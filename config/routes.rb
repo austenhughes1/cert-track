@@ -1,0 +1,37 @@
+Rails.application.routes.draw do
+  # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
+  # Can be used by load balancers and uptime monitors to verify that the app is live.
+  get "up" => "rails/health#show", as: :rails_health_check
+
+  # --- Auth and users (invite-only; no public sign-up) ---
+  resource :session
+  resources :passwords, param: :token
+  resources :users, except: :show do
+    post :resend_invite, on: :member
+    post :send_test_digest, on: :collection # Phase 2
+  end
+
+  root "dashboard#show"
+
+  # --- Crew ---
+  resources :crew_roles, except: :show
+  resources :crew_members do
+    resources :certificates, except: :index
+  end
+
+  # --- Master list ---
+  resources :certificate_types, except: :show
+
+  # --- Projects, requirements, assignments, compliance ---
+  resources :projects do
+    resource :requirements, only: %i[edit update], controller: "project_requirements" do
+      post :copy
+    end
+    resources :assignments, only: %i[index create update destroy], controller: "project_assignments"
+    resource :compliance, only: :show, controller: "compliance" # /projects/:project_id/compliance(.csv)
+    resource :packet, only: %i[show create], controller: "packets"
+  end
+
+  # --- Admin tools ---
+  mount MissionControl::Jobs::Engine, at: "/jobs"
+end
