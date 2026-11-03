@@ -1,0 +1,32 @@
+<% content_for :footer, render("digest_footer", user: @user, kind: "daily digests") -%>
+<% if @test -%>
+<% if @sample -%>
+TEST DIGEST. Nothing is within 90 days of expiry right now, so this shows made-up sample data.
+<% else -%>
+TEST DIGEST. Built from today's data: every current certificate within 90 days of expiry, or already expired. Nothing was logged, so the real daily digest is unaffected.
+<% end -%>
+
+<% end -%>
+<%= pluralize(@items.size, "certificate") %> <%= @items.one? ? "needs" : "need" %> attention.
+Each one has reached an expiry notice (90, 60, 30 or 7 days left) or has expired.
+<% if @groups.empty? -%>
+
+Nothing needs attention today.
+<% end -%>
+<% @groups.each do |project, people| -%>
+
+<%= project_heading(project) %>
+<%= "=" * project_heading(project).length %>
+<% if (compliance_url = project_compliance_url_or_nil(project)) -%>
+Compliance matrix: <%= compliance_url %>
+<% end -%>
+<% people.each do |crew_member, items| -%>
+
+<%= crew_member.display_name %><% if (member_url = crew_member_url_or_nil(crew_member)) %>: <%= member_url %><% end %>
+<% items.each do |item| -%>
+  - <%= item_line(item) %> [<%= threshold_label(item) %>]
+<% end -%>
+<% end -%>
+<% end -%>
+
+Open CertTrack: <%= root_url %>

@@ -1,0 +1,14 @@
+<% content_for :footer do -%>
+You get this reminder because ABA Ventures keeps track of your safety certificates and you're signed up for expiry reminders. To stop them, <%= @office_email ? "reply to this email and ask the office" : "ask the office" %>.
+<% end -%>
+<% expired = @days_left&.negative? -%>
+Hi <%= @crew_member.preferred_name.presence || @crew_member.first_name %>,
+
+Your <%= @certificate_type.name %> certificate <%= @days_left.nil? ? "is up for renewal" : expiry_phrase(@certificate.expires_on, @days_left) %>.
+
+<%= expired ? "Please renew it as soon as you can" : "Please renew it before it expires" %>, then send a copy of the new certificate (a clear photo or PDF of the front and back) to the office<% if @office_email %>. Just reply to this email, or write to <%= @office_email %><% end %>.
+
+If you've already renewed, send us the new certificate so our records are up to date.
+
+Thank you,
+The ABA Ventures office

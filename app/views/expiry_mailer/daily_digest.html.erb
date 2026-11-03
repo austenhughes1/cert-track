@@ -1,0 +1,52 @@
+<% content_for :footer, render("digest_footer", user: @user, kind: "daily digests") %>
+
+<% if @test %>
+  <p style="margin:0 0 16px;padding:10px 12px;background-color:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;color:#1e3a8a;">
+    <strong>Test digest.</strong>
+    <% if @sample %>
+      Nothing is within 90 days of expiry right now, so this shows made-up sample data.
+    <% else %>
+      Built from today's data: every current certificate within 90 days of expiry, or already expired. Nothing was logged, so the real daily digest is unaffected.
+    <% end %>
+  </p>
+<% end %>
+
+<h1 style="margin:0 0 4px;font-size:18px;line-height:1.3;">
+  <%= pluralize(@items.size, "certificate") %> <%= @items.one? ? "needs" : "need" %> attention
+</h1>
+<p style="margin:0 0 8px;color:#4b5563;">
+  Each one has reached an expiry notice (90, 60, 30 or 7 days left) or has expired. Grouped by project, then person.
+</p>
+
+<% if @groups.empty? %>
+  <p style="margin:16px 0;color:#4b5563;">Nothing needs attention today.</p>
+<% end %>
+
+<% @groups.each do |project, people| %>
+  <h2 style="margin:20px 0 4px;padding-bottom:4px;border-bottom:1px solid #e5e7eb;font-size:15px;line-height:1.3;">
+    <% if (compliance_url = project_compliance_url_or_nil(project)) %>
+      <%= link_to project_heading(project), compliance_url, style: "color:#111827;text-decoration:none;" %>
+    <% else %>
+      <%= project_heading(project) %>
+    <% end %>
+  </h2>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;">
+    <% people.each do |crew_member, items| %>
+      <tr>
+        <td colspan="2" style="padding:8px 0 2px;"><%= crew_member_link(crew_member) %></td>
+      </tr>
+      <% items.each do |item| %>
+        <tr>
+          <td style="padding:2px 8px 2px 12px;vertical-align:top;color:#374151;"><%= item_line(item) %></td>
+          <td style="padding:2px 0;vertical-align:top;text-align:right;white-space:nowrap;">
+            <span style="<%= threshold_style(item.threshold) %>"><%= threshold_label(item) %></span>
+          </td>
+        </tr>
+      <% end %>
+    <% end %>
+  </table>
+<% end %>
+
+<p style="margin:24px 0 0;">
+  <%= link_to "Open CertTrack", root_url, style: "display:inline-block;padding:8px 14px;background-color:#2563eb;color:#ffffff;border-radius:6px;text-decoration:none;font-weight:600;" %>
+</p>

@@ -1,0 +1,62 @@
+<% content_for :footer, render("digest_footer", user: @user, kind: "digest emails") %>
+<% section_style = "margin:24px 0 4px;padding-bottom:4px;border-bottom:1px solid #e5e7eb;font-size:15px;line-height:1.3;" %>
+
+<h1 style="margin:0 0 4px;font-size:18px;line-height:1.3;">Weekly summary for <%= email_date(@today) %></h1>
+
+<% if @expiring.empty? && @gaps.empty? %>
+  <p style="margin:12px 0;padding:10px 12px;background-color:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;color:#166534;">
+    <strong>All clear.</strong> Nothing has expired or expires in the next 30 days, and everyone on an active project holds every certificate it requires.
+  </p>
+<% else %>
+  <p style="margin:0 0 8px;color:#4b5563;">
+    <%= pluralize(@expiring.size - @expired_count, "certificate") %> expiring within 30 days,
+    <%= @expired_count %> already expired, and <%= pluralize(@gaps.size, "gap") %> (missing or expired requirements) on active projects.
+  </p>
+
+  <h2 style="<%= section_style %>">Expired or expiring within 30 days</h2>
+  <% if @expiring.empty? %>
+    <p style="margin:8px 0;color:#4b5563;">Nothing has expired or expires in the next 30 days.</p>
+  <% else %>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;">
+      <% @expiring.each do |item| %>
+        <tr>
+          <td style="padding:4px 8px 4px 0;vertical-align:top;white-space:nowrap;"><%= crew_member_link(item.crew_member) %></td>
+          <td style="padding:4px 8px 4px 0;vertical-align:top;color:#374151;"><%= item_line(item) %></td>
+          <td style="padding:4px 0;vertical-align:top;text-align:right;white-space:nowrap;">
+            <span style="<%= threshold_style(item.threshold) %>"><%= threshold_label(item) %></span>
+          </td>
+        </tr>
+      <% end %>
+    </table>
+  <% end %>
+
+  <h2 style="<%= section_style %>">Gaps on active projects</h2>
+  <% if @gaps.empty? %>
+    <p style="margin:8px 0;color:#4b5563;">No gaps: everyone on an active project holds every certificate it requires.</p>
+  <% else %>
+    <% @gap_groups.each do |project, gaps| %>
+      <h3 style="margin:14px 0 4px;font-size:14px;">
+        <% if (compliance_url = project_compliance_url_or_nil(project)) %>
+          <%= link_to project.display_name, compliance_url, style: "color:#111827;" %>
+        <% else %>
+          <%= project.display_name %>
+        <% end %>
+      </h3>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;">
+        <% gaps.each do |gap| %>
+          <tr>
+            <td style="padding:2px 8px 2px 12px;vertical-align:top;white-space:nowrap;"><%= crew_member_link(gap.crew_member) %></td>
+            <td style="padding:2px 8px 2px 0;vertical-align:top;color:#374151;"><%= gap.certificate_type.name %></td>
+            <td style="padding:2px 0;vertical-align:top;text-align:right;white-space:nowrap;">
+              <span style="<%= threshold_style("expired") %>"><%= gap_status_text(gap) %></span>
+            </td>
+          </tr>
+        <% end %>
+      </table>
+    <% end %>
+  <% end %>
+<% end %>
+
+<p style="margin:24px 0 0;">
+  <%= link_to "Open CertTrack", root_url, style: "display:inline-block;padding:8px 14px;background-color:#2563eb;color:#ffffff;border-radius:6px;text-decoration:none;font-weight:600;" %>
+</p>

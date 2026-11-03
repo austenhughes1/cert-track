@@ -78,6 +78,7 @@ Every layer runs on a free tier, so steady-state cost is **$0/month**. The only 
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | R2 credentials |
 | `R2_BUCKET`, `R2_BACKUP_BUCKET` | Files bucket and backups bucket |
 | `RESEND_API_KEY`, `MAIL_FROM` | Outbound email |
+| `OFFICE_EMAIL` | Office inbox that crew expiry notices reply to, e.g. `office@abaventures.net`. Not on the send-only `notify` subdomain |
 | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_AI_API_TOKEN` | Workers AI |
 | `AI_PROVIDER` | `workers_ai` (default), `ollama` or `anthropic` |
 | `EXTRACTION_MODEL`, `EXTRACTION_VISION_MODEL` | Model IDs, chosen in the Phase 3 accuracy spike |
@@ -404,34 +405,40 @@ Owner, by hand:
 
 Claude Code:
 
-- [ ] `rails new certtrack --database=postgresql --css=tailwind` on the latest Rails 8 and Ruby 3.4.
-- [ ] Add gems: `ruby_llm`, `rubyzip`, `combine_pdf`, `aws-sdk-s3`, `mission_control-jobs`.
-- [ ] Dockerfile: install `poppler-utils`, `tesseract-ocr`, `tesseract-ocr-eng`, and libvips with HEIC support.
-- [ ] Kamal: arm64 builder, Postgres 17 accessory with a volume, secrets from `.kamal/secrets`, proxy host `certs.abaventures.net` with SSL, `SOLID_QUEUE_IN_PUMA=1`.
-- [ ] Rails authentication generator, `role` enum, and `bin/rails certtrack:create_admin`.
-- [ ] Nightly `Backups::DatabaseJob` (pg\_dump, gzip, upload to R2, keep 14) and `bin/rails certtrack:restore_latest`.
-- [ ] GitHub Actions running tests, RuboCop and Brakeman (the Rails 8 default CI).
+- [x] `rails new certtrack --database=postgresql --css=tailwind` on the latest Rails 8 and Ruby 3.4.
+- [x] Add gems: `ruby_llm`, `rubyzip`, `combine_pdf`, `aws-sdk-s3`, `mission_control-jobs`.
+- [x] Dockerfile: install `poppler-utils`, `tesseract-ocr`, `tesseract-ocr-eng`, and libvips with HEIC support.
+- [x] Kamal: arm64 builder, Postgres 17 accessory with a volume, secrets from `.kamal/secrets`, proxy host `certs.abaventures.net` with SSL, `SOLID_QUEUE_IN_PUMA=1`.
+- [x] Rails authentication generator, `role` enum, and `bin/rails certtrack:create_admin`.
+- [x] Nightly `Backups::DatabaseJob` (pg\_dump, gzip, upload to R2, keep 14) and `bin/rails certtrack:restore_latest`.
+- [x] GitHub Actions running tests, RuboCop and Brakeman (the Rails 8 default CI).
 
 Done when: `https://certs.abaventures.net/up` returns 200 with a valid certificate, the admin can sign in, and a backup restores into a scratch database.
 
+Status (Nov 2, 2026): code complete; the app lives in the `cert-track` repo (Rails app name `CertTrack`). Backup and restore are tested locally against Postgres. Still open, and blocked on the owner's accounts and VM: the first `kamal setup`, the live `/up` and TLS check, and a restore drill on the server. The Dockerfile has not been built yet, because Docker isn't available on the dev machine. Steps are in `docs/DEPLOY.md`.
+
 ### Phase 1: Core tracker
 
-- [ ] Migrations, models, validations and the model rules from the Data model section.
-- [ ] Crew CRUD with trigram search and filters.
-- [ ] Certificate line items with multiple attached files: direct upload to R2, HEIC to JPEG, thumbnails.
-- [ ] Master list CRUD with aliases; seed the example list.
-- [ ] Projects, requirements editor with optional role, "copy requirements", assignments.
-- [ ] `Compliance::ProjectReport` service, matrix view, CSV export, packet zip built in a background job.
-- [ ] Dashboard and role-based authorization.
+- [x] Migrations, models, validations and the model rules from the Data model section.
+- [x] Crew CRUD with trigram search and filters.
+- [x] Certificate line items with multiple attached files: direct upload to R2, HEIC to JPEG, thumbnails.
+- [x] Master list CRUD with aliases; seed the example list.
+- [x] Projects, requirements editor with optional role, "copy requirements", assignments.
+- [x] `Compliance::ProjectReport` service, matrix view, CSV export, packet zip built in a background job.
+- [x] Dashboard and role-based authorization.
 
 Done when: a project with 5 required types (one role-specific) and 3 assigned people shows correct `missing`, `expired`, `expiring`, `lapses_on_project` and `valid` cells; the packet zip holds the right files with the naming convention; a viewer gets a 403 on every write action.
 
+Status (Nov 2, 2026): met in tests (`test/services/compliance/`, packet tests, `test/integration/authorization_audit_test.rb`). The one exception is that viewers may `POST /projects/:id/packet`, because building a packet only reads data; the audit test allowlists it.
+
 ### Phase 2: Expiration emails
 
-- [ ] Action Mailer over Resend SMTP, digest and weekly mailers with previews.
-- [ ] `Notifications::ExpiryScanJob` in `config/recurring.yml`, the send log, crew opt-in, 90/day cap, "send test digest" button.
+- [x] Action Mailer over Resend SMTP, digest and weekly mailers with previews.
+- [x] `Notifications::ExpiryScanJob` in `config/recurring.yml`, the send log, crew opt-in, 90/day cap, "send test digest" button.
 
 Done when: tests using `travel_to` show each threshold fires exactly once, a same-day re-run sends nothing, a missed week sends only the most urgent threshold, and a real digest arrives passing SPF and DKIM.
+
+Status (Nov 2, 2026): every `travel_to` criterion passes in `test/jobs/notifications/`. Still open: the real Resend delivery with SPF and DKIM, which waits on the `notify.abaventures.net` verification.
 
 ### Phase 3: Bulk import
 

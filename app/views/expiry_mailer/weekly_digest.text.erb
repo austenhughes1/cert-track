@@ -1,0 +1,33 @@
+<% content_for :footer, render("digest_footer", user: @user, kind: "digest emails") -%>
+Weekly summary for <%= email_date(@today) %>
+
+<% if @expiring.empty? && @gaps.empty? -%>
+All clear. Nothing has expired or expires in the next 30 days, and everyone on an active project holds every certificate it requires.
+<% else -%>
+<%= pluralize(@expiring.size - @expired_count, "certificate") %> expiring within 30 days, <%= @expired_count %> already expired, and <%= pluralize(@gaps.size, "gap") %> (missing or expired requirements) on active projects.
+
+EXPIRED OR EXPIRING WITHIN 30 DAYS
+<% if @expiring.empty? -%>
+Nothing has expired or expires in the next 30 days.
+<% end -%>
+<% @expiring.each do |item| -%>
+- <%= item.crew_member.display_name %>, <%= item_line(item) %> [<%= threshold_label(item) %>]
+<% if (member_url = crew_member_url_or_nil(item.crew_member)) -%>
+  <%= member_url %>
+<% end -%>
+<% end -%>
+
+GAPS ON ACTIVE PROJECTS
+<% if @gaps.empty? -%>
+No gaps: everyone on an active project holds every certificate it requires.
+<% end -%>
+<% @gap_groups.each do |project, gaps| -%>
+
+<%= project.display_name %><% if (compliance_url = project_compliance_url_or_nil(project)) %>: <%= compliance_url %><% end %>
+<% gaps.each do |gap| -%>
+  - <%= gap.crew_member.display_name %>, <%= gap.certificate_type.name %>: <%= gap_status_text(gap) %>
+<% end -%>
+<% end -%>
+<% end -%>
+
+Open CertTrack: <%= root_url %>
