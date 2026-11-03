@@ -7,7 +7,15 @@ class ImportItem < ApplicationRecord
   enum :status, { pending: 0, extracting: 1, needs_review: 2, accepted: 3, rejected: 4, duplicate: 5, failed: 6 },
     default: :pending, validate: true
 
+  # matched_crew_member / matched_certificate_type hold the exact match or the top suggestion;
+  # these say which. Suggestions are [{ "id" =>, "name" =>, "similarity" => }] best first.
+  enum :person_match, { unmatched: 0, suggested: 1, matched: 2 }, prefix: :person, default: :unmatched
+  enum :type_match, { unmatched: 0, suggested: 1, matched: 2 }, prefix: :type, default: :unmatched
+  enum :proposed_expires_on_source, { printed: 0, computed: 1, none: 2 }, prefix: :proposed_expiry
+
   belongs_to :import_batch
+  belongs_to :source_item, class_name: "ImportItem", optional: true, inverse_of: :split_items # the file this page range came from
+  has_many :split_items, class_name: "ImportItem", foreign_key: :source_item_id, inverse_of: :source_item, dependent: :destroy
   belongs_to :matched_crew_member, class_name: "CrewMember", optional: true
   belongs_to :matched_certificate_type, class_name: "CertificateType", optional: true
   belongs_to :certificate, optional: true # set on accept

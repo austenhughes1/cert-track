@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_02_231507) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_03_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -148,6 +148,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_231507) do
     t.integer "error_count", default: 0, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.text "error_message"
+    t.datetime "summary_sent_at"
     t.index ["status"], name: "index_import_batches_on_status"
     t.index ["uploaded_by_id"], name: "index_import_batches_on_uploaded_by_id"
   end
@@ -177,6 +179,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_231507) do
     t.bigint "duplicate_of_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "person_match", default: 0, null: false
+    t.integer "type_match", default: 0, null: false
+    t.jsonb "person_suggestions", default: [], null: false
+    t.jsonb "type_suggestions", default: [], null: false
+    t.string "issuer_raw"
+    t.integer "proposed_expires_on_source"
+    t.bigint "source_item_id"
+    t.string "rejection_reason"
+    t.datetime "skipped_at"
+    t.datetime "next_attempt_at"
+    t.integer "attempts", default: 0, null: false
     t.index ["certificate_id"], name: "index_import_items_on_certificate_id"
     t.index ["duplicate_of_id"], name: "index_import_items_on_duplicate_of_id"
     t.index ["import_batch_id"], name: "index_import_items_on_import_batch_id"
@@ -184,6 +197,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_231507) do
     t.index ["matched_crew_member_id"], name: "index_import_items_on_matched_crew_member_id"
     t.index ["reviewed_by_id"], name: "index_import_items_on_reviewed_by_id"
     t.index ["sha256", "page_range"], name: "index_import_items_on_sha256_and_page_range"
+    t.index ["source_item_id"], name: "index_import_items_on_source_item_id"
     t.index ["status"], name: "index_import_items_on_status"
   end
 
@@ -261,6 +275,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_231507) do
   add_foreign_key "import_items", "crew_members", column: "matched_crew_member_id", on_delete: :restrict
   add_foreign_key "import_items", "import_batches", on_delete: :cascade
   add_foreign_key "import_items", "import_items", column: "duplicate_of_id", on_delete: :nullify
+  add_foreign_key "import_items", "import_items", column: "source_item_id", on_delete: :cascade
   add_foreign_key "import_items", "users", column: "reviewed_by_id", on_delete: :restrict
   add_foreign_key "project_assignments", "crew_members", on_delete: :restrict
   add_foreign_key "project_assignments", "crew_roles", on_delete: :restrict

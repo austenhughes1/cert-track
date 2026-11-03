@@ -36,6 +36,24 @@ Rails.application.routes.draw do
     resource :packet, only: %i[show create], controller: "packets"
   end
 
+  # --- Bulk import (Phase 3) ---
+  # The review queue is declared before resources :imports so /imports/review isn't read as imports#show.
+  scope "imports" do
+    resources :review, controller: "import_reviews", as: :import_reviews, only: %i[index show update] do
+      member do
+        post :accept
+        post :reject
+        post :skip
+        post :create_crew_member
+        post :merge
+      end
+    end
+  end
+  resources :imports, only: %i[index create show]
+
+  # --- Ask box (Phase 4a) ---
+  get "ask" => "ask#show", as: :ask
+
   # --- Admin tools ---
   mount MissionControl::Jobs::Engine, at: "/jobs"
 end
