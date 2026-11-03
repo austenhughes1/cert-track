@@ -1,0 +1,72 @@
+<%# locals: (upload_errors:, carried_over:) %>
+<%# The drop zone. Files go straight to storage by direct upload while the form submits;
+    the server then checks the batch (types, 500 MB total) and starts Imports::ExpandJob. %>
+<% max_bytes = Imports::Config.max_batch_bytes %>
+<% extensions = ImportsController::EXTENSIONS %>
+<% accept = (extensions.map { |extension| ".#{extension}" } + Imports::Config.upload_content_types).uniq.join(",") %>
+
+<%= form_with url: imports_path, scope: :import, id: "new_import",
+      class: "rounded-lg border border-gray-200 bg-white p-4 shadow-sm" do |form| %>
+  <% if upload_errors.any? %>
+    <div class="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" id="error_explanation">
+      <p class="font-medium">Nothing was imported:</p>
+      <ul class="mt-1 list-disc space-y-1 pl-5">
+        <% upload_errors.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div data-controller="import-drop"
+       data-import-drop-max-bytes-value="<%= max_bytes %>"
+       data-import-drop-max-files-value="<%= Imports::Config.max_entries %>"
+       data-import-drop-extensions-value="<%= extensions.to_json %>"
+       data-action="dragenter->import-drop#dragOver dragover->import-drop#dragOver dragleave->import-drop#dragLeave drop->import-drop#drop
+                    direct-upload:initialize->import-drop#uploadInitialize direct-upload:start->import-drop#uploadStart
+                    direct-upload:progress->import-drop#uploadProgress direct-upload:error->import-drop#uploadError
+                    direct-upload:end->import-drop#uploadEnd">
+    <div data-import-drop-target="zone"
+         class="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-10 text-center transition-colors focus-within:border-blue-600">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           class="mx-auto h-10 w-10 text-gray-400" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+      </svg>
+      <p class="mt-2 text-sm font-medium text-gray-900">Drop certificates or zips here</p>
+      <p class="mt-1 text-xs text-gray-500">
+        PDF, JPG, PNG, HEIC, WEBP and ZIP (zips inside zips too), up to <%= number_to_human_size(max_bytes) %> per batch.
+        A PDF can hold several certificates; each one is found and split out.
+      </p>
+      <%= form.label :uploads, "Choose files", class: "sr-only" %>
+      <%= form.file_field :uploads, multiple: true, direct_upload: true, accept: accept,
+            data: { import_drop_target: "input", action: "change->import-drop#select" },
+            class: "mx-auto mt-4 block max-w-xs text-sm text-gray-600 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100" %>
+    </div>
+    <p data-import-drop-target="message" class="mt-2 text-sm text-red-700" role="alert" hidden></p>
+    <p data-import-drop-target="summary" class="mt-2 text-sm text-gray-600" aria-live="polite" hidden></p>
+    <ul data-import-drop-target="list" class="mt-2 max-h-80 space-y-1 overflow-y-auto" aria-label="Files to upload"></ul>
+  </div>
+
+  <% if carried_over.any? %>
+    <fieldset class="mt-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" id="carried_over_uploads">
+      <legend class="px-1 text-gray-700">Already uploaded; included when you import again (untick to leave one out):</legend>
+      <ul class="mt-1 space-y-0.5 text-gray-600">
+        <% carried_over.each do |blob| %>
+          <li>
+            <label class="inline-flex items-center gap-2">
+              <%= check_box_tag "import[uploads][]", blob.signed_id, true, id: "carried_over_#{blob.id}",
+                    class: "rounded border-gray-300 text-blue-600 focus:ring-blue-600" %>
+              <%= blob.filename %> <span class="text-gray-400">(<%= number_to_human_size(blob.byte_size) %>)</span>
+            </label>
+          </li>
+        <% end %>
+      </ul>
+    </fieldset>
+  <% end %>
+
+  <div class="mt-4 flex items-center gap-3">
+    <%= form.submit "Import", name: nil, data: { turbo_submits_with: "Uploading…" },
+          class: "cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:cursor-wait disabled:opacity-60" %>
+    <p class="text-xs text-gray-500">Large drops take a while to upload; keep this tab open until the batch page appears.</p>
+  </div>
+<% end %>

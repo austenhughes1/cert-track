@@ -80,12 +80,14 @@ Every layer runs on a free tier, so steady-state cost is **$0/month**. The only 
 | `RESEND_API_KEY`, `MAIL_FROM` | Outbound email |
 | `OFFICE_EMAIL` | Office inbox that crew expiry notices reply to, currently `austen@abaventures.net`. Not on the send-only `notify` subdomain |
 | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_AI_API_TOKEN` | Workers AI |
-| `AI_PROVIDER` | `workers_ai` (default), `ollama` or `anthropic` |
+| `AI_PROVIDER` | `workers_ai` (default), `ollama` or `anthropic`; `fake` for offline demos (tests always use it) |
 | `EXTRACTION_MODEL`, `EXTRACTION_VISION_MODEL` | Model IDs, chosen in the Phase 3 accuracy spike |
 | `CHAT_MODEL` | Model ID, chosen with `certtrack:eval_chat` in Phase 4 |
 | `AI_DAILY_NEURON_BUDGET` | Default `9000`, leaves headroom under the 10,000 free neurons |
 | `AUTO_ACCEPT_ENABLED` | Default `false`; turn on after the owner trusts the import output |
 | `ANTHROPIC_API_KEY` | Optional; only for the paid fallback |
+| `ANTHROPIC_MODEL` | Optional; the fallback's model, default `claude-haiku-5-5` |
+| `OLLAMA_URL` | Optional; Ollama endpoint for `AI_PROVIDER=ollama`, default `http://localhost:11434/v1` |
 
 ## Data model
 
@@ -260,7 +262,7 @@ Free local OCR reads every file first. A free model then turns the text into JSO
 1. **Intake.** `POST /imports` takes many files via direct upload: PDF, JPG, JPEG, PNG, HEIC, WEBP and ZIP, up to 500 MB per batch. Create an `ImportBatch` and enqueue `Imports::ExpandJob`.
 2. **Expand.** Unzip with `rubyzip` into `Dir.mktmpdir`, recursing into nested zips two levels deep. Skip `__MACOSX`, `.DS_Store`, `Thumbs.db` and hidden files. Reject entries with `..` or absolute paths. Stop at 2,000 entries or 2 GB uncompressed (zip-bomb guard). Each supported file is a candidate; hash it with SHA-256.
 3. **Extract text (free, local).** For PDFs run `pdftotext -layout` per page. If a page yields fewer than 40 characters, it is a scan: rasterize with `pdftoppm -r 300` and run `tesseract`. For images, auto-rotate and convert to grayscale with libvips, then run `tesseract`. Store the text in `extracted_text` with `=== page N ===` markers.
-4. **AI extraction (free model).** Send the page text, the master list (code, name, aliases) and the JSON schema below. Use `EXTRACTION_MODEL` through `ruby_llm` with structured output. If OCR text is unusable, send the page image (long side 1,568 px or less) to `EXTRACTION_VISION_MODEL` instead. One call per source file returns every certificate in it, with page numbers.
+4. **AI extraction (free model).** Send the page text, the master list (code, name, aliases) and the JSON schema below. Use `EXTRACTION_MODEL` through `ruby_llm` with structured output. If OCR text is unusable, send the page image (long side 1,568 px or less) to `EXTRACTION_VISION_MODEL` instead. A blank page needs no call. Without a vision model, unreadable pages are skipped and named in the certificate's notes. Usually one call per source file returns every certificate in it, with page numbers. A file with more than 24,000 characters of text takes one call per 24,000 characters, never splitting a page. Unreadable pages go in extra vision calls, as many images per call as the model accepts. The replies are merged.
 5. **Split.** For each certificate returned, create an `ImportItem`. Multi-page PDFs are split by page range with `combine_pdf`, and the split file is attached to the item.
 6. **Match type (Ruby).** Accept `certificate_type_code` only if it exists in the master list. Otherwise fuzzy-match `certificate_name_as_printed` against names and aliases with `pg_trgm`; similarity of 0.45 or more is a suggestion, not a match.
 7. **Match person (Ruby).** Normalize the holder name and compare against crew full names and `name_aliases` with `pg_trgm`. An exact normalized match is a match. Otherwise the best candidate at 0.6 or more, beating the runner-up by at least 0.15, becomes a suggestion. No candidate means review offers "create crew member".
@@ -297,6 +299,7 @@ Prompt rules to put in the system prompt: dates are ISO `YYYY-MM-DD`; use null w
 
 - Before every AI call, check `ai_usage_days`. If today's usage is at `AI_DAILY_NEURON_BUDGET`, or the API returns HTTP 429 or a quota error, reschedule the job for 00:05 UTC, just after the 10,000-neuron allocation resets at 00:00 UTC.
 - Estimate neurons from the token counts in each response, using per-model rates from the Workers AI pricing page stored in config.
+- Before a file's first call, estimate what the whole file will cost. A file estimated over one day's budget fails with a message to split it or use `AI_PROVIDER=anthropic`. A file stopped part way by the budget keeps its finished calls and resumes from there, so no paid call is repeated.
 - Text-only calls are much cheaper than image calls, which is why OCR runs first.
 - A large first backlog can take several days to drain for free. For a one-time catch-up, the owner can set `AI_PROVIDER=anthropic`: at Haiku 5.5 rates a page costs well under $0.001, so 2,000 pages is roughly $1.
 

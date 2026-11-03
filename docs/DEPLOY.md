@@ -186,12 +186,14 @@ An unset variable becomes an **empty** secret without any warning, so don't skip
 | `MAIL_FROM` | `config/deploy.yml` | `CertTrack <certtrack@notify.abaventures.net>` |
 | `OFFICE_EMAIL` | `config/deploy.yml` | `austen@abaventures.net`, the Reply-To on crew expiry notices. It must be a real, monitored inbox on the main domain: `notify.abaventures.net` is send-only, so replies sent there bounce |
 | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_AI_API_TOKEN` | your shell | Workers AI |
-| `AI_PROVIDER` | `config/deploy.yml` | `workers_ai` (or `ollama`, `anthropic`) |
-| `EXTRACTION_MODEL`, `EXTRACTION_VISION_MODEL` | `config/deploy.yml` | Set after the Phase 3 accuracy spike (commented out until then) |
+| `AI_PROVIDER` | `config/deploy.yml` | `workers_ai` (or `ollama`, `anthropic`; `fake` is for offline demos only) |
+| `EXTRACTION_MODEL`, `EXTRACTION_VISION_MODEL` | `config/deploy.yml` | Set after the Phase 3 accuracy spike, `docs/IMPORT_SPIKE.md` (commented out until then; imports stop at the AI step until `EXTRACTION_MODEL` is set; without `EXTRACTION_VISION_MODEL`, pages OCR can't read are skipped and named in the certificate's notes) |
 | `CHAT_MODEL` | `config/deploy.yml` | Set after `certtrack:eval_chat` in Phase 4 |
 | `AI_DAILY_NEURON_BUDGET` | `config/deploy.yml` | `9000` |
 | `AUTO_ACCEPT_ENABLED` | `config/deploy.yml` | `false` until you trust the import output |
 | `ANTHROPIC_API_KEY` | your shell (optional) | Paid fallback only; see section 12 |
+| `ANTHROPIC_MODEL` | `config/deploy.yml` (optional) | Model for `AI_PROVIDER=anthropic`, text and images; default `claude-haiku-5-5` |
+| `OLLAMA_URL` | `config/deploy.yml` (optional) | Ollama endpoint for `AI_PROVIDER=ollama`; default `http://localhost:11434/v1` |
 | `WEB_CONCURRENCY`, `JOB_CONCURRENCY` | `config/deploy.yml` | `2` Puma workers, `1` Solid Queue process (sized for 2 OCPU) |
 
 To change a `config/deploy.yml` value, edit it, commit, and run `bin/kamal deploy`. To change a secret, update `deploy.env`, `source` it, and run `bin/kamal deploy`. Kamal rewrites the container env on every deploy.

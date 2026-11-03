@@ -57,6 +57,7 @@ class PacketsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "shows the download link, build time and rebuild button once ready" do
+    freeze_time # blob links expire (urls_expire_in): the page's link and the expected one are minted at the same time
     certificates(:juan_osha30).files.attach(io: StringIO.new("%PDF-1.4\n"), filename: "osha.pdf", content_type: "application/pdf")
     Compliance::PacketJob.request(@project)
     perform_enqueued_jobs(only: Compliance::PacketJob)

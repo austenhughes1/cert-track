@@ -1,0 +1,43 @@
+<%# locals: (status:) %>
+<%# One line on the AI step: provider, whether it is configured, today's use of the free
+    allocation (a UTC day: Workers AI resets at 00:00 UTC) and items parked until 00:05 UTC. %>
+<section id="ai_status" class="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm" aria-label="AI status">
+  <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+    <span>
+      <span class="font-medium text-gray-900">AI:</span>
+      <span id="ai_provider"><%= status.provider ? import_provider_label(status.provider) : "unknown provider" %></span>
+    </span>
+
+    <% unless status.ready.nil? %>
+      <span id="ai_ready" class="inline-flex items-center gap-1 <%= status.ready ? "text-green-700" : "text-red-700" %>">
+        <span class="size-2 rounded-full <%= status.ready ? "bg-green-500" : "bg-red-500" %>" aria-hidden="true"></span>
+        <%= status.ready ? "Models configured" : "Not configured" %>
+      </span>
+    <% end %>
+
+    <span id="ai_budget" class="<%= status.exhausted ? "font-medium text-amber-800" : "text-gray-600" %>">
+      Today (UTC): <span class="tabular-nums"><%= number_with_delimiter(status.used.to_i) %></span>
+      <% if status.budget %>
+        of <span class="tabular-nums"><%= number_with_delimiter(status.budget) %></span> neurons used<%= ", the daily budget is used up" if status.exhausted %>
+      <% else %>
+        tokens used
+      <% end %>
+    </span>
+
+    <% if status.waiting_count.positive? %>
+      <span id="ai_waiting" class="text-sky-800">
+        <%= pluralize(status.waiting_count, "item") %> waiting for the 00:05 UTC reset<% if status.resumes_at %>
+          (continues <%= import_time(status.resumes_at) %>)<% end %>
+      </span>
+    <% end %>
+  </div>
+
+  <% if status.ready == false && status.problems.any? %>
+    <ul class="mt-2 list-disc space-y-0.5 pl-5 text-red-700" id="ai_problems">
+      <% status.problems.each do |problem| %>
+        <li><%= problem %></li>
+      <% end %>
+    </ul>
+    <p class="mt-1 text-xs text-gray-500">Until an admin sets these, imported files fail at the AI step (the text is still read).</p>
+  <% end %>
+</section>

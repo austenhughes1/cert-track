@@ -97,6 +97,62 @@ class ImportItemTest < ActiveSupport::TestCase
     assert_empty ImportItem.purgeable
   end
 
+  test "a rejected item may have no digest; other items need one" do
+    assert build(sha256: nil, status: :rejected, rejection_reason: "Unsafe path in zip").valid?
+    assert_not build(sha256: nil, status: :pending).valid?
+    assert_not build(sha256: "nope", status: :rejected).valid?
+  end
+
+  test "review_queue puts skipped items last, earliest skip first" do
+    review = import_items(:review_juan_first_aid)
+    skipped_early = build(status: :needs_review, skipped_at: 2.hours.ago).tap(&:save!)
+    skipped_late = build(status: :needs_review, skipped_at: 1.hour.ago).tap(&:save!)
+    fresh = build(status: :needs_review).tap(&:save!)
+
+    assert_equal [ review, fresh, skipped_early, skipped_late ], ImportItem.review_queue.to_a
+
+    review.update!(skipped_at: Time.current)
+    assert_equal [ fresh, skipped_early, skipped_late, review ], ImportItem.review_queue.to_a
+  end
+
+  test "in_pipeline and waiting_for_budget" do
+    waiting = build(status: :extracting, next_attempt_at: 2.hours.from_now).tap(&:save!)
+    due = build(status: :extracting, next_attempt_at: 1.minute.ago).tap(&:save!)
+    pending = build(status: :pending).tap(&:save!)
+    build(status: :needs_review, next_attempt_at: 2.hours.from_now).save!
+
+    assert_equal [ waiting, due, pending ], ImportItem.in_pipeline.order(:id).to_a
+    assert_equal [ waiting ], ImportItem.waiting_for_budget.to_a
+    assert_empty ImportItem.waiting_for_budget(3.hours.from_now)
+    assert waiting.waiting_for_budget?
+    assert_not waiting.waiting_for_budget?(3.hours.from_now)
+    assert_not due.waiting_for_budget?
+    assert pending.in_pipeline?
+    assert_not import_items(:accepted_li_flagger).in_pipeline?
+  end
+
+  test "original_file_for finds the whole-file item for any page range" do
+    sha = "d" * 64
+    assert_nil ImportItem.original_file_for(sha)
+
+    whole = build(sha256: sha, status: :needs_review, page_range: "1").tap(&:save!)
+    build(sha256: sha, status: :needs_review, page_range: "2", source_item: whole).save!
+    build(sha256: sha, status: :duplicate, duplicate_of: whole).save!
+    assert_equal whole, ImportItem.original_file_for(sha.upcase)
+
+    # the fixture file: its first item stands for it
+    assert_equal import_items(:accepted_li_flagger), ImportItem.original_file_for(import_items(:accepted_li_flagger).sha256)
+
+    whole.update!(status: :failed)
+    assert_equal "2", ImportItem.original_file_for(sha).page_range
+  end
+
+  test "filename is the last part of original_filename" do
+    assert_equal "ortiz.jpg", build(original_filename: "crew.zip/cards/ortiz.jpg").filename
+    assert_equal "scan_0001.pdf", import_items(:accepted_li_flagger).filename
+    assert_nil build(original_filename: nil).filename
+  end
+
   test "destroying an original nullifies its duplicates" do
     original = import_items(:accepted_li_flagger)
     original.destroy!

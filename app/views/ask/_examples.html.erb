@@ -1,0 +1,9 @@
+<%# locals: (examples:) %>
+<%# Example questions as chips; each one asks itself. %>
+<nav id="ask_examples" class="mt-3 flex flex-wrap items-center gap-2" aria-label="Example questions">
+  <span class="text-xs font-medium uppercase tracking-wide text-gray-500">Try</span>
+  <% examples.each do |example| %>
+    <%= link_to example, ask_path(q: example),
+          class: "rounded-full border border-gray-300 bg-white px-3 py-1 text-sm text-gray-700 shadow-sm hover:border-blue-400 hover:bg-blue-50 hover:text-blue-800" %>
+  <% end %>
+</nav>

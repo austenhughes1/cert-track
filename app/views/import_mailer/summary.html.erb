@@ -1,0 +1,61 @@
+<% content_for :footer do %>
+  You receive this because you uploaded this import batch (<%= @user.email_address %>). Only one summary is sent per batch.
+<% end %>
+<% button = "display:inline-block;padding:8px 14px;border-radius:6px;text-decoration:none;font-weight:600;" %>
+
+<h1 style="margin:0 0 4px;font-size:18px;line-height:1.3;">
+  <% if @review_count.positive? %>
+    <%= pluralize(@review_count, "item") %> from your import <%= @review_count == 1 ? "needs" : "need" %> review
+  <% elsif @batch.failed? %>
+    Your import failed
+  <% else %>
+    Your import is finished
+  <% end %>
+</h1>
+<p style="margin:0 0 16px;color:#4b5563;">
+  You uploaded <%= pluralize(@batch.files_count, "file") %> on <%= @uploaded_on %>.
+  CertTrack found <%= pluralize(@batch.items_count, "item") %> in them<% if @batch.items_count > @batch.files_count %> (a PDF holding several certificates gives one item per certificate)<% end %>.
+</p>
+
+<% if @batch.error_message.present? %>
+  <p style="margin:0 0 16px;padding:10px 12px;background-color:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#991b1b;">
+    <%= @batch.error_message %>
+  </p>
+<% end %>
+
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;min-width:240px;">
+  <% ImportMailer::COUNT_ROWS.each do |label, status| %>
+    <% count = @counts.fetch(status) %>
+    <tr>
+      <td style="padding:4px 24px 4px 0;color:#374151;"><%= label %></td>
+      <td style="<%= import_count_style(status, count) %>"><%= count %></td>
+    </tr>
+  <% end %>
+</table>
+
+<% if @problems.any? %>
+  <h2 style="margin:20px 0 4px;padding-bottom:4px;border-bottom:1px solid #e5e7eb;font-size:15px;line-height:1.3;">Not imported</h2>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;">
+    <% @problems.each do |item| %>
+      <tr>
+        <td style="padding:3px 12px 3px 0;vertical-align:top;color:#111827;word-break:break-all;"><%= item.original_filename.presence || "(unnamed file)" %></td>
+        <td style="padding:3px 0;vertical-align:top;color:#4b5563;">
+          <%= item.failed? ? "Failed: #{item.error_message.presence || "couldn't be read"}" : (item.rejection_reason.presence || "Rejected") %>
+        </td>
+      </tr>
+    <% end %>
+  </table>
+  <% if @problem_count > @problems.size %>
+    <p style="margin:4px 0 0;color:#6b7280;font-size:13px;">and <%= @problem_count - @problems.size %> more on the batch page.</p>
+  <% end %>
+<% end %>
+
+<p style="margin:24px 0 0;">
+  <% if @review_count.positive? %>
+    <%= link_to "Open the review queue", import_reviews_url, style: "#{button}background-color:#2563eb;color:#ffffff;" %>
+  <% end %>
+  <% if (batch_url = import_batch_url_or_nil(@batch)) %>
+    <%= link_to "See this batch", batch_url,
+      style: "#{button}#{@review_count.positive? ? "margin-left:8px;background-color:#ffffff;color:#1d4ed8;border:1px solid #bfdbfe;" : "background-color:#2563eb;color:#ffffff;"}" %>
+  <% end %>
+</p>

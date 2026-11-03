@@ -7,6 +7,9 @@ require "test_helper"
 class AuthorizationAuditTest < ActionDispatch::IntegrationTest
   WRITE_VERBS = %w[POST PATCH PUT DELETE].freeze
   FORM_ACTIONS = %w[new edit].freeze
+  # Controllers a viewer may not even read (Phase 3: uploads and import results carry
+  # personal data), so their GET routes are audited too. The Ask box stays open to everyone.
+  EDITOR_ONLY_CONTROLLERS = %w[imports import_reviews].freeze
 
   # Framework and engine internals. Mission Control guards itself through AdminController
   # (test/controllers/admin_jobs_test.rb); Active Storage through its own auth tests.
@@ -28,10 +31,8 @@ class AuthorizationAuditTest < ActionDispatch::IntegrationTest
     "certificate_types" => %i[certificate_types osha30],
     "projects" => %i[projects tower_2417],
     "project_assignments" => %i[project_assignments tower_juan], # on tower_2417, the :project_id below
-    # Phase 3 guesses; adjust when the imports routes land.
-    "imports" => %i[import_batches march_batch],
-    "import_batches" => %i[import_batches march_batch],
-    "import_items" => %i[import_items review_juan_first_aid]
+    "imports" => %i[import_batches march_batch], # /imports/:id is an ImportBatch
+    "import_reviews" => %i[import_items review_juan_first_aid] # /imports/review/:id is an ImportItem
   }.freeze
 
   PARENT_FIXTURES = {
@@ -62,7 +63,8 @@ class AuthorizationAuditTest < ActionDispatch::IntegrationTest
       controller, action = route.defaults.values_at(:controller, :action)
       next false if controller.nil? || controller.match?(SKIPPED_CONTROLLERS)
 
-      WRITE_VERBS.include?(route.verb) || (route.verb == "GET" && FORM_ACTIONS.include?(action))
+      WRITE_VERBS.include?(route.verb) ||
+        (route.verb == "GET" && (FORM_ACTIONS.include?(action) || EDITOR_ONLY_CONTROLLERS.include?(controller)))
     end
   end
 
@@ -81,7 +83,18 @@ class AuthorizationAuditTest < ActionDispatch::IntegrationTest
       certificates#create certificates#edit certificates#destroy crew_roles#create certificate_types#update
       projects#create projects#destroy project_requirements#update project_requirements#copy
       project_assignments#create project_assignments#destroy
+      imports#index imports#show imports#create import_reviews#index import_reviews#show import_reviews#update
+      import_reviews#accept import_reviews#reject import_reviews#skip import_reviews#create_crew_member import_reviews#merge
     ].each { |key| assert_includes keys, key }
+    assert_not_includes keys, "ask#show"
+  end
+
+  test "the Ask box stays open to viewers" do
+    sign_in_as users(:viewer)
+
+    get ask_path, params: { q: "does juan ortiz have osha 30" }
+
+    assert_response :success
   end
 
   test "every allowlist entry matches a real route" do

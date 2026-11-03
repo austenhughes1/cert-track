@@ -1,0 +1,67 @@
+<%# locals: (section:, columns:, today:) %>
+<%# One group of evidence rows (Ask::Section of Ask::Item). %>
+<div class="mt-5" id="ask_section_<%= section.key %>">
+  <% if section.title %>
+    <h2 class="mb-2 text-sm font-semibold text-gray-700"><%= section.title %> <span class="font-normal text-gray-500">(<%= section.total %>)</span></h2>
+  <% end %>
+  <% if section.items.empty? %>
+    <p class="rounded-md border border-dashed border-gray-300 bg-white px-4 py-4 text-center text-sm text-gray-500">None.</p>
+  <% else %>
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+      <table class="min-w-full divide-y divide-gray-200 text-sm">
+        <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <tr>
+            <% if columns[:person] %><th scope="col" class="px-4 py-2">Person</th><% end %>
+            <% if columns[:certificate_type] %><th scope="col" class="px-4 py-2">Certificate</th><% end %>
+            <th scope="col" class="px-4 py-2">Status</th>
+            <th scope="col" class="px-4 py-2">When</th>
+            <th scope="col" class="px-4 py-2"><span class="sr-only">Links</span></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          <% section.items.each do |item| %>
+            <% member = item.crew_member %>
+            <tr class="hover:bg-gray-50" data-crew-member-id="<%= member.id %>" data-certificate-type-id="<%= item.certificate_type.id %>">
+              <% if columns[:person] %>
+                <td class="whitespace-nowrap px-4 py-2">
+                  <%= link_to member.display_name, crew_member_path(member), class: "font-medium text-blue-700 hover:underline" %>
+                  <% unless member.active? %>
+                    <span class="ml-1 inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">Inactive</span>
+                  <% end %>
+                </td>
+              <% end %>
+              <% if columns[:certificate_type] %>
+                <td class="px-4 py-2 text-gray-900">
+                  <%= item.certificate_type.name %>
+                  <span class="ml-1 font-mono text-xs text-gray-400"><%= item.certificate_type.code %></span>
+                </td>
+              <% end %>
+              <td class="whitespace-nowrap px-4 py-2"><%= compliance_badge(item.status, item.expires_on) %></td>
+              <td class="whitespace-nowrap px-4 py-2 tabular-nums text-gray-600">
+                <% if item.expires_on %>
+                  <%= ask_relative_expiry(item.expires_on, today: today) %>
+                <% elsif item.certificate %>
+                  No expiration
+                <% else %>
+                  <span class="text-gray-400">—</span>
+                <% end %>
+              </td>
+              <td class="whitespace-nowrap px-4 py-2 text-right">
+                <% if item.certificate %>
+                  <%= link_to "View", crew_member_certificate_path(member, item.certificate), class: "text-blue-700 hover:underline",
+                        aria: { label: "View #{member.display_name}'s #{item.certificate_type.name} certificate" } %>
+                <% else %>
+                  <%= link_to "View", crew_member_path(member), class: "text-blue-700 hover:underline",
+                        aria: { label: "View #{member.display_name}" } %>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+    <% if section.truncated? %>
+      <p class="mt-1 text-xs text-gray-500">Showing the first <%= section.items.size %> of <%= number_with_delimiter(section.total) %>.</p>
+    <% end %>
+  <% end %>
+</div>

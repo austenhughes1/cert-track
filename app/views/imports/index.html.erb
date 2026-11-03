@@ -1,0 +1,24 @@
+<% content_for :title, "Imports" %>
+
+<div class="mb-4 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-semibold">Imports</h1>
+    <p class="mt-1 max-w-3xl text-sm text-gray-500">
+      Drop certificate scans, phone photos and zips. Each file is read on this server, the AI proposes who and what it is,
+      and nothing becomes a certificate until someone reviews it<%= " or it passes the strict auto-accept rules" if Imports::Config.auto_accept_enabled? %>.
+    </p>
+  </div>
+  <%= link_to import_reviews_path, id: "review_queue_link",
+        class: "rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" do %>
+    Review queue
+    <span class="ml-1 rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-800 tabular-nums"><%= @review_count %></span>
+  <% end %>
+</div>
+
+<%= render "imports/ai_status", status: @ai_status %>
+
+<div class="mt-4">
+  <%= render "imports/form", upload_errors: @upload_errors || [], carried_over: @carried_over || [] %>
+</div>
+
+<%= render "imports/batches", batches: @batches %>

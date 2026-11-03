@@ -1,0 +1,120 @@
+<%# locals: (item:, fields:, crew_members:, certificate_types:, merge_candidates:) %>
+<%# The proposal, editable. Accept (POST accept) turns it into a certificate; "Save edits"
+    sends the same fields as PATCH to update; Merge (POST merge) makes one certificate from
+    this item and its front/back partners. %>
+<% input_class = "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+<% hint_class = "mt-1 text-xs text-gray-500" %>
+
+<% people = crew_members.map { |member| [ member.sort_name, member.id ] } %>
+<% if (member = item.matched_crew_member) && crew_members.exclude?(member) %>
+  <% people.unshift([ "#{member.sort_name} (inactive)", member.id ]) %>
+<% end %>
+<% type_label = ->(type) { "#{type.name} (#{type.code}) · #{type.never_expires? ? "never expires" : "valid #{pluralize(type.validity_months, "month")}"}" } %>
+<% types = certificate_types.dup %>
+<% types.unshift(item.matched_certificate_type) if item.matched_certificate_type && types.exclude?(item.matched_certificate_type) %>
+<% type_choices = types.map { |type| [ type_label.call(type), type.id ] } %>
+<% selected_type = types.find { |type| type.id == fields.certificate_type_id.presence&.to_i } %>
+<% completed_on = (Date.iso8601(fields.completed_on.to_s) rescue nil) %>
+
+<section class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" aria-labelledby="proposal_heading">
+  <h2 id="proposal_heading" class="text-sm font-semibold text-gray-900">Certificate to create</h2>
+
+  <%= form_with model: fields, scope: :review, url: accept_import_review_path(item), method: :post, id: "review_form",
+        class: "mt-3 space-y-4" do |form| %>
+    <div>
+      <div class="flex items-center justify-between gap-2">
+        <%= form.label :crew_member_id, "Crew member", class: "block text-sm font-medium text-gray-700" %>
+        <%= import_match_badge(import_person_match_state(item)) %>
+      </div>
+      <%= form.select :crew_member_id,
+            import_picker_options(suggestions: item.person_suggestions, records: people, selected_id: fields.crew_member_id, blank: "Choose a person"),
+            {}, required: true, class: "#{input_class} bg-white" %>
+      <p class="<%= hint_class %>">
+        <% if item.person_unmatched? && item.person_suggestions.blank? %>
+          Nobody on the crew list matches “<%= item.holder_name_raw %>”.
+          <a href="#new_crew_member" class="text-blue-700 hover:underline">Create a crew member from this</a>, or pick someone.
+        <% else %>
+          Suggestions come first, best match on top; the rest of the active crew follows.
+        <% end %>
+      </p>
+    </div>
+
+    <div>
+      <div class="flex items-center justify-between gap-2">
+        <%= form.label :certificate_type_id, "Certificate type", class: "block text-sm font-medium text-gray-700" %>
+        <%= import_match_badge(item.type_match) %>
+      </div>
+      <%= form.select :certificate_type_id,
+            import_picker_options(suggestions: item.type_suggestions, records: type_choices, selected_id: fields.certificate_type_id, blank: "Choose a type"),
+            {}, required: true, class: "#{input_class} bg-white" %>
+      <% if can?(:admin) %>
+        <p class="<%= hint_class %>">Missing a type? <%= link_to "Add it to the master list", new_certificate_type_path, class: "text-blue-700 hover:underline", target: "_blank" %>.</p>
+      <% end %>
+    </div>
+
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div>
+        <%= form.label :completed_on, "Completed on", class: "block text-sm font-medium text-gray-700" %>
+        <%= form.date_field :completed_on, required: true, max: Date.current, class: input_class %>
+      </div>
+      <div>
+        <%= form.label :expires_on, "Expires on", class: "block text-sm font-medium text-gray-700" %>
+        <%= form.date_field :expires_on, aria: { describedby: "review_expires_on_hint" }, class: input_class %>
+      </div>
+    </div>
+    <p id="review_expires_on_hint" class="-mt-2 text-xs text-gray-500">
+      Use the date printed on the card. Leave it blank to work it out from the type<% if selected_type %>:
+        <% if selected_type.never_expires? %>
+          <%= selected_type.name %> never expires.
+        <% elsif completed_on %>
+          <%= format_date(selected_type.expiry_for(completed_on)) %> (completed plus <%= pluralize(selected_type.validity_months, "month") %>).
+        <% else %>
+          completed date plus <%= pluralize(selected_type.validity_months, "month") %>.
+        <% end %>
+      <% else %>.<% end %>
+    </p>
+
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div>
+        <%= form.label :certificate_number, "Certificate or card number", class: "block text-sm font-medium text-gray-700" %>
+        <%= form.text_field :certificate_number, autocomplete: "off", class: "#{input_class} font-mono" %>
+      </div>
+      <div>
+        <%= form.label :issued_by, "Issued by", class: "block text-sm font-medium text-gray-700" %>
+        <%= form.text_field :issued_by, autocomplete: "off", placeholder: "Trainer or provider", class: input_class %>
+      </div>
+    </div>
+
+    <% merge_candidates.each do |other| %>
+      <%= hidden_field_tag "other_ids[]", other.id, id: nil %>
+    <% end %>
+
+    <div class="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-4">
+      <%= form.button "Accept", type: "submit", title: "Shortcut: A", data: { review_shortcuts_target: "accept", turbo_submits_with: "Accepting…" },
+            class: "cursor-pointer rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:cursor-wait disabled:opacity-60" %>
+      <%= form.button "Save edits", type: "submit", name: "_method", value: "patch", formaction: import_review_path(item), formnovalidate: true,
+            title: "Keep your changes without accepting; it stays in the queue",
+            class: "cursor-pointer rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" %>
+    </div>
+
+    <% if merge_candidates.any? %>
+      <div class="rounded-md border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900" id="merge_candidates">
+        <p>
+          <%= merge_candidates.size == 1 ? "Another item has" : "#{merge_candidates.size} other items have" %>
+          the same person, type and number, probably the other side of this card:
+        </p>
+        <ul class="mt-1 list-disc pl-5">
+          <% merge_candidates.each do |other| %>
+            <li>
+              <%= link_to [ other.original_filename.presence || "Item #{other.id}", import_page_label(other) ].compact.join(" "),
+                    import_review_path(other), class: "text-blue-700 hover:underline", target: "_blank" %>
+            </li>
+          <% end %>
+        </ul>
+        <%= form.button "Merge with #{pluralize(merge_candidates.size, "matching item")} (front/back of one card)", type: "submit",
+              formaction: merge_import_review_path(item), id: "merge_button",
+              class: "mt-2 cursor-pointer rounded-md border border-sky-300 bg-white px-3 py-1.5 text-sm font-medium text-sky-800 shadow-sm hover:bg-sky-100" %>
+      </div>
+    <% end %>
+  <% end %>
+</section>

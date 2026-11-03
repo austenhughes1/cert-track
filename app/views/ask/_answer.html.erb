@@ -1,0 +1,52 @@
+<%# locals: (result:, today:) %>
+<%# The answer card: status pill, the answer sentence, "Did you mean" choices, notes and the evidence. %>
+<section id="ask_answer" class="<%= class_names("mt-6 rounded-lg border p-5 shadow-sm", ask_card_classes(result.status)) %>"
+         aria-labelledby="ask_answer_text" aria-live="polite" data-intent="<%= result.intent %>" data-status="<%= result.status %>">
+  <p class="mb-2 text-xs text-gray-500">You asked: <span class="font-medium text-gray-700"><%= result.question %></span></p>
+
+  <div class="flex items-start gap-3">
+    <%= ask_status_badge(result.status) %>
+    <div class="min-w-0 flex-1">
+      <p id="ask_answer_text" class="text-base leading-relaxed text-gray-900"><%= result.answer %></p>
+
+      <% if result.status.in?(%i[yes no]) %>
+        <p id="ask_check_links" class="mt-2 text-sm"><%= ask_check_links(result) %></p>
+      <% end %>
+
+      <% if result.candidates.any? %>
+        <ul id="ask_candidates" class="mt-3 flex flex-wrap gap-2" aria-label="Did you mean">
+          <% result.candidates.each do |candidate| %>
+            <li>
+              <%= link_to ask_candidate_path(candidate),
+                    class: "inline-flex items-baseline gap-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm shadow-sm hover:border-blue-400 hover:bg-blue-50" do %>
+                <span class="font-medium text-blue-700"><%= candidate.label %></span>
+                <% if candidate.detail.present? %>
+                  <span class="text-xs text-gray-500"><%= candidate.detail %></span>
+                <% end %>
+              <% end %>
+            </li>
+          <% end %>
+        </ul>
+      <% end %>
+
+      <% if result.notes.any? %>
+        <ul id="ask_notes" class="mt-3 space-y-0.5 text-xs text-gray-500">
+          <% result.notes.each do |note| %>
+            <li><%= note %></li>
+          <% end %>
+        </ul>
+      <% end %>
+    </div>
+  </div>
+
+  <% if result.status == :list %>
+    <% if result.sections.empty? %>
+      <p class="mt-4 rounded-md border border-dashed border-gray-300 bg-white px-4 py-6 text-center text-sm text-gray-500">Nothing to list.</p>
+    <% else %>
+      <% columns = ask_columns(result) %>
+      <% result.sections.each do |section| %>
+        <%= render "section", section: section, columns: columns, today: today %>
+      <% end %>
+    <% end %>
+  <% end %>
+</section>

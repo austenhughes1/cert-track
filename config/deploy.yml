@@ -57,10 +57,14 @@ env:
     # shell out to tesseract/pdftoppm and are CPU-bound, so more job processes would starve web.
     WEB_CONCURRENCY: 2
     JOB_CONCURRENCY: 1
-    # Model IDs are chosen in Phase 3/4; uncomment once picked.
+    # Model IDs are chosen in Phase 3/4; uncomment once picked. Until EXTRACTION_MODEL is set,
+    # imports fail at the AI step with "set EXTRACTION_MODEL" (docs/IMPORT_SPIKE.md).
     # EXTRACTION_MODEL: "@cf/..."
     # EXTRACTION_VISION_MODEL: "@cf/..."
     # CHAT_MODEL: "@cf/..."
+    # Only with AI_PROVIDER=anthropic (default claude-haiku-5-5) or ollama (default http://localhost:11434/v1).
+    # ANTHROPIC_MODEL: claude-haiku-5-5
+    # OLLAMA_URL: "http://localhost:11434/v1"
   secret:
     - RAILS_MASTER_KEY
     - POSTGRES_PASSWORD

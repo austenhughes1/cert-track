@@ -1,0 +1,37 @@
+<% content_for :footer do -%>
+You receive this because you uploaded this import batch (<%= @user.email_address %>). Only one summary is sent per batch.
+<% end -%>
+<% if @review_count.positive? -%>
+<%= pluralize(@review_count, "item") %> from your import <%= @review_count == 1 ? "needs" : "need" %> review.
+<% elsif @batch.failed? -%>
+Your import failed.
+<% else -%>
+Your import is finished.
+<% end -%>
+You uploaded <%= pluralize(@batch.files_count, "file") %> on <%= @uploaded_on %>. CertTrack found <%= pluralize(@batch.items_count, "item") %> in them.
+<% if @batch.error_message.present? -%>
+
+<%= @batch.error_message %>
+<% end -%>
+
+<% ImportMailer::COUNT_ROWS.each do |label, status| -%>
+<%= "#{label}:".ljust(14) %><%= @counts.fetch(status) %>
+<% end -%>
+<% if @problems.any? -%>
+
+Not imported
+============
+<% @problems.each do |item| -%>
+- <%= item.original_filename.presence || "(unnamed file)" %>: <%= item.failed? ? "Failed: #{item.error_message.presence || "couldn't be read"}" : (item.rejection_reason.presence || "Rejected") %>
+<% end -%>
+<% if @problem_count > @problems.size -%>
+  and <%= @problem_count - @problems.size %> more on the batch page.
+<% end -%>
+<% end -%>
+
+<% if @review_count.positive? -%>
+Review queue: <%= import_reviews_url %>
+<% end -%>
+<% if (batch_url = import_batch_url_or_nil(@batch)) -%>
+This batch: <%= batch_url %>
+<% end -%>

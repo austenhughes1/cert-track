@@ -149,8 +149,9 @@ export default class extends Controller {
       removeButton.className = "cursor-pointer text-red-700 hover:underline"
       removeButton.textContent = "Remove"
       removeButton.setAttribute("aria-label", `Remove ${file.name}`)
-      removeButton.dataset.action = "file-drop#remove"
-      removeButton.dataset.fileDropIndexParam = index
+      // By identifier, so subclasses registered under another name (import-drop) get the click too.
+      removeButton.dataset.action = `${this.identifier}#remove`
+      removeButton.setAttribute(`data-${this.identifier}-index-param`, index)
       meta.append(status, removeButton)
       line.append(name, meta)
 

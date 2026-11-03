@@ -1,0 +1,56 @@
+<%# locals: (item:) %>
+<%# The file being reviewed: PDFs in the browser's viewer, images as an <img> (HEIC through a
+    PNG variant, since most browsers can't show it). Every URL goes through Active Storage's
+    signed-in redirect to a short-lived service URL. %>
+<% file = item.file %>
+<section aria-label="File preview" id="review_preview">
+  <% if file.attached? %>
+    <% blob = file.blob %>
+    <% inline_path = rails_blob_path(file, disposition: "inline") %>
+    <div class="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+      <p class="text-gray-600">
+        <span class="font-medium text-gray-900"><%= blob.filename %></span>
+        <% if (pages = import_page_label(item)) %>
+          · <span id="review_page_range"><%= item.pages.size == 1 ? "Page" : "Pages" %> <%= pages.delete_prefix("p. ") %> of the original file</span>
+        <% end %>
+      </p>
+      <span class="flex items-center gap-3">
+        <%= link_to "Open in a new tab", inline_path, target: "_blank", rel: "noopener", class: "text-blue-700 hover:underline" %>
+        <%= link_to "Download", rails_blob_path(file, disposition: "attachment"), class: "text-blue-700 hover:underline" %>
+      </span>
+    </div>
+
+    <% if blob.content_type == "application/pdf" %>
+      <iframe src="<%= inline_path %>" title="<%= blob.filename %>" id="review_preview_pdf"
+              class="h-[78vh] w-full rounded-lg border border-gray-200 bg-gray-100"></iframe>
+    <% elsif blob.image? && ActiveStorage.web_image_content_types.include?(blob.content_type) %>
+      <div class="overflow-auto rounded-lg border border-gray-200 bg-gray-100 p-2">
+        <%= image_tag inline_path, alt: "Uploaded certificate image #{blob.filename}", id: "review_preview_image",
+              class: "mx-auto max-h-[78vh] w-auto" %>
+      </div>
+    <% elsif blob.representable? %>
+      <div class="overflow-auto rounded-lg border border-gray-200 bg-gray-100 p-2">
+        <%= image_tag file.representation(resize_to_limit: [ 2000, 2000 ]), alt: "Uploaded certificate image #{blob.filename}",
+              id: "review_preview_image", class: "mx-auto max-h-[78vh] w-auto" %>
+      </div>
+    <% else %>
+      <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center text-sm text-gray-500">
+        No preview for this kind of file. Use Download to open it.
+      </div>
+    <% end %>
+  <% else %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center" id="review_preview_missing">
+      <p class="text-sm font-medium text-gray-900">No file attached</p>
+      <p class="mt-1 text-sm text-gray-500">Check the details against the original upload in batch #<%= item.import_batch_id %>.</p>
+    </div>
+  <% end %>
+
+  <details class="mt-4 rounded-lg border border-gray-200 bg-white shadow-sm" id="extracted_text">
+    <summary class="cursor-pointer px-4 py-2 text-sm font-medium text-gray-700">Text read from the file</summary>
+    <% if item.extracted_text.present? %>
+      <pre class="max-h-96 overflow-auto whitespace-pre-wrap border-t border-gray-100 px-4 py-3 font-mono text-xs text-gray-700"><%= item.extracted_text %></pre>
+    <% else %>
+      <p class="border-t border-gray-100 px-4 py-3 text-sm text-gray-500">No text was kept for this item.</p>
+    <% end %>
+  </details>
+</section>

@@ -1,0 +1,115 @@
+<% label = [ @item.original_filename.presence || "Item #{@item.id}", import_page_label(@item) ].compact.join(" ") %>
+<% content_for :title, "Review · #{label}" %>
+<% dash = tag.span("—", class: "text-gray-400") %>
+<% label_class = "text-xs font-medium uppercase tracking-wide text-gray-500" %>
+<% notes = import_item_notes(@item) %>
+
+<div data-controller="review-shortcuts"
+     data-action="keydown@document->review-shortcuts#press turbo:submit-start->review-shortcuts#started turbo:submit-end->review-shortcuts#ended">
+  <div class="flex flex-wrap items-center justify-between gap-3 text-sm">
+    <%= link_to "← Review queue", import_reviews_path, class: "text-blue-700 hover:underline" %>
+    <p class="text-gray-500" id="review_shortcut_hints">
+      Shortcuts:
+      <kbd class="rounded border border-gray-300 bg-white px-1.5 font-mono text-xs text-gray-700">A</kbd> accept ·
+      <kbd class="rounded border border-gray-300 bg-white px-1.5 font-mono text-xs text-gray-700">R</kbd> reject ·
+      <kbd class="rounded border border-gray-300 bg-white px-1.5 font-mono text-xs text-gray-700">S</kbd> skip
+      <span class="text-gray-400">(not while typing in a field)</span>
+    </p>
+  </div>
+
+  <div class="mt-2 mb-4 flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold break-all"><%= label %></h1>
+      <p class="mt-1 text-sm text-gray-500">
+        <span id="review_position">Item <%= @queue_position %> of <%= @queue_count %> waiting</span>
+        · from <%= link_to "batch ##{@item.import_batch_id}", import_path(@item.import_batch_id), class: "text-blue-700 hover:underline" %>
+        <% if @item.provider.present? %>· read by <%= import_provider_label(@item.provider) %><% end %>
+        <% if @item.skipped_at %>· <span class="text-amber-700">skipped once</span><% end %>
+      </p>
+    </div>
+  </div>
+
+  <% if @errors.present? %>
+    <div class="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" id="error_explanation">
+      <p class="font-medium"><%= pluralize(@errors.size, "problem") %> to fix:</p>
+      <ul class="mt-1 list-disc space-y-1 pl-5">
+        <% @errors.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="grid gap-6 lg:grid-cols-5">
+    <div class="lg:col-span-3">
+      <%= render "import_reviews/preview", item: @item %>
+    </div>
+
+    <div class="space-y-4 lg:col-span-2">
+      <section class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" aria-labelledby="read_heading">
+        <h2 id="read_heading" class="text-sm font-semibold text-gray-900">What the AI read</h2>
+        <% if @item.error_message.present? %>
+          <div class="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert" id="review_pipeline_problem">
+            <span class="font-medium">Check before accepting:</span> <%= @item.error_message %>
+          </div>
+        <% end %>
+        <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm" id="review_raw">
+          <div class="col-span-2">
+            <dt class="<%= label_class %>">Name on the card</dt>
+            <dd class="mt-0.5 text-gray-900" id="raw_holder_name"><%= @item.holder_name_raw.presence || dash %></dd>
+          </div>
+          <div class="col-span-2">
+            <dt class="<%= label_class %>">Certificate as printed</dt>
+            <dd class="mt-0.5 text-gray-900" id="raw_certificate_name"><%= @item.certificate_name_raw.presence || dash %></dd>
+          </div>
+          <div>
+            <dt class="<%= label_class %>">Confidence</dt>
+            <dd class="mt-0.5" id="raw_confidence"><%= import_confidence(@item.confidence) %></dd>
+          </div>
+          <div>
+            <dt class="<%= label_class %>">Expiry</dt>
+            <dd class="mt-0.5 text-gray-700">
+              <% if @item.proposed_expiry_printed? %>Printed on the card
+              <% elsif @item.proposed_expiry_computed? %>Not printed; computed
+              <% elsif @item.proposed_expiry_none? %>Type never expires
+              <% elsif @item.proposed_expires_on %>Typed in by a reviewer
+              <% else %><%= dash %><% end %>
+            </dd>
+          </div>
+          <% if notes %>
+            <div class="col-span-2">
+              <dt class="<%= label_class %>">Notes</dt>
+              <dd class="mt-0.5 text-gray-700" id="raw_notes"><%= notes %></dd>
+            </div>
+          <% end %>
+        </dl>
+      </section>
+
+      <%= render "import_reviews/form", item: @item, fields: @fields, crew_members: @crew_members,
+            certificate_types: @certificate_types, merge_candidates: @merge_candidates %>
+
+      <section class="flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm" aria-label="Reject or skip">
+        <%= form_with url: reject_import_review_path(@item), scope: :reject, id: "reject_form", class: "flex flex-1 items-end gap-2" do |form| %>
+          <div class="min-w-40 flex-1">
+            <%= form.label :reason, "Reject reason (optional)", class: "block text-xs font-medium text-gray-600" %>
+            <%= form.text_field :reason, list: "reject_reasons", autocomplete: "off", placeholder: "e.g. Not a certificate",
+                  class: "mt-1 block w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+            <datalist id="reject_reasons">
+              <% ImportsHelper::REJECT_REASONS.each do |reason| %>
+                <option value="<%= reason %>"></option>
+              <% end %>
+            </datalist>
+          </div>
+          <%= form.button "Reject", type: "submit", title: "Shortcut: R", data: { review_shortcuts_target: "reject" },
+                class: "cursor-pointer rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 shadow-sm hover:bg-red-50" %>
+        <% end %>
+        <%= button_to "Skip for now", skip_import_review_path(@item), title: "Shortcut: S", form: { id: "skip_form" },
+              data: { review_shortcuts_target: "skip" },
+              class: "cursor-pointer rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" %>
+      </section>
+
+      <%= render "import_reviews/crew_member_form", item: @item, attributes: @crew_member_attributes,
+            errors: @crew_member_errors || [], crew_roles: @crew_roles, employers: @employers %>
+    </div>
+  </div>
+</div>

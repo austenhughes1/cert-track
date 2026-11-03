@@ -1,0 +1,28 @@
+<% content_for :title, "Ask" %>
+
+<div class="mx-auto max-w-4xl">
+  <div class="mb-4">
+    <h1 class="text-2xl font-semibold">Ask</h1>
+    <p class="mt-1 text-sm text-gray-500">Ask about crew certificates in plain words. Answers come straight from the tracker: no AI, and nothing leaves the server.</p>
+  </div>
+
+  <%= form_with url: ask_path, method: :get, id: "ask_form", role: "search",
+        class: "rounded-lg border border-gray-200 bg-white p-3 shadow-sm" do %>
+    <%= label_tag :q, "Your question", class: "sr-only" %>
+    <div class="flex flex-col gap-2 sm:flex-row">
+      <%= search_field_tag :q, @question, placeholder: @examples.first, autofocus: @question.blank?, autocomplete: "off",
+            maxlength: Ask::Question::MAX_LENGTH,
+            class: "block w-full rounded-md border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+      <%= submit_tag "Ask", name: nil,
+            class: "cursor-pointer rounded-md bg-blue-600 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-blue-500" %>
+    </div>
+  <% end %>
+
+  <%= render "examples", examples: @examples %>
+
+  <% if @result %>
+    <%= render "answer", result: @result, today: @today %>
+  <% else %>
+    <%= render "help", examples: @examples %>
+  <% end %>
+</div>

@@ -2,6 +2,8 @@
 # AI proposals stay here until a person (or the auto-accept rules) turns them into a Certificate.
 class ImportItem < ApplicationRecord
   TERMINAL_STATUSES = %w[accepted rejected duplicate failed].freeze
+  # Still being read by the pipeline (text extraction, then AI): the batch isn't finished.
+  PIPELINE_STATUSES = %w[pending extracting].freeze
   PURGE_AFTER = 30.days
 
   enum :status, { pending: 0, extracting: 1, needs_review: 2, accepted: 3, rejected: 4, duplicate: 5, failed: 6 },
@@ -9,8 +11,13 @@ class ImportItem < ApplicationRecord
 
   # matched_crew_member / matched_certificate_type hold the exact match or the top suggestion;
   # these say which. Suggestions are [{ "id" =>, "name" =>, "similarity" => }] best first.
+  # After a reviewer's "Save edits", matched_crew_member may instead be a person picked by
+  # hand, stored with person_match unmatched (shown as "Picked by hand"; Imports::Accept
+  # learns no alias from it). A type picked by hand is stored as type_match matched.
   enum :person_match, { unmatched: 0, suggested: 1, matched: 2 }, prefix: :person, default: :unmatched
   enum :type_match, { unmatched: 0, suggested: 1, matched: 2 }, prefix: :type, default: :unmatched
+  # A proposed_expires_on with no source is one a reviewer typed and saved ("Save edits");
+  # Imports::Accept records it as manual.
   enum :proposed_expires_on_source, { printed: 0, computed: 1, none: 2 }, prefix: :proposed_expiry
 
   belongs_to :import_batch
@@ -32,14 +39,20 @@ class ImportItem < ApplicationRecord
     with: ->(value) { value.squish.presence }
   normalizes :sha256, with: ->(digest) { digest.strip.downcase }
 
-  validates :sha256, format: { with: /\A\h{64}\z/, message: "must be a SHA-256 hex digest" }
+  # A file rejected before it could be read (zip-slip, over a limit) has no digest.
+  validates :sha256, format: { with: /\A\h{64}\z/, message: "must be a SHA-256 hex digest" },
+    unless: -> { rejected? && sha256.nil? }
   validates :page_range, format: { with: /\A\d+(-\d+)?\z/ }, allow_nil: true
   validates :confidence, numericality: { greater_than_or_equal_to: 0, less_than_or_equal_to: 1 }, allow_nil: true
   validates :ai_units_used, numericality: { only_integer: true, greater_than_or_equal_to: 0 }, allow_nil: true
 
   scope :terminal, -> { where(status: TERMINAL_STATUSES) }
   scope :unfinished, -> { where.not(status: TERMINAL_STATUSES) }
-  scope :review_queue, -> { needs_review.order(:id) }
+  scope :in_pipeline, -> { where(status: PIPELINE_STATUSES) }
+  # Oldest first; a skipped item goes behind every unskipped one (earliest skip first).
+  scope :review_queue, -> { needs_review.order(arel_table[:skipped_at].asc.nulls_first, :id) }
+  # Parked until the AI allocation resets (next_attempt_at still ahead).
+  scope :waiting_for_budget, ->(now = Time.current) { in_pipeline.where(arel_table[:next_attempt_at].gt(now)) }
   # Accepted or rejected items whose extracted_text/extraction are past the 30-day retention.
   scope :purgeable, ->(now: Time.current) {
     where(status: %i[accepted rejected])
@@ -57,6 +70,15 @@ class ImportItem < ApplicationRecord
         .first
     end
 
+    # The earlier item for the same file (any page range) that a new upload of it would
+    # duplicate, or nil: the whole-file item when there is one. Same exclusions as original_for.
+    def original_file_for(sha256)
+      where(sha256: sha256.to_s.strip.downcase)
+        .where.not(status: %i[duplicate failed])
+        .order(arel_table[:source_item_id].asc.nulls_first, :id)
+        .first
+    end
+
     # Clears extracted_text and extraction on purgeable items. Returns the number cleared.
     def purge_stale_extractions!(now: Time.current)
       purgeable(now: now).update_all(extracted_text: nil, extraction: nil, updated_at: now)
@@ -65,6 +87,19 @@ class ImportItem < ApplicationRecord
 
   def terminal?
     TERMINAL_STATUSES.include?(status)
+  end
+
+  def in_pipeline?
+    PIPELINE_STATUSES.include?(status)
+  end
+
+  def waiting_for_budget?(now = Time.current)
+    in_pipeline? && next_attempt_at.present? && next_attempt_at > now
+  end
+
+  # "ortiz.jpg" for "crew.zip/cards/ortiz.jpg".
+  def filename
+    File.basename(original_filename.to_s).presence
   end
 
   # [1, 2] for "1-2", [3] for "3", [] when nil.

@@ -27,6 +27,7 @@ class ActiveStorageAuthenticationTest < ActionDispatch::IntegrationTest
   end
 
   test "signed-in users get a service URL that expires within 5 minutes" do
+    certificates(:juan_osha30).files.attach(@blob) # a blob attached to nothing is editors-only
     sign_in_as users(:viewer)
 
     get rails_blob_path(@blob, disposition: "inline")

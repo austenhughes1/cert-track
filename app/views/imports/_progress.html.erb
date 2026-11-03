@@ -1,0 +1,148 @@
+<%# locals: (batch:, progress:, items:, items_total:) %>
+<%# Live progress. While files are still being read, frame-refresh reloads this frame every
+    3 s (every 60 s when everything left is parked until the AI allocation resets at 00:05 UTC);
+    the refresh stops once nothing is pending. Links leave the frame (target _top). %>
+<% counts = import_progress_counts(progress) %>
+<% in_flight = counts["pending"] + counts["extracting"] %>
+<% live = batch.receiving? || batch.processing? || in_flight.positive? %>
+<% only_waiting = in_flight.positive? && counts["waiting_for_budget"] >= in_flight %>
+<% done = counts.except("pending", "extracting", "waiting_for_budget").values.sum %>
+<% first_to_review = items.find(&:needs_review?) %>
+<% tiles = [
+  [ "pending", "Queued" ], [ "extracting", "Reading" ], [ "needs_review", "Needs review" ], [ "accepted", "Accepted" ],
+  [ "duplicate", "Duplicates" ], [ "rejected", "Rejected" ], [ "failed", "Failed" ], [ "waiting_for_budget", "Waiting for AI budget" ]
+] %>
+
+<%= turbo_frame_tag "import_batch_progress", target: "_top" do %>
+  <div id="batch_progress" data-status="<%= batch.status %>" data-live="<%= live %>"
+       <%= tag.attributes(data: { controller: "frame-refresh", frame_refresh_interval_value: only_waiting ? 60_000 : 3000 }) if live %>>
+    <section class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm"
+             aria-label="Batch status">
+      <div class="flex items-center gap-3">
+        <% if live %>
+          <span class="inline-block size-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" aria-hidden="true"></span>
+        <% end %>
+        <%= import_batch_status_badge(batch) %>
+        <p class="text-sm text-gray-700" id="batch_status_text">
+          <% if batch.receiving? %>
+            Waiting to unpack the upload…
+          <% elsif live && only_waiting %>
+            Today's free AI allocation is used up. The remaining <%= pluralize(in_flight, "item") %> continue after 00:05 UTC.
+          <% elsif live %>
+            Reading files: <%= done %> of <%= pluralize(counts.except("waiting_for_budget").values.sum, "item") %> done. This page updates every few seconds.
+          <% elsif batch.needs_review? || counts["needs_review"].positive? %>
+            Finished reading. <%= pluralize(counts["needs_review"], "item") %> <%= counts["needs_review"] == 1 ? "needs" : "need" %> review.
+          <% elsif batch.failed? %>
+            This batch could not be processed.
+          <% else %>
+            Done. Every file is accounted for.
+          <% end %>
+        </p>
+      </div>
+      <% if first_to_review %>
+        <%= link_to "Review these", import_review_path(first_to_review),
+              class: "rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+      <% end %>
+    </section>
+
+    <% if batch.error_message.present? %>
+      <div class="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" id="batch_error">
+        <%= batch.error_message %>
+      </div>
+    <% end %>
+
+    <dl class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8" id="batch_counts">
+      <% tiles.each do |key, label| %>
+        <div class="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm" id="count_<%= key %>">
+          <dt class="text-xs font-medium text-gray-500"><%= label %></dt>
+          <dd class="mt-1 text-2xl font-semibold tabular-nums <%= "text-gray-300" if counts[key].zero? %>" data-count><%= counts[key] %></dd>
+        </div>
+      <% end %>
+    </dl>
+
+    <% if items.empty? %>
+      <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
+        <p class="text-sm font-medium text-gray-900"><%= live ? "Nothing found yet" : "No files were found in this batch" %></p>
+        <p class="mt-1 text-sm text-gray-500">
+          <%= live ? "Files appear here as they are unpacked." : "Check that the upload held PDFs, images or zips." %>
+        </p>
+      </div>
+    <% else %>
+      <% if items_total > items.size %>
+        <p class="mb-2 text-sm text-gray-500">Showing the first <%= items.size %> of <%= number_with_delimiter(items_total) %> items.</p>
+      <% end %>
+      <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+        <table class="min-w-full divide-y divide-gray-200 text-sm" id="import_items">
+          <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <tr>
+              <th scope="col" class="px-4 py-2">File</th>
+              <th scope="col" class="px-4 py-2">Status</th>
+              <th scope="col" class="px-4 py-2">Person</th>
+              <th scope="col" class="px-4 py-2">Certificate type</th>
+              <th scope="col" class="px-4 py-2 text-right">Confidence</th>
+              <th scope="col" class="px-4 py-2">Details</th>
+              <th scope="col" class="px-4 py-2"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <% items.each do |item| %>
+              <tr id="<%= dom_id(item) %>" class="align-top hover:bg-gray-50">
+                <td class="max-w-xs px-4 py-2">
+                  <span class="block break-all text-gray-900"><%= item.original_filename.presence || "Item #{item.id}" %></span>
+                  <% if (pages = import_page_label(item)) %>
+                    <span class="text-xs text-gray-500"><%= pages %></span>
+                  <% end %>
+                </td>
+                <td class="whitespace-nowrap px-4 py-2"><%= import_item_status_badge(item) %></td>
+                <td class="whitespace-nowrap px-4 py-2">
+                  <% if item.matched_crew_member %>
+                    <%= link_to item.matched_crew_member.display_name, crew_member_path(item.matched_crew_member), class: "text-blue-700 hover:underline" %>
+                    <% if item.person_suggested? %><span class="text-xs text-amber-700">(suggested)</span><% end %>
+                  <% elsif item.holder_name_raw.present? %>
+                    <span class="text-gray-500" title="Name on the card; no crew member matched"><%= item.holder_name_raw %></span>
+                  <% else %>
+                    <span class="text-gray-400">—</span>
+                  <% end %>
+                </td>
+                <td class="px-4 py-2">
+                  <% if item.matched_certificate_type %>
+                    <%= item.matched_certificate_type.name %>
+                    <% unless item.type_matched? %><span class="text-xs text-amber-700">(suggested)</span><% end %>
+                  <% elsif item.certificate_name_raw.present? %>
+                    <span class="text-gray-500" title="Name as printed; no type matched"><%= item.certificate_name_raw %></span>
+                  <% else %>
+                    <span class="text-gray-400">—</span>
+                  <% end %>
+                </td>
+                <td class="whitespace-nowrap px-4 py-2 text-right"><%= import_confidence(item.confidence) %></td>
+                <td class="px-4 py-2 text-gray-600">
+                  <% if item.duplicate? %>
+                    Same file as <%= item.duplicate_of&.original_filename || "an earlier upload" %><%= " (#{import_page_label(item.duplicate_of)})" if item.duplicate_of && import_page_label(item.duplicate_of) %>
+                    <% if item.duplicate_of %>in <%= link_to "batch ##{item.duplicate_of.import_batch_id}", import_path(item.duplicate_of.import_batch_id), class: "text-blue-700 hover:underline" %><% end %>
+                  <% elsif item.rejected? %>
+                    <%= item.rejection_reason.presence || "Rejected" %>
+                  <% elsif item.failed? %>
+                    <span class="text-red-700"><%= item.error_message.presence || "Failed" %></span>
+                  <% elsif import_item_waiting?(item) %>
+                    Continues <%= import_time(item.next_attempt_at) %>
+                  <% elsif item.needs_review? && item.error_message.present? %>
+                    <span class="text-amber-800">Check before accepting: <%= item.error_message %></span>
+                  <% elsif item.accepted? && item.certificate %>
+                    <%= link_to "View certificate", crew_member_certificate_path(item.certificate.crew_member_id, item.certificate),
+                          class: "text-blue-700 hover:underline" %>
+                  <% end %>
+                </td>
+                <td class="whitespace-nowrap px-4 py-2 text-right">
+                  <% if item.needs_review? %>
+                    <%= link_to "Review", import_review_path(item), class: "font-medium text-blue-700 hover:underline",
+                          aria: { label: "Review #{item.original_filename}" } %>
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+  </div>
+<% end %>

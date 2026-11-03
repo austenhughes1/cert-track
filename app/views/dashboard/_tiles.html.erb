@@ -24,11 +24,14 @@
     <% end %>
   <% end %>
 
-  <div id="tile_review_queue" class="rounded-lg border border-gray-200 bg-white p-4 text-gray-700 shadow-sm">
+  <%# Editors open the import review queue from here; viewers can't use it, so they get no link. %>
+  <%= content_tag(can?(:editor) ? :a : :div, id: "tile_review_queue", href: (import_reviews_path if can?(:editor)),
+        class: class_names("block rounded-lg border border-gray-200 bg-white p-4 text-gray-700 shadow-sm",
+          "hover:ring-2 hover:ring-blue-300" => can?(:editor))) do %>
     <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Review queue</p>
     <p class="mt-1 text-3xl font-semibold tabular-nums" data-count><%= review_count %></p>
     <p class="mt-1 text-xs text-gray-500">
       <%= review_count.zero? ? "no imports waiting" : "#{"import".pluralize(review_count)} waiting for review" %>
     </p>
-  </div>
+  <% end %>
 </div>

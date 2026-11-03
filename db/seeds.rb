@@ -99,6 +99,11 @@ end
   end
 end
 
+# Demo certificates are dated relative to today, so finding them by completed_on would add a
+# second, shifted copy of each (superseding the first) on every later day the seeds run.
+# Only members who have no certificates yet get them.
+already_certified = Certificate.where(crew_member: crew.values).distinct.pluck(:crew_member_id).to_set
+
 # [first name, code, completed days ago, expires days from today (nil = never), extra attributes]
 [
   [ "Juan", "OSHA30", 700, nil, { certificate_number: "30-1234567", issued_by: "Example Safety Training LLC" } ],
@@ -123,7 +128,10 @@ end
   [ "Tom", "OSHA30", 50, nil, {} ],
   [ "Sam", "OSHA30", 900, nil, {} ]
 ].each do |first_name, code, completed_ago, expires_in, extra|
-  Certificate.find_or_create_by!(crew_member: crew.fetch(first_name), certificate_type: types.fetch(code),
+  member = crew.fetch(first_name)
+  next if already_certified.include?(member.id)
+
+  Certificate.find_or_create_by!(crew_member: member, certificate_type: types.fetch(code),
     completed_on: today - completed_ago) do |certificate|
     certificate.expires_on = today + expires_in if expires_in
     certificate.assign_attributes(extra)

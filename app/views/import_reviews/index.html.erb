@@ -1,0 +1,90 @@
+<% content_for :title, "Review queue" %>
+
+<%= link_to "← Imports", imports_path, class: "text-sm text-blue-700 hover:underline" %>
+
+<div class="mt-2 mb-4 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-semibold">Review queue</h1>
+    <p class="mt-1 text-sm text-gray-500" id="review_counts">
+      <%= pluralize(@total_count, "item") %> waiting for review<% if @skipped_count.positive? %>, <%= @skipped_count %> of them skipped once<% end %>.
+      <% if @processing_count.positive? %>
+        <%= pluralize(@processing_count, "more item") %> still being read.
+      <% end %>
+    </p>
+  </div>
+  <% if @items.any? %>
+    <%= link_to "Start reviewing", import_review_path(@items.first), id: "start_reviewing",
+          class: "rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+  <% end %>
+</div>
+
+<% if @items.empty? %>
+  <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
+    <p class="text-sm font-medium text-gray-900">Nothing to review</p>
+    <p class="mt-1 text-sm text-gray-500">
+      <% if @processing_count.positive? %>
+        Items appear here as the AI finishes reading them.
+      <% else %>
+        <%= link_to "Import more certificates", imports_path, class: "text-blue-700 hover:underline" %> and the ones that need a person's check show up here.
+      <% end %>
+    </p>
+  </div>
+<% else %>
+  <% if @total_count > @items.size %>
+    <p class="mb-2 text-sm text-gray-500">Showing the first <%= @items.size %> of <%= number_with_delimiter(@total_count) %>.</p>
+  <% end %>
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-gray-200 text-sm" id="review_items">
+      <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <tr>
+          <th scope="col" class="px-4 py-2">File</th>
+          <th scope="col" class="px-4 py-2">Name on card</th>
+          <th scope="col" class="px-4 py-2">Person</th>
+          <th scope="col" class="px-4 py-2">Certificate type</th>
+          <th scope="col" class="px-4 py-2">Completed</th>
+          <th scope="col" class="px-4 py-2 text-right">Confidence</th>
+          <th scope="col" class="px-4 py-2">Batch</th>
+          <th scope="col" class="px-4 py-2"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        <% @items.each do |item| %>
+          <tr id="<%= dom_id(item) %>" class="align-top hover:bg-gray-50">
+            <td class="max-w-xs px-4 py-2">
+              <span class="block break-all text-gray-900"><%= item.original_filename.presence || "Item #{item.id}" %></span>
+              <span class="text-xs text-gray-500">
+                <%= import_page_label(item) %>
+                <% if item.skipped_at %><span class="text-amber-700">· skipped</span><% end %>
+              </span>
+            </td>
+            <td class="px-4 py-2 text-gray-700"><%= item.holder_name_raw.presence || tag.span("—", class: "text-gray-400") %></td>
+            <td class="whitespace-nowrap px-4 py-2">
+              <% if item.matched_crew_member %>
+                <%= item.matched_crew_member.display_name %>
+              <% end %>
+              <%= import_match_badge(import_person_match_state(item)) %>
+            </td>
+            <td class="px-4 py-2">
+              <% if item.matched_certificate_type %>
+                <%= item.matched_certificate_type.name %>
+              <% elsif item.certificate_name_raw.present? %>
+                <span class="text-gray-500"><%= item.certificate_name_raw %></span>
+              <% end %>
+              <%= import_match_badge(item.type_match) %>
+            </td>
+            <td class="whitespace-nowrap px-4 py-2 text-gray-700"><%= format_date(item.proposed_completed_on) %></td>
+            <td class="whitespace-nowrap px-4 py-2 text-right"><%= import_confidence(item.confidence) %></td>
+            <td class="whitespace-nowrap px-4 py-2">
+              <%= link_to "##{item.import_batch_id}", import_path(item.import_batch_id), class: "text-blue-700 hover:underline",
+                    aria: { label: "Batch #{item.import_batch_id}" } %>
+            </td>
+            <td class="whitespace-nowrap px-4 py-2 text-right">
+              <%= link_to "Review", import_review_path(item), class: "font-medium text-blue-700 hover:underline",
+                    aria: { label: "Review #{item.original_filename}" } %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+<% end %>

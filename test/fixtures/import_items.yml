@@ -4,7 +4,7 @@
 %>
 # accepted_li_flagger    page 1 of scan_0001.pdf, accepted into certificates(:li_flagger)
 # review_juan_first_aid  page 2 of the same file, needs review; holder misspelled "Jaun Ortis",
-#                        no person matched, type matched (first_aid)
+#                        no person matched, type suggested (first_aid, by name: no code was read)
 # duplicate_li_flagger   second upload of page 1, status duplicate, duplicate_of accepted_li_flagger
 accepted_li_flagger:
   import_batch: march_batch
@@ -40,6 +40,7 @@ review_juan_first_aid:
   holder_name_raw: Jaun Ortis
   certificate_name_raw: Adult First Aid CPR AED
   matched_certificate_type: first_aid
+  type_match: suggested
   proposed_completed_on: <%= today - 20 %>
   provider: workers_ai
   ai_units_used: 140

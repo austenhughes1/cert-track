@@ -3,6 +3,11 @@
 # URLs must expire within 5 minutes, in every environment.
 Rails.application.config.active_storage.service_urls_expire_in = 5.minutes
 
+# The signed Rails links on pages (rails_blob_path, representations) expire too, so a link
+# copied out of a page, a browser history or an old email stops working. Rails' default is
+# never. Long enough for a review session; reloading the page makes fresh links.
+Rails.application.config.active_storage.urls_expire_in = 1.hour
+
 # url_for(attachment) and friends go through the redirect controller, never proxy file bytes.
 Rails.application.config.active_storage.resolve_model_to_route = :rails_storage_redirect
 
