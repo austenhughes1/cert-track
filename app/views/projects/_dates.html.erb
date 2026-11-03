@@ -1,0 +1,6 @@
+<%# locals: (starts_on:, ends_on:) %>
+<% if starts_on || ends_on %>
+  <%= starts_on ? format_date(starts_on) : "?" %> – <%= ends_on ? format_date(ends_on) : "open-ended" %>
+<% else %>
+  <span class="text-gray-400">—</span>
+<% end %>

@@ -1,0 +1,32 @@
+# tower_2417 requires 5 types: osha30, flagger, first_aid for everyone; climber for
+# the climber role only; cdl_a for the operator role only.
+tower_osha30:
+  project: tower_2417
+  certificate_type: osha30
+
+tower_flagger:
+  project: tower_2417
+  certificate_type: flagger
+
+tower_first_aid:
+  project: tower_2417
+  certificate_type: first_aid
+
+tower_climber_climbers:
+  project: tower_2417
+  certificate_type: climber
+  crew_role: climber
+  notes: Anyone working above 6 ft on the tower.
+
+tower_cdl_operators:
+  project: tower_2417
+  certificate_type: cdl_a
+  crew_role: operator
+
+closed_osha30:
+  project: closed_2390
+  certificate_type: osha30
+
+closed_first_aid:
+  project: closed_2390
+  certificate_type: first_aid

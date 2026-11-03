@@ -4,8 +4,8 @@ Rails.application.routes.draw do
   get "up" => "rails/health#show", as: :rails_health_check
 
   # --- Auth and users (invite-only; no public sign-up) ---
-  resource :session
-  resources :passwords, param: :token
+  resource :session, only: %i[new create destroy]
+  resources :passwords, param: :token, only: %i[new create edit update]
   resources :users, except: :show do
     post :resend_invite, on: :member
     post :send_test_digest, on: :collection # Phase 2
@@ -16,11 +16,15 @@ Rails.application.routes.draw do
   # --- Crew ---
   resources :crew_roles, except: :show
   resources :crew_members do
-    resources :certificates, except: :index
+    resources :certificates, except: :index do
+      delete "files", action: :remove_file, on: :member, as: :remove_file # param: attachment_id
+    end
   end
 
   # --- Master list ---
-  resources :certificate_types, except: :show
+  resources :certificate_types, except: :show do
+    patch :move, on: :member # params: direction=up|down, status=list filter
+  end
 
   # --- Projects, requirements, assignments, compliance ---
   resources :projects do

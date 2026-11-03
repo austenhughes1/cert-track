@@ -1,0 +1,51 @@
+<% content_for :title, "Compliance · #{@project.display_name}" %>
+<% secondary_button = "rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" %>
+
+<%= link_to "← #{@project.display_name}", project_path(@project), class: "text-sm text-blue-700 hover:underline" %>
+
+<div class="mt-2 mb-4 flex flex-wrap items-start justify-between gap-4">
+  <div>
+    <div class="flex items-center gap-3">
+      <h1 class="text-2xl font-semibold">Compliance matrix</h1>
+      <%= render "projects/status_badge", project: @project %>
+    </div>
+    <p class="mt-1 text-sm text-gray-500">
+      <%= @project.display_name %>
+      <% if (details = [ @project.client, @project.location ].compact.join(" · ")).present? %>· <%= details %><% end %>
+      · <%= render "projects/dates", starts_on: @project.starts_on, ends_on: @project.ends_on %>
+      · As of <%= format_date(@report.today) %>
+    </p>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2">
+    <%= link_to "Export CSV", project_compliance_path(@project, format: :csv), class: secondary_button, data: { turbo: false } %>
+    <%= link_to "Download packet", project_packet_path(@project),
+          class: "rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+    <% if can?(:editor) %>
+      <%= link_to "Edit requirements", edit_project_requirements_path(@project), class: secondary_button %>
+      <%= link_to "Manage assignments", project_assignments_path(@project), class: secondary_button %>
+    <% end %>
+  </div>
+</div>
+
+<% if @report.columns.empty? %>
+  <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
+    <p class="text-sm font-medium text-gray-900">No required certificates yet</p>
+    <p class="mt-1 text-sm text-gray-500">Pick the certificate types this project requires to see who holds them.</p>
+    <% if can?(:editor) %>
+      <%= link_to "Edit requirements", edit_project_requirements_path(@project), class: "mt-4 inline-block text-sm font-medium text-blue-700 hover:underline" %>
+    <% end %>
+  </div>
+<% elsif @report.rows.empty? %>
+  <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
+    <p class="text-sm font-medium text-gray-900">No active crew assigned</p>
+    <p class="mt-1 text-sm text-gray-500">Assign crew members to this project to check them against its <%= pluralize(@report.columns.size, "required type") %>.</p>
+    <% if can?(:editor) %>
+      <%= link_to "Manage assignments", project_assignments_path(@project), class: "mt-4 inline-block text-sm font-medium text-blue-700 hover:underline" %>
+    <% end %>
+  </div>
+<% else %>
+  <%= render "compliance/summary", report: @report %>
+  <%= render "compliance/matrix", report: @report, editor: can?(:editor) %>
+  <%= render "compliance/gaps", report: @report, editor: can?(:editor) %>
+<% end %>

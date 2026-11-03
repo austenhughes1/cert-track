@@ -1,0 +1,97 @@
+<%# locals: (crew_member:) %>
+<% input_class = "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+<%= form_with model: crew_member, class: "space-y-5" do |form| %>
+  <% if crew_member.errors.any? %>
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" id="error_explanation">
+      <p class="font-medium"><%= pluralize(crew_member.errors.count, "problem") %> to fix:</p>
+      <ul class="mt-1 list-disc space-y-1 pl-5">
+        <% crew_member.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="grid gap-5 sm:grid-cols-3">
+    <div>
+      <%= form.label :first_name, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :first_name, required: true, autofocus: crew_member.new_record?, autocomplete: "off", class: input_class %>
+    </div>
+    <div>
+      <%= form.label :last_name, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :last_name, required: true, autocomplete: "off", class: input_class %>
+    </div>
+    <div>
+      <%= form.label :preferred_name, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :preferred_name, autocomplete: "off", placeholder: "e.g. Dave for David", class: input_class %>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :name_aliases, "Other spellings", class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_area :name_aliases, value: crew_member_aliases_text(crew_member), rows: 3,
+          aria: { describedby: "name_aliases_hint" }, class: input_class %>
+    <p id="name_aliases_hint" class="mt-1 text-xs text-gray-500">One per line, as printed on cards (for example "Jon Smith" or "J. Smith"). Search and imports match these too.</p>
+  </div>
+
+  <div class="grid gap-5 sm:grid-cols-2">
+    <div>
+      <%= form.label :email, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.email_field :email, autocomplete: "off", class: input_class %>
+    </div>
+    <div>
+      <%= form.label :phone, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.telephone_field :phone, autocomplete: "off", class: input_class %>
+    </div>
+  </div>
+
+  <div class="grid gap-5 sm:grid-cols-2">
+    <div>
+      <%= form.label :employer, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :employer, list: "employer_options", autocomplete: "off", placeholder: "ABA Ventures or a subcontractor",
+            class: input_class %>
+      <datalist id="employer_options">
+        <% CrewMember.employer_names.each do |employer| %>
+          <option value="<%= employer %>"></option>
+        <% end %>
+      </datalist>
+    </div>
+    <div>
+      <%= form.label :crew_role_id, "Role", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.collection_select :crew_role_id, CrewRole.ordered, :id, :name, { include_blank: "No role" },
+            aria: { describedby: "crew_role_hint" }, class: "#{input_class} bg-white" %>
+      <p id="crew_role_hint" class="mt-1 text-xs text-gray-500">
+        Decides role-specific project requirements; a project assignment can override it.
+        <%= link_to "Manage roles", crew_roles_path, class: "text-blue-700 hover:underline" %>
+      </p>
+    </div>
+  </div>
+
+  <div class="space-y-3">
+    <div class="flex items-start gap-2">
+      <%= form.check_box :active, class: "mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" %>
+      <div>
+        <%= form.label :active, class: "text-sm font-medium text-gray-700" %>
+        <p class="text-xs text-gray-500">Inactive members drop out of compliance reports and emails. Their history is kept.</p>
+      </div>
+    </div>
+    <div class="flex items-start gap-2">
+      <%= form.check_box :expiry_emails_opt_in, class: "mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" %>
+      <div>
+        <%= form.label :expiry_emails_opt_in, "Email this person 30 and 7 days before a certificate expires (needs an email)",
+              class: "text-sm font-medium text-gray-700" %>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :notes, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_area :notes, rows: 3, class: input_class %>
+  </div>
+
+  <div class="flex items-center gap-3 border-t border-gray-100 pt-5">
+    <%= form.submit crew_member.new_record? ? "Add crew member" : "Save changes",
+          class: "cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+    <%= link_to "Cancel", crew_member.persisted? ? crew_member_path(crew_member) : crew_members_path, class: "text-sm text-gray-600 hover:underline" %>
+  </div>
+<% end %>

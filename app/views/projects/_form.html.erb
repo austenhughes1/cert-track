@@ -1,0 +1,59 @@
+<%# locals: (project:) %>
+<% input_class = "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+<%= form_with model: project, class: "space-y-5" do |form| %>
+  <% if project.errors.any? %>
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" id="error_explanation">
+      <p class="font-medium"><%= pluralize(project.errors.count, "problem") %> to fix:</p>
+      <ul class="mt-1 list-disc space-y-1 pl-5">
+        <% project.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="grid gap-5 sm:grid-cols-3">
+    <div class="sm:col-span-2">
+      <%= form.label :name, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :name, required: true, autofocus: project.new_record?, autocomplete: "off", class: input_class %>
+    </div>
+    <div>
+      <%= form.label :code, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :code, autocomplete: "off", placeholder: "2417", aria: { describedby: "code_hint" }, class: input_class %>
+      <p id="code_hint" class="mt-1 text-xs text-gray-500">Job number; optional, must be unique.</p>
+    </div>
+  </div>
+
+  <div class="grid gap-5 sm:grid-cols-2">
+    <div>
+      <%= form.label :client, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :client, placeholder: "Prime contractor or GC", class: input_class %>
+    </div>
+    <div>
+      <%= form.label :location, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :location, placeholder: "Golden, CO", class: input_class %>
+    </div>
+  </div>
+
+  <div class="grid gap-5 sm:grid-cols-3">
+    <div>
+      <%= form.label :starts_on, "Starts", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.date_field :starts_on, class: input_class %>
+    </div>
+    <div>
+      <%= form.label :ends_on, "Ends", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.date_field :ends_on, aria: { describedby: "ends_on_hint" }, class: input_class %>
+      <p id="ends_on_hint" class="mt-1 text-xs text-gray-500">Certificates expiring before this show as “lapses on project”.</p>
+    </div>
+    <div>
+      <%= form.label :status, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.select :status, Project.statuses.keys.map { |status| [ status.humanize, status ] }, {}, class: input_class + " bg-white" %>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-3 border-t border-gray-100 pt-5">
+    <%= form.submit project.new_record? ? "Create project" : "Save changes",
+          class: "cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+    <%= link_to "Cancel", project.persisted? ? project_path(project) : projects_path, class: "text-sm text-gray-600 hover:underline" %>
+  </div>
+<% end %>

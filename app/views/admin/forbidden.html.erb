@@ -1,0 +1,17 @@
+<%# Standalone 403 for engines mounted behind AdminController (Mission Control Jobs):
+    their views only know the engine's route helpers, so the app layout can't render. %>
+<!DOCTYPE html>
+<html class="h-full bg-gray-50">
+  <head>
+    <title>Not allowed · CertTrack</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%= stylesheet_link_tag :app %>
+  </head>
+  <body class="h-full text-gray-900">
+    <div class="mx-auto max-w-lg py-16 text-center">
+      <h1 class="text-2xl font-semibold text-gray-900">Not allowed</h1>
+      <p class="mt-2 text-gray-600">Only admins can open this page.</p>
+      <%= link_to "Back to dashboard", main_app.root_path, class: "mt-6 inline-block text-blue-700 hover:underline" %>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,49 @@
+<%# Getting-started checklist for a fresh install.
+    Locals: type_count, timed_type_count (types with a validity period), has_crew, has_projects. %>
+<% steps = [
+  { done: type_count.positive? && timed_type_count.positive?,
+    title: "Review the master list",
+    body: "#{pluralize(type_count, "active certificate type")}, #{timed_type_count} with a validity period. " \
+          "Set how many months each type is valid so expiry dates are filled in for you.",
+    action: ([ "Open master list", certificate_types_path ] if can?(:admin)) },
+  { done: has_crew,
+    title: "Add your crew",
+    body: "Enter each person with their role and employer, then record the certificates they hold.",
+    action: ([ "Add crew member", new_crew_member_path ] if can?(:editor)) },
+  { done: has_projects,
+    title: "Create a project",
+    body: "Tick the certificates it requires (optionally per role) and assign crew. The compliance matrix fills in from there.",
+    action: ([ "New project", new_project_path ] if can?(:editor)) }
+] %>
+
+<section id="getting_started" class="mb-6 rounded-lg border border-blue-200 bg-white p-6 shadow-sm">
+  <h2 class="text-lg font-semibold text-gray-900">Welcome to CertTrack</h2>
+  <p class="mt-1 text-sm text-gray-600">
+    <% if can?(:editor) %>
+      Three steps get you from an empty install to a live compliance view.
+    <% else %>
+      Nothing to show yet. An admin or manager needs to finish these steps first.
+    <% end %>
+  </p>
+
+  <ol class="mt-4 divide-y divide-gray-100">
+    <% steps.each_with_index do |step, index| %>
+      <li class="flex items-start gap-4 py-3">
+        <span class="<%= class_names("flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
+              "bg-green-100 text-green-800": step[:done], "bg-gray-100 text-gray-600": !step[:done]) %>">
+          <%= step[:done] ? "✓" : index + 1 %>
+        </span>
+        <div class="min-w-0 flex-1">
+          <p class="<%= class_names("text-sm font-medium", "text-gray-500 line-through": step[:done], "text-gray-900": !step[:done]) %>">
+            <%= step[:title] %>
+          </p>
+          <p class="text-sm text-gray-500"><%= step[:body] %></p>
+        </div>
+        <% if step[:action] && !step[:done] %>
+          <%= link_to step[:action].first, step[:action].last,
+                class: "shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+        <% end %>
+      </li>
+    <% end %>
+  </ol>
+</section>

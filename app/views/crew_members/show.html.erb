@@ -1,0 +1,195 @@
+<% content_for :title, @crew_member.display_name %>
+<% deletable = @current_certificates.empty? && @superseded_count.zero? && @assignments.empty? %>
+<% secondary_button = "cursor-pointer rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" %>
+
+<%= link_to "← Crew", crew_members_path, class: "text-sm text-blue-700 hover:underline" %>
+
+<div class="mt-2 mb-6 flex flex-wrap items-start justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-semibold">
+      <%= @crew_member.display_name %>
+      <% unless @crew_member.active? %>
+        <span class="ml-2 inline-flex rounded-full bg-gray-100 px-2 py-0.5 align-middle text-xs font-medium text-gray-600">Inactive</span>
+      <% end %>
+    </h1>
+    <p class="mt-1 text-sm text-gray-500">
+      <%= [ @crew_member.crew_role&.name, @crew_member.employer ].compact.join(" · ").presence || "No role or employer set" %>
+    </p>
+  </div>
+
+  <% if can?(:editor) %>
+    <div class="flex flex-wrap items-center gap-2">
+      <%= link_to "Add certificate", new_crew_member_certificate_path(@crew_member),
+            class: "rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+      <%= link_to "Edit", edit_crew_member_path(@crew_member), class: secondary_button %>
+      <% if @crew_member.active? %>
+        <%= button_to "Deactivate", crew_member_path(@crew_member), method: :patch, params: { crew_member: { active: "0" } },
+              class: secondary_button,
+              form: { data: { turbo_confirm: "Deactivate #{@crew_member.display_name}? They drop out of compliance reports and emails; their history is kept." } } %>
+      <% else %>
+        <%= button_to "Reactivate", crew_member_path(@crew_member), method: :patch, params: { crew_member: { active: "1" } },
+              class: secondary_button %>
+      <% end %>
+      <% if deletable %>
+        <%= button_to "Delete", crew_member_path(@crew_member), method: :delete,
+              class: "cursor-pointer rounded-md px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50",
+              form: { data: { turbo_confirm: "Delete #{@crew_member.display_name}? They have no certificates or assignments, so nothing else is lost." } } %>
+      <% end %>
+    </div>
+  <% end %>
+</div>
+
+<section class="mb-8 rounded-lg border border-gray-200 bg-white p-4 shadow-sm" aria-labelledby="details_heading">
+  <h2 id="details_heading" class="sr-only">Details</h2>
+  <dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+    <div>
+      <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">Full name</dt>
+      <dd class="mt-0.5 text-gray-900"><%= @crew_member.full_name %></dd>
+    </div>
+    <div>
+      <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">Preferred name</dt>
+      <dd class="mt-0.5 text-gray-900"><%= @crew_member.preferred_name || tag.span("—", class: "text-gray-400") %></dd>
+    </div>
+    <div>
+      <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">Role</dt>
+      <dd class="mt-0.5 text-gray-900"><%= @crew_member.crew_role&.name || tag.span("—", class: "text-gray-400") %></dd>
+    </div>
+    <div>
+      <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">Employer</dt>
+      <dd class="mt-0.5 text-gray-900"><%= @crew_member.employer || tag.span("—", class: "text-gray-400") %></dd>
+    </div>
+    <div>
+      <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">Contact</dt>
+      <dd class="mt-0.5"><%= crew_member_contact(@crew_member) %></dd>
+    </div>
+    <div>
+      <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">Status</dt>
+      <dd class="mt-0.5 text-gray-900"><%= @crew_member.active? ? "Active" : "Inactive" %></dd>
+    </div>
+    <div>
+      <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">Expiry emails</dt>
+      <dd class="mt-0.5 text-gray-900" id="expiry_emails">
+        <% if @crew_member.expiry_emails_opt_in? %>
+          Yes, 30 and 7 days before
+          <% if @crew_member.email.blank? %>
+            <span class="block text-xs text-amber-700">No email on file, so none are sent.</span>
+          <% end %>
+        <% else %>
+          No
+        <% end %>
+      </dd>
+    </div>
+    <div>
+      <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">Other spellings</dt>
+      <dd class="mt-0.5 text-gray-900" id="name_aliases">
+        <% if @crew_member.name_aliases.any? %>
+          <%= @crew_member.name_aliases.join(", ") %>
+        <% else %>
+          <span class="text-gray-400">—</span>
+        <% end %>
+      </dd>
+    </div>
+    <% if @crew_member.notes.present? %>
+      <div class="sm:col-span-2 lg:col-span-4">
+        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">Notes</dt>
+        <dd class="mt-0.5 whitespace-pre-line text-gray-900"><%= @crew_member.notes %></dd>
+      </div>
+    <% end %>
+  </dl>
+</section>
+
+<section id="certificates" class="mb-8" aria-labelledby="current_certificates_heading">
+  <div class="mb-2 flex items-end justify-between gap-4">
+    <h2 id="current_certificates_heading" class="text-lg font-semibold">Current certificates</h2>
+    <% if @superseded_count.positive? %>
+      <% if @show_history %>
+        <%= link_to "Hide history", crew_member_path(@crew_member, anchor: "certificates"), class: "text-sm text-blue-700 hover:underline" %>
+      <% else %>
+        <%= link_to "Show history (#{@superseded_count} older)", crew_member_path(@crew_member, history: 1, anchor: "history"),
+              class: "text-sm text-blue-700 hover:underline" %>
+      <% end %>
+    <% end %>
+  </div>
+
+  <% if @current_certificates.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-8 text-center">
+      <p class="text-sm font-medium text-gray-900">No certificates on file</p>
+      <% if can?(:editor) %>
+        <p class="mt-1 text-sm text-gray-500"><%= link_to "Add a certificate", new_crew_member_certificate_path(@crew_member), class: "text-blue-700 hover:underline" %> or import scanned cards.</p>
+      <% end %>
+    </div>
+  <% else %>
+    <%= render "certificates_table", certificates: @current_certificates, crew_member: @crew_member, today: @today, superseded: false %>
+  <% end %>
+
+  <% if @show_history %>
+    <div id="history" class="mt-6">
+      <h3 class="mb-2 text-base font-semibold text-gray-700">History</h3>
+      <p class="mb-2 text-sm text-gray-500">Older certificates replaced by a newer one of the same type. They are kept for the record and don't count toward compliance.</p>
+      <% if @superseded_certificates.empty? %>
+        <p class="text-sm text-gray-500">No older certificates.</p>
+      <% else %>
+        <%= render "certificates_table", certificates: @superseded_certificates, crew_member: @crew_member, today: @today, superseded: true %>
+      <% end %>
+    </div>
+  <% end %>
+</section>
+
+<section id="assignments" aria-labelledby="assignments_heading">
+  <h2 id="assignments_heading" class="mb-2 text-lg font-semibold">Projects</h2>
+
+  <% if @assignments.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-8 text-center">
+      <p class="text-sm font-medium text-gray-900">Not assigned to any project</p>
+      <p class="mt-1 text-sm text-gray-500">Assign crew from a project's page.</p>
+    </div>
+  <% else %>
+    <% unless @crew_member.active? %>
+      <p class="mb-2 text-sm text-gray-500">Inactive members aren't checked against project requirements.</p>
+    <% end %>
+    <ul class="space-y-3">
+      <% @assignments.each do |assignment| %>
+        <% project = assignment.project %>
+        <% row = @project_rows[project.id] %>
+        <li id="<%= dom_id(assignment) %>" class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <%= link_to project.display_name, project_path(project), class: "font-medium text-blue-700 hover:underline" %>
+              <span class="ml-1 inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"><%= project.status.humanize %></span>
+            </div>
+            <p class="text-xs text-gray-500">
+              Role on project: <%= assignment.effective_role&.name || "none" %><%= " (project override)" if assignment.crew_role_id %>
+              <% if assignment.starts_on || assignment.ends_on %>
+                · <%= assignment.starts_on ? format_date(assignment.starts_on) : "?" %> – <%= assignment.ends_on ? format_date(assignment.ends_on) : "ongoing" %>
+              <% end %>
+            </p>
+          </div>
+
+          <% if project.closed? %>
+            <p class="mt-2 text-sm text-gray-500">Project closed; compliance is no longer tracked.</p>
+          <% elsif assignment.ends_on&.before?(@today) %>
+            <p class="mt-2 text-sm text-gray-500">Assignment ended; compliance is no longer tracked.</p>
+          <% elsif row %>
+            <% cells = row.required_cells %>
+            <% if cells.empty? %>
+              <p class="mt-2 text-sm text-gray-500">No certificates required for this role.</p>
+            <% else %>
+              <ul class="mt-3 flex flex-wrap gap-2" aria-label="Requirements on <%= project.display_name %>">
+                <% cells.each do |cell| %>
+                  <li class="flex items-center gap-2 rounded-md border border-gray-200 px-2 py-1 text-sm" data-status="<%= cell.status %>">
+                    <% if cell.certificate %>
+                      <%= link_to cell.certificate_type.name, crew_member_certificate_path(@crew_member, cell.certificate), class: "text-gray-900 hover:underline" %>
+                    <% else %>
+                      <span class="text-gray-900"><%= cell.certificate_type.name %></span>
+                    <% end %>
+                    <%= compliance_badge(cell) %>
+                  </li>
+                <% end %>
+              </ul>
+            <% end %>
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</section>

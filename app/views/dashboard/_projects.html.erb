@@ -1,0 +1,62 @@
+<%# Active projects with compliance counts. Locals: reports (Array<Compliance::ProjectReport>). %>
+<% columns = [
+  [ "expired", "Expired", "text-red-700" ],
+  [ "missing", "Missing", "text-red-700" ],
+  [ "expiring", "Expiring", "text-amber-700" ],
+  [ "lapses_on_project", "Lapses", "text-orange-700" ],
+  [ "valid", "Valid", "text-green-700" ]
+] %>
+
+<section id="active_projects">
+  <div class="mb-2 flex items-end justify-between gap-4">
+    <h2 class="text-lg font-semibold text-gray-900">Active projects</h2>
+    <%= link_to "All projects", projects_path, class: "text-sm text-blue-700 hover:underline" %>
+  </div>
+
+  <% if reports.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center">
+      <p class="text-sm font-medium text-gray-900">No active projects</p>
+      <p class="mt-1 text-sm text-gray-500">Planned and closed projects aren't counted on the dashboard. Set a project's status to active to track it here.</p>
+    </div>
+  <% else %>
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+      <table class="min-w-full divide-y divide-gray-200 text-sm">
+        <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <tr>
+            <th scope="col" class="px-4 py-2">Project</th>
+            <th scope="col" class="px-4 py-2">Client</th>
+            <th scope="col" class="px-4 py-2">Ends</th>
+            <th scope="col" class="px-4 py-2 text-right">Crew</th>
+            <% columns.each do |_status, label, _color| %>
+              <th scope="col" class="px-4 py-2 text-right"><%= label %></th>
+            <% end %>
+            <th scope="col" class="px-4 py-2"><span class="sr-only">Matrix</span></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          <% reports.each do |report| %>
+            <% project = report.project %>
+            <% summary = report.summary %>
+            <tr id="<%= dom_id(project, :dashboard) %>" class="hover:bg-gray-50">
+              <td class="whitespace-nowrap px-4 py-2">
+                <%= link_to project.display_name, project_path(project), class: "font-medium text-blue-700 hover:underline" %>
+              </td>
+              <td class="whitespace-nowrap px-4 py-2 text-gray-700"><%= project.client.presence || "—" %></td>
+              <td class="whitespace-nowrap px-4 py-2 tabular-nums text-gray-700"><%= format_date(project.ends_on) %></td>
+              <td class="whitespace-nowrap px-4 py-2 text-right tabular-nums text-gray-700"><%= report.rows.size %></td>
+              <% columns.each do |status, _label, color| %>
+                <% count = summary.fetch(status, 0) %>
+                <td class="<%= class_names("whitespace-nowrap px-4 py-2 text-right tabular-nums", color => count.positive?,
+                      "font-semibold": count.positive? && status != "valid", "text-gray-300": count.zero?) %>"
+                    data-status="<%= status %>"><%= count %></td>
+              <% end %>
+              <td class="whitespace-nowrap px-4 py-2 text-right">
+                <%= link_to "Matrix", project_compliance_path(project), class: "text-blue-700 hover:underline" %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</section>

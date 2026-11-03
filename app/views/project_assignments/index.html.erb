@@ -1,0 +1,163 @@
+<% content_for :title, "Crew · #{@project.display_name}" %>
+<% input_class = "block w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+<% editor = can?(:editor) %>
+
+<%= link_to "← #{@project.display_name}", project_path(@project), class: "text-sm text-blue-700 hover:underline" %>
+<div class="mt-2 mb-6 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-semibold">Assigned crew <span class="text-base font-normal text-gray-500">(<%= @assignments.size %>)</span></h1>
+    <p class="mt-1 text-sm text-gray-500">
+      A person's required certificates follow their role on this project; leave the role blank to use their own role.
+    </p>
+  </div>
+  <%= link_to "Compliance matrix", project_compliance_path(@project), class: "text-sm text-blue-700 hover:underline" %>
+</div>
+
+<% if editor %>
+  <section class="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm" aria-labelledby="add_heading">
+    <h2 id="add_heading" class="text-sm font-semibold text-gray-900">Add a crew member</h2>
+
+    <% if @new_assignment.errors.any? %>
+      <div class="mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" id="error_explanation">
+        <p class="font-medium"><%= pluralize(@new_assignment.errors.count, "problem") %> to fix:</p>
+        <ul class="mt-1 list-disc space-y-1 pl-5">
+          <% @new_assignment.errors.full_messages.each do |message| %>
+            <li><%= message %></li>
+          <% end %>
+        </ul>
+      </div>
+    <% end %>
+
+    <% if @available_members.empty? %>
+      <p class="mt-2 text-sm text-gray-500">
+        Every active crew member is already on this project.
+        <%= link_to "Add a crew member", new_crew_member_path, class: "text-blue-700 hover:underline" %> to the roster first.
+      </p>
+    <% else %>
+      <%= form_with model: @new_assignment, url: project_assignments_path(@project),
+            class: "mt-3 grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-6",
+            data: { controller: "assignment-role", action: "change->assignment-role#update" } do |form| %>
+        <div class="lg:col-span-2">
+          <%= form.label :crew_member_id, "Crew member", class: "block text-xs font-medium text-gray-700" %>
+          <%= form.select :crew_member_id,
+                @available_members.map { |member|
+                  [ [ member.sort_name, member.crew_role&.name, member.employer ].compact.join(" · "), member.id,
+                    { data: { role: member.crew_role&.name } } ]
+                },
+                { prompt: "Choose…" },
+                required: true, class: "mt-1 #{input_class}", data: { assignment_role_target: "member" } %>
+        </div>
+        <div>
+          <%= form.label :crew_role_id, "Role on project", class: "block text-xs font-medium text-gray-700" %>
+          <%= form.select :crew_role_id, @crew_roles.map { |role| [ role.name, role.id ] },
+                { include_blank: "Member's role" },
+                class: "mt-1 #{input_class}", aria: { describedby: "new_role_hint" }, data: { assignment_role_target: "role" } %>
+        </div>
+        <div>
+          <%= form.label :starts_on, "Starts", class: "block text-xs font-medium text-gray-700" %>
+          <%= form.date_field :starts_on, class: "mt-1 #{input_class}" %>
+        </div>
+        <div>
+          <%= form.label :ends_on, "Ends", class: "block text-xs font-medium text-gray-700" %>
+          <%= form.date_field :ends_on, class: "mt-1 #{input_class}" %>
+        </div>
+        <div>
+          <%= form.submit "Assign", class: "w-full cursor-pointer rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+        </div>
+        <p id="new_role_hint" class="text-xs text-gray-500 sm:col-span-2 lg:col-span-6">
+          Requirements will follow: <strong class="font-medium text-gray-700" data-assignment-role-target="hint">the member's role</strong>
+        </p>
+      <% end %>
+    <% end %>
+  </section>
+<% end %>
+
+<% if @assignments.empty? %>
+  <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
+    <p class="text-sm font-medium text-gray-900">No crew assigned yet</p>
+    <p class="mt-1 text-sm text-gray-500">
+      <%= editor ? "Add crew members above to check their certificates against this project." : "An admin or manager can assign crew." %>
+    </p>
+  </div>
+<% else %>
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <tr>
+          <th scope="col" class="px-4 py-2">Name</th>
+          <th scope="col" class="px-4 py-2">Role on project</th>
+          <th scope="col" class="px-4 py-2" title="Certificate types this person must hold here">Requires</th>
+          <th scope="col" class="px-4 py-2">Starts</th>
+          <th scope="col" class="px-4 py-2">Ends</th>
+          <% if editor %><th scope="col" class="px-4 py-2"><span class="sr-only">Actions</span></th><% end %>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        <% @assignments.each do |assignment| %>
+          <% member = assignment.crew_member %>
+          <% form_id = dom_id(assignment, :form) %>
+          <% required_codes = @project.requirements_for(assignment.effective_role_id).map { |requirement| requirement.certificate_type.code }.uniq.sort %>
+          <tr id="<%= dom_id(assignment) %>" class="<%= class_names("align-top hover:bg-gray-50", "bg-red-50": assignment.errors.any?) %>">
+            <td class="whitespace-nowrap px-4 py-2 font-medium">
+              <%= link_to member.sort_name, crew_member_path(member), class: "text-blue-700 hover:underline" %>
+              <% unless member.active? %><span class="ml-1 rounded bg-gray-100 px-1.5 text-xs font-normal text-gray-500">Inactive</span><% end %>
+              <span class="block text-xs font-normal text-gray-500"><%= member.employer %></span>
+            </td>
+            <td class="whitespace-nowrap px-4 py-2">
+              <% if editor %>
+                <%= label_tag "#{form_id}_crew_role_id", "Role on project for #{member.display_name}", class: "sr-only" %>
+                <%= select_tag "project_assignment[crew_role_id]",
+                      options_from_collection_for_select(@crew_roles, :id, :name, assignment.crew_role_id),
+                      include_blank: "Member's role#{" (#{member.crew_role.name})" if member.crew_role}",
+                      id: "#{form_id}_crew_role_id", form: form_id, class: "#{input_class} w-48" %>
+              <% end %>
+              <span class="<%= "mt-1 block text-xs" if editor %>"><%= render "project_assignments/effective_role", assignment: assignment %></span>
+            </td>
+            <td class="px-4 py-2">
+              <% if required_codes.any? %>
+                <span class="font-mono text-xs text-gray-700"><%= required_codes.join(", ") %></span>
+              <% else %>
+                <span class="text-xs text-gray-400">Nothing</span>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-4 py-2">
+              <% if editor %>
+                <%= label_tag "#{form_id}_starts_on", "Starts", class: "sr-only" %>
+                <%= date_field_tag "project_assignment[starts_on]", assignment.starts_on, id: "#{form_id}_starts_on", form: form_id, class: "#{input_class} w-40" %>
+              <% else %>
+                <%= assignment.starts_on ? format_date(assignment.starts_on) : "—" %>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-4 py-2">
+              <% if editor %>
+                <%= label_tag "#{form_id}_ends_on", "Ends", class: "sr-only" %>
+                <%= date_field_tag "project_assignment[ends_on]", assignment.ends_on, id: "#{form_id}_ends_on", form: form_id, class: "#{input_class} w-40" %>
+              <% else %>
+                <%= assignment.ends_on ? format_date(assignment.ends_on) : "—" %>
+              <% end %>
+            </td>
+            <% if editor %>
+              <td class="whitespace-nowrap px-4 py-2">
+                <div class="flex items-center justify-end gap-3">
+                  <%= form_with model: assignment, url: project_assignment_path(@project, assignment), id: form_id do |form| %>
+                    <%= form.submit "Save", class: "cursor-pointer rounded-md border border-gray-300 bg-white px-2.5 py-1 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" %>
+                  <% end %>
+                  <%= button_to "Remove", project_assignment_path(@project, assignment), method: :delete,
+                        class: "cursor-pointer text-sm text-red-700 hover:underline",
+                        form: { data: { turbo_confirm: "Remove #{member.display_name} from #{@project.display_name}?" } } %>
+                </div>
+              </td>
+            <% end %>
+          </tr>
+          <% if assignment.errors.any? %>
+            <tr class="bg-red-50">
+              <td colspan="6" class="px-4 pb-3 text-sm text-red-800" role="alert">
+                <%= member.display_name %>: <%= assignment.errors.full_messages.to_sentence %>
+              </td>
+            </tr>
+          <% end %>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+<% end %>

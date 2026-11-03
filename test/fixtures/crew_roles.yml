@@ -1,0 +1,13 @@
+# Crew roles. Members: maria_garcia foreman, li_chen + dave_miller operator,
+# sam_inactive laborer, juan_ortiz climber.
+foreman:
+  name: Foreman
+
+operator:
+  name: Operator
+
+laborer:
+  name: Laborer
+
+climber:
+  name: Climber

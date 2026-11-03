@@ -1,0 +1,15 @@
+<% content_for :title, "Add certificate · #{@crew_member.display_name}" %>
+
+<%= link_to "← #{@crew_member.display_name}", crew_member_path(@crew_member), class: "text-sm text-blue-700 hover:underline" %>
+
+<div class="mt-2 max-w-3xl">
+  <h1 class="text-2xl font-semibold">Add certificate</h1>
+  <p class="mt-1 text-sm text-gray-500">
+    For <%= @crew_member.display_name %><%= " (#{@crew_member.crew_role.name})" if @crew_member.crew_role %>.
+    A newer certificate of the same type replaces the current one; the old one is kept as history.
+  </p>
+
+  <div class="mt-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+    <%= render "form", certificate: @certificate, crew_member: @crew_member %>
+  </div>
+</div>

@@ -1,0 +1,20 @@
+<% today = Date.current %>
+# tower_2417  active, ends 120 days out (so certs expiring 31..119 days out lapse on it)
+# closed_2390 closed last year
+tower_2417:
+  name: Tower 2417 Upgrade
+  code: "2417"
+  client: Prime Wireless
+  location: Golden, CO
+  starts_on: <%= today - 30 %>
+  ends_on: <%= today + 120 %>
+  status: active
+
+closed_2390:
+  name: Rooftop 2390
+  code: "2390"
+  client: Metro Towers
+  location: Denver, CO
+  starts_on: <%= today - 400 %>
+  ends_on: <%= today - 200 %>
+  status: closed

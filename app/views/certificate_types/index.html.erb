@@ -1,0 +1,146 @@
+<% content_for :title, "Master list" %>
+<%# List buttons redirect back to this exact URL, so Turbo morphs the table and keeps the scroll position. %>
+<% turbo_refreshes_with method: :morph, scroll: :preserve %>
+<% admin = can?(:admin) %>
+
+<div class="mb-4 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-semibold">Master list</h1>
+    <p class="mt-1 max-w-3xl text-sm text-gray-500">
+      Every certificate type the company tracks. Projects choose their required types from this list,
+      and imports use the aliases to recognise the names printed on real cards.
+    </p>
+  </div>
+  <% if admin %>
+    <%= link_to "New certificate type", new_certificate_type_path, class: "rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+  <% end %>
+</div>
+
+<% active_count = @counts_by_active.fetch(true, 0) %>
+<% inactive_count = @counts_by_active.fetch(false, 0) %>
+<nav class="mb-4 flex gap-1 text-sm" aria-label="Filter by status">
+  <% [ [ nil, "Active", active_count ], [ "inactive", "Inactive", inactive_count ], [ "all", "All", active_count + inactive_count ] ].each do |status, label, count| %>
+    <%= link_to certificate_types_path(status: status), aria: { current: ("page" if @status == status) },
+          class: class_names("rounded-md px-3 py-1.5 font-medium", @status == status ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-200") do %>
+      <%= label %> <span class="ml-0.5 tabular-nums opacity-70"><%= count %></span>
+    <% end %>
+  <% end %>
+</nav>
+
+<% if @certificate_types.empty? %>
+  <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
+    <% if active_count + inactive_count == 0 %>
+      <p class="text-sm font-medium text-gray-900">No certificate types yet</p>
+      <p class="mt-1 text-sm text-gray-500">
+        <% if admin %>
+          Add the first one: <%= link_to "new certificate type", new_certificate_type_path, class: "text-blue-700 hover:underline" %>.
+        <% else %>
+          An admin adds types to the master list.
+        <% end %>
+      </p>
+    <% else %>
+      <p class="text-sm font-medium text-gray-900">No <%= @status == "inactive" ? "inactive" : "active" %> certificate types</p>
+      <p class="mt-1 text-sm text-gray-500"><%= link_to "Show all types", certificate_types_path(status: "all"), class: "text-blue-700 hover:underline" %></p>
+    <% end %>
+  </div>
+<% else %>
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <tr>
+          <% if admin %><th scope="col" class="px-3 py-2" title="Position: lower numbers come first">Order</th><% end %>
+          <th scope="col" class="px-3 py-2">Code</th>
+          <th scope="col" class="px-3 py-2">Name</th>
+          <th scope="col" class="px-3 py-2">Issuing body</th>
+          <th scope="col" class="px-3 py-2">Validity</th>
+          <th scope="col" class="px-3 py-2">Aliases</th>
+          <th scope="col" class="px-3 py-2">Status</th>
+          <th scope="col" class="px-3 py-2 text-right" title="Current certificates of this type (superseded history not counted)">Current certs</th>
+          <th scope="col" class="px-3 py-2 text-right" title="Projects (any status) that require this type">Projects</th>
+          <% if admin %><th scope="col" class="px-3 py-2"><span class="sr-only">Actions</span></th><% end %>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        <% last_index = @certificate_types.size - 1 %>
+        <% @certificate_types.each_with_index do |type, index| %>
+          <% usage = @usage.fetch(type.id) %>
+          <tr id="<%= dom_id(type) %>" class="<%= class_names("align-top hover:bg-gray-50", "bg-gray-50 text-gray-400": !type.active?) %>">
+            <% if admin %>
+              <td class="whitespace-nowrap px-3 py-2">
+                <div class="flex items-center gap-1">
+                  <span class="w-6 text-right text-xs tabular-nums text-gray-400"><%= type.position || "–" %></span>
+                  <%= button_to "↑", move_certificate_type_path(type), method: :patch, params: { direction: "up", status: @status },
+                        disabled: index.zero?, aria: { label: "Move #{type.name} up" }, title: "Move up",
+                        class: "cursor-pointer rounded px-1.5 text-gray-500 hover:bg-gray-200 hover:text-gray-900 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent" %>
+                  <%= button_to "↓", move_certificate_type_path(type), method: :patch, params: { direction: "down", status: @status },
+                        disabled: index == last_index, aria: { label: "Move #{type.name} down" }, title: "Move down",
+                        class: "cursor-pointer rounded px-1.5 text-gray-500 hover:bg-gray-200 hover:text-gray-900 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent" %>
+                </div>
+              </td>
+            <% end %>
+            <td class="<%= class_names("whitespace-nowrap px-3 py-2 font-mono text-xs font-semibold", type.active? ? "text-gray-900" : "text-gray-400") %>" data-column="code"><%= type.code %></td>
+            <td class="px-3 py-2" data-column="name">
+              <span class="<%= class_names("font-medium", type.active? ? "text-gray-900" : "text-gray-400") %>"><%= type.name %></span>
+              <% if type.description.present? %>
+                <p class="mt-0.5 line-clamp-2 max-w-sm text-xs text-gray-500" title="<%= type.description %>"><%= type.description %></p>
+              <% end %>
+            </td>
+            <td class="px-3 py-2" data-column="issuing-body"><%= type.issuing_body.presence || tag.span("—", class: "text-gray-400") %></td>
+            <td class="whitespace-nowrap px-3 py-2" data-column="validity">
+              <span class="<%= class_names("text-gray-500": type.never_expires?) %>"><%= certificate_type_validity(type) %></span>
+            </td>
+            <td class="px-3 py-2" data-column="aliases">
+              <% if type.aliases.any? %>
+                <ul class="space-y-0.5 text-xs text-gray-600" title="<%= type.aliases.join("\n") %>">
+                  <% type.aliases.first(2).each do |name| %>
+                    <li class="max-w-xs truncate"><%= name %></li>
+                  <% end %>
+                  <% if type.aliases.size > 2 %>
+                    <li class="text-gray-400">+<%= type.aliases.size - 2 %> more</li>
+                  <% end %>
+                </ul>
+              <% else %>
+                <span class="text-gray-400">—</span>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2" data-column="status">
+              <% if type.active? %>
+                <span class="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">Active</span>
+              <% else %>
+                <span class="inline-flex rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">Inactive</span>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums" data-column="current-certificates"
+                title="<%= pluralize(usage.certificates, "certificate") %> including history"><%= usage.current_certificates %></td>
+            <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums" data-column="projects"><%= usage.projects %></td>
+            <% if admin %>
+              <td class="whitespace-nowrap px-3 py-2">
+                <div class="flex items-center justify-end gap-3">
+                  <%= link_to "Edit", edit_certificate_type_path(type), class: "text-blue-700 hover:underline" %>
+                  <% if type.active? %>
+                    <%= button_to "Deactivate", certificate_type_path(type), method: :patch,
+                          params: { certificate_type: { active: false }, status: @status },
+                          class: "cursor-pointer text-gray-600 hover:underline",
+                          form: { data: { turbo_confirm: "Deactivate #{type.name}? Existing certificates and project requirements keep it." } } %>
+                  <% else %>
+                    <%= button_to "Reactivate", certificate_type_path(type), method: :patch,
+                          params: { certificate_type: { active: true }, status: @status },
+                          class: "cursor-pointer text-blue-700 hover:underline" %>
+                  <% end %>
+                  <% unless usage.in_use? %>
+                    <%= button_to "Delete", certificate_type_path(type), method: :delete, params: { status: @status },
+                          class: "cursor-pointer text-red-700 hover:underline",
+                          form: { data: { turbo_confirm: "Delete #{type.name}? Nothing uses it yet." } } %>
+                  <% end %>
+                </div>
+              </td>
+            <% end %>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-2 text-xs text-gray-500">
+    Types in use (certificates, project requirements or import matches) can't be deleted; deactivate them instead.
+  </p>
+<% end %>

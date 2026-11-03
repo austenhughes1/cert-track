@@ -1,0 +1,15 @@
+<%# locals: (summary:, empty_text: "No required certificates") %>
+<%# summary: Compliance::ProjectReport#summary. Shows non-zero counts, most severe first. %>
+<% statuses = Compliance::SEVERITY.select { |status| summary.fetch(status, 0).positive? } %>
+<% if statuses.empty? %>
+  <span class="text-xs text-gray-400"><%= empty_text %></span>
+<% else %>
+  <span class="inline-flex flex-wrap gap-1">
+    <% statuses.each do |status| %>
+      <span class="<%= class_names(ComplianceHelper::BADGE_BASE, compliance_status_classes(status)) %>"
+            title="<%= status_label(status) %>" data-status="<%= status %>">
+        <%= summary[status] %> <%= status_label(status).downcase %>
+      </span>
+    <% end %>
+  </span>
+<% end %>

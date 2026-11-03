@@ -1,0 +1,33 @@
+<% today = Date.current %>
+# tower_2417: juan (climber via member role), maria (foreman), li_chen (role override:
+# climber on this project although his member role is operator), dave (operator).
+# closed_2390: juan and sam_inactive.
+tower_juan:
+  project: tower_2417
+  crew_member: juan_ortiz
+  starts_on: <%= today - 30 %>
+
+tower_maria:
+  project: tower_2417
+  crew_member: maria_garcia
+  starts_on: <%= today - 30 %>
+
+tower_li_chen:
+  project: tower_2417
+  crew_member: li_chen
+  crew_role: climber
+  starts_on: <%= today - 10 %>
+
+tower_dave:
+  project: tower_2417
+  crew_member: dave_miller
+
+closed_juan:
+  project: closed_2390
+  crew_member: juan_ortiz
+  starts_on: <%= today - 400 %>
+  ends_on: <%= today - 200 %>
+
+closed_sam:
+  project: closed_2390
+  crew_member: sam_inactive

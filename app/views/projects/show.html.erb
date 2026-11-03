@@ -1,0 +1,208 @@
+<% content_for :title, @project.display_name %>
+<% secondary_button = "rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" %>
+<% deletable = @assignments.empty? && @requirements_by_type.empty? %>
+
+<%= link_to "← Projects", projects_path, class: "text-sm text-blue-700 hover:underline" %>
+
+<div class="mt-2 mb-6 flex flex-wrap items-start justify-between gap-4">
+  <div>
+    <div class="flex items-center gap-3">
+      <h1 class="text-2xl font-semibold"><%= @project.display_name %></h1>
+      <%= render "projects/status_badge", project: @project %>
+    </div>
+    <p class="mt-1 text-sm text-gray-500">
+      <%= [ @project.client, @project.location ].compact.join(" · ").presence || "No client or location" %>
+      ·
+      <%= render "projects/dates", starts_on: @project.starts_on, ends_on: @project.ends_on %>
+    </p>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2">
+    <%= link_to "Compliance matrix", project_compliance_path(@project),
+          class: "rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+    <%= link_to "Packet", project_packet_path(@project), class: secondary_button %>
+    <% if can?(:editor) %>
+      <%= link_to "Edit requirements", edit_project_requirements_path(@project), class: secondary_button %>
+      <%= link_to "Manage assignments", project_assignments_path(@project), class: secondary_button %>
+      <%= link_to "Edit project", edit_project_path(@project), class: secondary_button %>
+      <% unless @project.closed? %>
+        <%= button_to "Close project", project_path(@project), method: :patch, params: { project: { status: "closed" } },
+              class: "cursor-pointer #{secondary_button}",
+              form: { data: { turbo_confirm: "Close #{@project.display_name}? It leaves the dashboard and active lists; its history is kept." } } %>
+      <% end %>
+      <% if deletable %>
+        <%= button_to "Delete", project_path(@project), method: :delete,
+              class: "cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50",
+              form: { data: { turbo_confirm: "Delete #{@project.display_name}? This can't be undone." } } %>
+      <% end %>
+    <% else %>
+      <%= link_to "Crew list", project_assignments_path(@project), class: secondary_button %>
+    <% end %>
+  </div>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-3">
+  <section class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:col-span-2" aria-labelledby="compliance_heading">
+    <div class="flex items-center justify-between">
+      <h2 id="compliance_heading" class="text-sm font-semibold text-gray-900">Compliance today</h2>
+      <% if @report.gaps.any? %>
+        <%= link_to pluralize(@report.gaps.size, "gap"), project_compliance_path(@project), class: "text-sm font-medium text-red-700 hover:underline" %>
+      <% elsif @report.rows.any? && @report.columns.any? %>
+        <span class="text-sm font-medium text-green-700">No gaps</span>
+      <% end %>
+    </div>
+    <div class="mt-2">
+      <%= render "projects/compliance_counts", summary: @report.summary,
+            empty_text: @report.columns.empty? ? "Nothing to check until requirements are set." : "Nothing to check until active crew are assigned." %>
+    </div>
+    <% if @report.gaps.any? %>
+      <% shown_gaps = @report.gaps.first(8) %>
+      <ul class="mt-3 divide-y divide-gray-100 border-t border-gray-100 text-sm" aria-label="Missing and expired certificates">
+        <% shown_gaps.each do |gap| %>
+          <li class="flex items-center justify-between gap-3 py-1.5">
+            <span>
+              <%= link_to gap.crew_member.sort_name, crew_member_path(gap.crew_member), class: "font-medium text-blue-700 hover:underline" %>
+              <span class="text-gray-500">· <%= gap.certificate_type.name %></span>
+            </span>
+            <%= compliance_badge(gap.status, gap.certificate&.expires_on) %>
+          </li>
+        <% end %>
+      </ul>
+      <% if @report.gaps.size > shown_gaps.size %>
+        <p class="mt-1 text-xs text-gray-500">
+          and <%= @report.gaps.size - shown_gaps.size %> more in the <%= link_to "compliance matrix", project_compliance_path(@project), class: "text-blue-700 hover:underline" %>.
+        </p>
+      <% end %>
+    <% end %>
+  </section>
+
+  <section class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" aria-labelledby="details_heading">
+    <h2 id="details_heading" class="text-sm font-semibold text-gray-900">Details</h2>
+    <dl class="mt-2 grid grid-cols-3 gap-x-3 gap-y-1 text-sm">
+      <dt class="text-gray-500">Code</dt><dd class="col-span-2"><%= @project.code || "—" %></dd>
+      <dt class="text-gray-500">Client</dt><dd class="col-span-2"><%= @project.client || "—" %></dd>
+      <dt class="text-gray-500">Location</dt><dd class="col-span-2"><%= @project.location || "—" %></dd>
+      <dt class="text-gray-500">Starts</dt><dd class="col-span-2"><%= @project.starts_on ? format_date(@project.starts_on) : "—" %></dd>
+      <dt class="text-gray-500">Ends</dt><dd class="col-span-2"><%= @project.ends_on ? format_date(@project.ends_on) : "—" %></dd>
+      <dt class="text-gray-500">Packet</dt>
+      <dd class="col-span-2"><%= @project.packet_built_at ? "Built #{format_date(@project.packet_built_at.to_date)}" : "Not built yet" %></dd>
+    </dl>
+  </section>
+</div>
+
+<section class="mt-6" aria-labelledby="requirements_heading">
+  <div class="mb-2 flex items-center justify-between">
+    <h2 id="requirements_heading" class="text-lg font-semibold">Required certificates</h2>
+    <% if can?(:editor) && @requirements_by_type.any? %>
+      <%= link_to "Edit requirements", edit_project_requirements_path(@project), class: "text-sm text-blue-700 hover:underline" %>
+    <% end %>
+  </div>
+
+  <% if @requirements_by_type.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-8 text-center">
+      <p class="text-sm font-medium text-gray-900">No required certificates yet</p>
+      <% if can?(:editor) %>
+        <p class="mt-1 text-sm text-gray-500">
+          <%= link_to "Choose them from the master list", edit_project_requirements_path(@project), class: "text-blue-700 hover:underline" %>
+          or copy them from another project.
+        </p>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+      <table class="min-w-full divide-y divide-gray-200 text-sm">
+        <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <tr>
+            <th scope="col" class="px-4 py-2">Certificate</th>
+            <th scope="col" class="px-4 py-2">Code</th>
+            <th scope="col" class="px-4 py-2">Required of</th>
+            <th scope="col" class="px-4 py-2">Notes</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          <% @requirements_by_type.each do |type, requirements| %>
+            <tr id="<%= dom_id(type, :requirement) %>">
+              <td class="px-4 py-2 font-medium text-gray-900">
+                <%= type.name %>
+                <% unless type.active? %><span class="ml-1 rounded bg-gray-100 px-1.5 text-xs font-normal text-gray-500">Retired</span><% end %>
+              </td>
+              <td class="whitespace-nowrap px-4 py-2 font-mono text-xs text-gray-600"><%= type.code %></td>
+              <td class="px-4 py-2">
+                <span class="inline-flex flex-wrap gap-1">
+                  <% requirements.sort_by { |requirement| requirement.crew_role&.name.to_s }.each do |requirement| %>
+                    <span class="<%= class_names("rounded-full px-2 py-0.5 text-xs font-medium",
+                          "bg-blue-100 text-blue-800": requirement.everyone?,
+                          "bg-violet-100 text-violet-800": !requirement.everyone?) %>">
+                      <%= requirement.everyone? ? "Everyone" : "#{requirement.crew_role.name} only" %>
+                    </span>
+                  <% end %>
+                </span>
+              </td>
+              <td class="px-4 py-2 text-gray-600"><%= requirements.filter_map(&:notes).join(" ").presence || "—" %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</section>
+
+<section class="mt-6" aria-labelledby="crew_heading">
+  <div class="mb-2 flex items-center justify-between">
+    <h2 id="crew_heading" class="text-lg font-semibold">Assigned crew <span class="text-sm font-normal text-gray-500">(<%= @assignments.size %>)</span></h2>
+    <% if can?(:editor) && @assignments.any? %>
+      <%= link_to "Manage assignments", project_assignments_path(@project), class: "text-sm text-blue-700 hover:underline" %>
+    <% end %>
+  </div>
+
+  <% if @assignments.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-8 text-center">
+      <p class="text-sm font-medium text-gray-900">No crew assigned yet</p>
+      <% if can?(:editor) %>
+        <p class="mt-1 text-sm text-gray-500"><%= link_to "Assign crew members", project_assignments_path(@project), class: "text-blue-700 hover:underline" %> to check their certificates.</p>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+      <table class="min-w-full divide-y divide-gray-200 text-sm">
+        <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <tr>
+            <th scope="col" class="px-4 py-2">Name</th>
+            <th scope="col" class="px-4 py-2">Role on project</th>
+            <th scope="col" class="px-4 py-2">Employer</th>
+            <th scope="col" class="px-4 py-2">On project</th>
+            <th scope="col" class="px-4 py-2">Compliance</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          <% @assignments.each do |assignment| %>
+            <% member = assignment.crew_member %>
+            <% row = @report.row_for(member) %>
+            <tr id="<%= dom_id(assignment) %>" class="<%= class_names("hover:bg-gray-50", "text-gray-400": !member.active?) %>">
+              <td class="whitespace-nowrap px-4 py-2 font-medium">
+                <%= link_to member.sort_name, crew_member_path(member), class: "text-blue-700 hover:underline" %>
+                <% unless member.active? %><span class="ml-1 rounded bg-gray-100 px-1.5 text-xs font-normal text-gray-500">Inactive</span><% end %>
+              </td>
+              <td class="whitespace-nowrap px-4 py-2">
+                <%= render "project_assignments/effective_role", assignment: assignment %>
+              </td>
+              <td class="whitespace-nowrap px-4 py-2 text-gray-700"><%= member.employer || "—" %></td>
+              <td class="whitespace-nowrap px-4 py-2 text-gray-700">
+                <%= render "projects/dates", starts_on: assignment.starts_on, ends_on: assignment.ends_on %>
+              </td>
+              <td class="whitespace-nowrap px-4 py-2">
+                <% if row.nil? %>
+                  <span class="text-xs text-gray-400">Not checked (inactive)</span>
+                <% elsif (status = row.worst_status) %>
+                  <%= compliance_badge(status) %>
+                <% else %>
+                  <span class="text-xs text-gray-400">Nothing required</span>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</section>

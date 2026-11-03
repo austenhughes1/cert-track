@@ -1,0 +1,10 @@
+# One batch by the manager: two copies of scan_0001.pdf -> 3 items
+# (1 accepted, 1 needs review, 1 duplicate).
+march_batch:
+  uploaded_by: manager
+  status: needs_review
+  files_count: 2
+  items_count: 3
+  accepted_count: 1
+  review_count: 1
+  error_count: 0

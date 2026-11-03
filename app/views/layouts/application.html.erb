@@ -26,7 +26,8 @@
     <% end %>
 
     <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <%= render "layouts/flash" %>
+      <%# Pages that place the flash themselves (sign-in card) set content_for :inline_flash. %>
+      <%= render "layouts/flash" unless content_for?(:inline_flash) %>
       <%= yield %>
     </main>
   </body>

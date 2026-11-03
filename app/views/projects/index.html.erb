@@ -1,0 +1,81 @@
+<% content_for :title, "Projects" %>
+
+<div class="mb-4 flex items-end justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-semibold">Projects</h1>
+    <p class="mt-1 text-sm text-gray-500">Each project picks its required certificates from the master list and tracks its assigned crew.</p>
+  </div>
+  <% if can?(:editor) %>
+    <%= link_to "New project", new_project_path, class: "rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+  <% end %>
+</div>
+
+<nav class="mb-4 flex flex-wrap gap-1 border-b border-gray-200 text-sm" aria-label="Filter by status">
+  <% ProjectsController::STATUS_FILTERS.each do |filter, statuses| %>
+    <% count = statuses.sum { |status| @status_counts.fetch(status, 0) } %>
+    <%= link_to projects_path(status: (filter unless filter == "open")),
+          aria: { current: (filter == @status_filter ? "page" : nil) },
+          class: class_names("-mb-px border-b-2 px-3 py-2 font-medium",
+            "border-blue-600 text-blue-700": filter == @status_filter,
+            "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700": filter != @status_filter) do %>
+      <%= filter == "open" ? "Planned + active" : filter.humanize %>
+      <span class="ml-1 rounded-full bg-gray-100 px-1.5 text-xs text-gray-600"><%= count %></span>
+    <% end %>
+  <% end %>
+</nav>
+
+<% if @projects.empty? %>
+  <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
+    <p class="text-sm font-medium text-gray-900">No <%= @status_filter == "open" ? "planned or active" : @status_filter unless @status_filter == "all" %> projects</p>
+    <p class="mt-1 text-sm text-gray-500">
+      <% if can?(:editor) %>
+        <%= link_to "Create a project", new_project_path, class: "text-blue-700 hover:underline" %> to start tracking its crew.
+      <% else %>
+        An admin or manager can create one.
+      <% end %>
+    </p>
+  </div>
+<% else %>
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <tr>
+          <th scope="col" class="px-4 py-2">Project</th>
+          <th scope="col" class="px-4 py-2">Client</th>
+          <th scope="col" class="px-4 py-2">Location</th>
+          <th scope="col" class="px-4 py-2">Dates</th>
+          <th scope="col" class="px-4 py-2">Status</th>
+          <th scope="col" class="px-4 py-2 text-right" title="Active crew members assigned">Crew</th>
+          <th scope="col" class="px-4 py-2 text-right" title="Certificate types required of at least one role">Types</th>
+          <th scope="col" class="px-4 py-2">Compliance</th>
+          <th scope="col" class="px-4 py-2"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        <% @projects.each do |project| %>
+          <% report = @reports.fetch(project.id) %>
+          <tr id="<%= dom_id(project) %>" class="hover:bg-gray-50">
+            <td class="px-4 py-2 font-medium text-gray-900">
+              <%= link_to project.display_name, project, class: "text-blue-700 hover:underline" %>
+            </td>
+            <td class="whitespace-nowrap px-4 py-2 text-gray-700"><%= project.client || "—" %></td>
+            <td class="whitespace-nowrap px-4 py-2 text-gray-700"><%= project.location || "—" %></td>
+            <td class="whitespace-nowrap px-4 py-2 text-gray-700">
+              <%= render "projects/dates", starts_on: project.starts_on, ends_on: project.ends_on %>
+            </td>
+            <td class="whitespace-nowrap px-4 py-2"><%= render "projects/status_badge", project: project %></td>
+            <td class="whitespace-nowrap px-4 py-2 text-right tabular-nums"><%= report.rows.size %></td>
+            <td class="whitespace-nowrap px-4 py-2 text-right tabular-nums"><%= report.columns.size %></td>
+            <td class="px-4 py-2">
+              <%= render "projects/compliance_counts", summary: report.summary,
+                    empty_text: report.columns.empty? ? "No requirements" : "No crew" %>
+            </td>
+            <td class="whitespace-nowrap px-4 py-2 text-right">
+              <%= link_to "Matrix", project_compliance_path(project), class: "text-blue-700 hover:underline" %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+<% end %>

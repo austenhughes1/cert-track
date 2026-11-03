@@ -1,0 +1,8 @@
+<%# locals: (assignment:) %>
+<%# The role whose requirements apply: the project override, else the member's own role. %>
+<% if (role = assignment.effective_role) %>
+  <span class="text-gray-900"><%= role.name %></span>
+  <span class="text-xs text-gray-500"><%= assignment.crew_role_id ? "(project role)" : "(member's role)" %></span>
+<% else %>
+  <span class="text-gray-400" title="Only requirements for everyone apply">No role</span>
+<% end %>

@@ -1,0 +1,26 @@
+<%# locals: (report:) %>
+<%# Legend doubling as the summary: one badge per status with its count over required cells. %>
+<% gap_count = report.gaps.size %>
+<div class="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm" id="compliance_summary">
+  <div class="mr-2">
+    <span class="text-gray-500"><%= pluralize(report.rows.size, "person", plural: "people") %> × <%= pluralize(report.columns.size, "type") %></span>
+    <span class="ml-2 font-semibold <%= gap_count.zero? ? "text-green-700" : "text-red-700" %>" data-gap-count="<%= gap_count %>">
+      <%= gap_count.zero? ? "No gaps" : pluralize(gap_count, "gap") %>
+    </span>
+  </div>
+  <dl class="flex flex-wrap items-center gap-x-4 gap-y-2">
+    <% Compliance::SEVERITY.each do |status| %>
+      <div class="flex items-center gap-1.5" data-summary-status="<%= status %>">
+        <dt><%= compliance_badge(status) %></dt>
+        <dd class="font-semibold tabular-nums text-gray-900"><%= report.summary.fetch(status, 0) %></dd>
+      </div>
+    <% end %>
+    <div class="flex items-center gap-1.5">
+      <dt><%= compliance_badge(ComplianceHelper::NOT_REQUIRED) %></dt>
+      <dd class="text-gray-500">Not required for that role</dd>
+    </div>
+  </dl>
+  <p class="w-full text-xs text-gray-500">
+    Dates are expiry dates. Expiring means within <%= Compliance::EXPIRING_WINDOW %> days; lapses on project means it expires before the project ends.
+  </p>
+</div>

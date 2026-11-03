@@ -1,0 +1,51 @@
+# osha30 never expires; flagger 36 months; first_aid 24; climber 24 (required for the
+# climber role only on tower_2417); cdl_a validity nil (expiry is printed on the card);
+# retired_hazwoper is inactive and unused.
+osha30:
+  name: OSHA 30 Construction
+  code: OSHA30
+  issuing_body: OSHA Outreach Training Program
+  aliases: ["OSHA 30-Hour Construction Industry Outreach Training", "OSHA 30 Hour"]
+  active: true
+  position: 1
+
+flagger:
+  name: Flagger
+  code: FLAGGER
+  issuing_body: ATSSA
+  validity_months: 36
+  aliases: ["Flagger Certification", "Traffic Control Flagger"]
+  active: true
+  position: 2
+
+first_aid:
+  name: First Aid/CPR/AED
+  code: FIRSTAID
+  issuing_body: American Red Cross
+  validity_months: 24
+  aliases: ["Adult First Aid CPR AED"]
+  active: true
+  position: 3
+
+climber:
+  name: Authorized Climber
+  code: CLIMBER
+  issuing_body: NATE
+  validity_months: 24
+  aliases: ["Authorized Climber/Rescuer", "Tower Climber"]
+  active: true
+  position: 4
+
+cdl_a:
+  name: CDL Class A
+  code: CDLA
+  issuing_body: Colorado DMV
+  aliases: ["Commercial Driver License Class A"]
+  active: true
+  position: 5
+
+retired_hazwoper:
+  name: HAZWOPER 40
+  code: HAZWOPER40
+  active: false
+  position: 99

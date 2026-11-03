@@ -1,0 +1,94 @@
+<%# locals: (certificate_type:, usage: nil) %>
+<% input_class = "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+<%= form_with model: certificate_type, class: "space-y-5" do |form| %>
+  <% if certificate_type.errors.any? %>
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" id="error_explanation">
+      <p class="font-medium"><%= pluralize(certificate_type.errors.count, "problem") %> to fix:</p>
+      <ul class="mt-1 list-disc space-y-1 pl-5">
+        <% certificate_type.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="grid gap-5 sm:grid-cols-3">
+    <div class="sm:col-span-2">
+      <%= form.label :name, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :name, required: true, autofocus: certificate_type.new_record?, autocomplete: "off",
+            placeholder: "OSHA 30 Construction", class: input_class %>
+    </div>
+
+    <div>
+      <%= form.label :code, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :code, required: true, autocomplete: "off", autocapitalize: "characters", spellcheck: false,
+            placeholder: "OSHA30", aria: { describedby: "code_hint" }, class: "#{input_class} font-mono uppercase" %>
+      <p id="code_hint" class="mt-1 text-xs text-gray-500">Letters, digits, - and _. Saved in capitals and used in packet file names.</p>
+    </div>
+  </div>
+
+  <div class="grid gap-5 sm:grid-cols-3">
+    <div class="sm:col-span-2">
+      <%= form.label :issuing_body, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :issuing_body, autocomplete: "off", placeholder: "OSHA Outreach Training Program", class: input_class %>
+    </div>
+
+    <div>
+      <%= form.label :position, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.number_field :position, step: 1, aria: { describedby: "position_hint" }, class: input_class %>
+      <p id="position_hint" class="mt-1 text-xs text-gray-500">Lower numbers come first. Blank sorts after numbered types, by name.</p>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :validity_months, "Validity (months)", class: "block text-sm font-medium text-gray-700" %>
+    <%= form.number_field :validity_months, min: 1, step: 1, placeholder: "Never expires",
+          aria: { describedby: "validity_hint" }, class: "#{input_class} sm:w-40" %>
+    <p id="validity_hint" class="mt-1 text-xs text-gray-500">
+      Leave blank if this certificate never expires. When set, a certificate with no expiry date printed on the card
+      expires this many months after its completed date.
+    </p>
+    <% if certificate_type.persisted? %>
+      <div class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" id="validity_note">
+        <strong class="font-semibold">Changing validity re-dates existing certificates that have no date from the card.</strong>
+        <% if usage&.certificates.to_i.positive? %>
+          Of the <%= pluralize(usage.certificates, "certificate") %> of this type, those with a computed expiry date or none
+          at all get their completed date plus the new validity (or no expiry date if you clear it).
+        <% else %>
+          Certificates with a computed expiry date or none at all get their completed date plus the new validity.
+        <% end %>
+        Expiry dates printed on a card or typed in by hand are kept.
+      </div>
+    <% end %>
+  </div>
+
+  <div>
+    <%= form.label :aliases, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_area :aliases, value: certificate_type.aliases.join("\n"), rows: 4, spellcheck: false,
+          placeholder: "OSHA 30-Hour Construction Industry Outreach Training\nOSHA 30 Hour",
+          aria: { describedby: "aliases_hint" }, class: input_class %>
+    <p id="aliases_hint" class="mt-1 text-xs text-gray-500">
+      One per line: the names as printed on real cards. Imports match a card to this type by its name or any alias.
+    </p>
+  </div>
+
+  <div>
+    <%= form.label :description, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_area :description, rows: 3, class: input_class %>
+  </div>
+
+  <div class="flex items-start gap-2">
+    <%= form.check_box :active, class: "mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" %>
+    <div>
+      <%= form.label :active, class: "text-sm font-medium text-gray-700" %>
+      <p class="text-xs text-gray-500">Inactive types stay on existing certificates and project requirements but are hidden from the default list.</p>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-3 border-t border-gray-100 pt-5">
+    <%= form.submit certificate_type.new_record? ? "Add certificate type" : "Save changes",
+          class: "cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+    <%= link_to "Cancel", certificate_types_path(status: ("all" if certificate_type.persisted? && !certificate_type.active_was)),
+          class: "text-sm text-gray-600 hover:underline" %>
+  </div>
+<% end %>

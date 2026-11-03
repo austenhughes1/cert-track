@@ -1,0 +1,53 @@
+<%
+  today = Date.current
+  scan_sha = Digest::SHA256.hexdigest("scan_0001.pdf")
+%>
+# accepted_li_flagger    page 1 of scan_0001.pdf, accepted into certificates(:li_flagger)
+# review_juan_first_aid  page 2 of the same file, needs review; holder misspelled "Jaun Ortis",
+#                        no person matched, type matched (first_aid)
+# duplicate_li_flagger   second upload of page 1, status duplicate, duplicate_of accepted_li_flagger
+accepted_li_flagger:
+  import_batch: march_batch
+  original_filename: scan_0001.pdf
+  page_range: "1"
+  sha256: <%= scan_sha %>
+  status: accepted
+  extracted_text: "=== page 1 ===\nFLAGGER CERTIFICATION\nLI CHEN\nCard FL-55501"
+  extraction: {"pages": [1], "holder_name": "LI CHEN", "certificate_type_code": "FLAGGER", "confidence": 0.93}
+  confidence: 0.93
+  holder_name_raw: LI CHEN
+  certificate_name_raw: Flagger Certification
+  matched_crew_member: li_chen
+  matched_certificate_type: flagger
+  proposed_completed_on: <%= today - 730 %>
+  proposed_expires_on: <%= today + 500 %>
+  proposed_certificate_number: "FL-55501"
+  provider: workers_ai
+  ai_units_used: 140
+  certificate: li_flagger
+  reviewed_by: manager
+  reviewed_at: <%= 1.day.ago %>
+
+review_juan_first_aid:
+  import_batch: march_batch
+  original_filename: scan_0001.pdf
+  page_range: "2"
+  sha256: <%= scan_sha %>
+  status: needs_review
+  extracted_text: "=== page 2 ===\nAdult First Aid CPR AED\nJaun Ortis"
+  extraction: {"pages": [2], "holder_name": "Jaun Ortis", "certificate_type_code": null, "confidence": 0.62}
+  confidence: 0.62
+  holder_name_raw: Jaun Ortis
+  certificate_name_raw: Adult First Aid CPR AED
+  matched_certificate_type: first_aid
+  proposed_completed_on: <%= today - 20 %>
+  provider: workers_ai
+  ai_units_used: 140
+
+duplicate_li_flagger:
+  import_batch: march_batch
+  original_filename: scan_0001 (1).pdf
+  page_range: "1"
+  sha256: <%= scan_sha %>
+  status: duplicate
+  duplicate_of: accepted_li_flagger

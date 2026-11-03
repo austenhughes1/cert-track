@@ -1,2 +1,72 @@
-<%# Stub: thumbnails and download links for a certificate's files (locals: certificate). %>
-<span class="text-sm text-gray-500"><%= pluralize(certificate.files.size, "file") %></span>
+<%# locals: (certificate:, compact: true, removable: false) %>
+<%# A certificate's files: a thumbnail (image variant or PDF preview, else an icon) that opens
+    the file, and a download link. compact (the default) fits a table cell. removable adds
+    Remove buttons for editors; those are forms, so don't render it inside another form. %>
+<% files = certificate.files.select { |file| file.persisted? && file.blob&.persisted? } %>
+<% removable &&= can?(:editor) %>
+<% if files.empty? %>
+  <span class="text-sm text-gray-400">No files</span>
+<% else %>
+  <ul class="<%= compact ? "flex flex-wrap gap-1.5" : "flex flex-wrap gap-3" %>" aria-label="Files">
+    <% files.each do |file| %>
+      <% blob = file.blob %>
+      <% extension = blob.filename.extension_without_delimiter.to_s.upcase.presence || "FILE" %>
+      <% converting = Certificate::HEIC_CONTENT_TYPES.include?(blob.content_type) %>
+      <% details = "#{blob.filename} (#{number_to_human_size(blob.byte_size)})" %>
+      <% thumbnail = capture do %>
+        <% if blob.representable? %>
+          <%= image_tag file.representation(resize_to_limit: [ 160, 160 ]), alt: "", loading: "lazy",
+                class: "h-full w-full #{compact ? "object-cover" : "object-contain"}" %>
+        <% else %>
+          <span class="flex h-full w-full flex-col items-center justify-center gap-0.5 text-gray-500">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                 class="<%= compact ? "h-5 w-5" : "h-10 w-10" %>" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+            </svg>
+            <span class="text-[10px] font-semibold"><%= extension.first(4) %></span>
+          </span>
+        <% end %>
+      <% end %>
+
+      <% if compact %>
+        <li class="w-12" id="<%= dom_id(file) %>">
+          <%= link_to rails_blob_path(file, disposition: "inline"), target: "_blank", rel: "noopener", title: details,
+                class: "block h-12 w-12 overflow-hidden rounded border border-gray-200 bg-gray-50 hover:ring-2 hover:ring-blue-500" do %>
+            <%= thumbnail %>
+            <span class="sr-only">Open <%= blob.filename %></span>
+          <% end %>
+          <%= link_to "Download", rails_blob_path(file, disposition: "attachment"),
+                class: "mt-0.5 block text-center text-[10px] leading-tight text-blue-700 hover:underline",
+                aria: { label: "Download #{blob.filename}" } %>
+        </li>
+      <% else %>
+        <li class="w-40 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm" id="<%= dom_id(file) %>">
+          <%= link_to rails_blob_path(file, disposition: "inline"), target: "_blank", rel: "noopener", title: details,
+                class: "block h-32 bg-gray-50 hover:opacity-90" do %>
+            <%= thumbnail %>
+            <span class="sr-only">Open <%= blob.filename %></span>
+          <% end %>
+          <div class="space-y-1 border-t border-gray-100 px-2 py-1.5">
+            <p class="truncate text-xs font-medium text-gray-900" title="<%= blob.filename %>"><%= blob.filename %></p>
+            <p class="text-xs text-gray-500">
+              <%= extension %> · <%= number_to_human_size(blob.byte_size) %>
+              <% if converting %>
+                <span class="block text-amber-700">Converting to JPG…</span>
+              <% end %>
+            </p>
+            <div class="flex items-center justify-between gap-2 text-xs">
+              <%= link_to "Download", rails_blob_path(file, disposition: "attachment"), class: "text-blue-700 hover:underline",
+                    aria: { label: "Download #{blob.filename}" } %>
+              <% if removable %>
+                <%= button_to "Remove", remove_file_crew_member_certificate_path(certificate.crew_member_id, certificate),
+                      method: :delete, params: { attachment_id: file.id },
+                      class: "cursor-pointer text-red-700 hover:underline", aria: { label: "Remove #{blob.filename}" },
+                      form: { data: { turbo_confirm: "Remove #{blob.filename}? The file is deleted; the certificate stays." } } %>
+              <% end %>
+            </div>
+          </div>
+        </li>
+      <% end %>
+    <% end %>
+  </ul>
+<% end %>

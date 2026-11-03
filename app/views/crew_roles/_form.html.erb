@@ -1,0 +1,25 @@
+<%# locals: (crew_role:) %>
+<%= form_with model: crew_role, class: "space-y-5" do |form| %>
+  <% if crew_role.errors.any? %>
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" id="error_explanation">
+      <p class="font-medium"><%= pluralize(crew_role.errors.count, "problem") %> to fix:</p>
+      <ul class="mt-1 list-disc space-y-1 pl-5">
+        <% crew_role.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div>
+    <%= form.label :name, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_field :name, required: true, autofocus: true, autocomplete: "off", placeholder: "e.g. Climber",
+          class: "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+  </div>
+
+  <div class="flex items-center gap-3 border-t border-gray-100 pt-5">
+    <%= form.submit crew_role.new_record? ? "Add role" : "Save changes",
+          class: "cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+    <%= link_to "Cancel", crew_roles_path, class: "text-sm text-gray-600 hover:underline" %>
+  </div>
+<% end %>

@@ -1,0 +1,62 @@
+<%# Next expirations. Locals: certificates (Array<Certificate>, crew_member and certificate_type
+    preloaded), needed_on ({ certificate_id => [Project] }), today (Date). %>
+<section id="upcoming_expirations">
+  <h2 class="mb-2 text-lg font-semibold text-gray-900">Next <%= DashboardController::UPCOMING_LIMIT %> expirations</h2>
+
+  <% if certificates.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center">
+      <p class="text-sm font-medium text-gray-900">Nothing is due to expire</p>
+      <p class="mt-1 text-sm text-gray-500">No current certificate held by active crew has an upcoming expiry date.</p>
+    </div>
+  <% else %>
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+      <table class="min-w-full divide-y divide-gray-200 text-sm">
+        <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <tr>
+            <th scope="col" class="px-4 py-2">Person</th>
+            <th scope="col" class="px-4 py-2">Certificate</th>
+            <th scope="col" class="px-4 py-2">Expires</th>
+            <th scope="col" class="px-4 py-2 text-right">Days left</th>
+            <th scope="col" class="px-4 py-2">Needed on</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          <% certificates.each do |certificate| %>
+            <% member = certificate.crew_member %>
+            <% days = certificate.days_until_expiry(today: today) %>
+            <tr id="<%= dom_id(certificate, :upcoming) %>" class="hover:bg-gray-50">
+              <td class="whitespace-nowrap px-4 py-2">
+                <%= link_to member.display_name, crew_member_path(member), class: "font-medium text-blue-700 hover:underline" %>
+                <% if member.employer.present? %><span class="ml-1 text-xs text-gray-400"><%= member.employer %></span><% end %>
+              </td>
+              <td class="whitespace-nowrap px-4 py-2">
+                <%= link_to certificate.certificate_type.name, crew_member_certificate_path(member, certificate), class: "text-gray-900 hover:underline" %>
+                <span class="ml-1 font-mono text-xs text-gray-400"><%= certificate.certificate_type.code %></span>
+              </td>
+              <td class="whitespace-nowrap px-4 py-2 tabular-nums text-gray-700"><%= format_date(certificate.expires_on) %></td>
+              <td class="<%= class_names("whitespace-nowrap px-4 py-2 text-right tabular-nums",
+                    "font-semibold text-red-700": days <= 7,
+                    "font-medium text-amber-700": days > 7 && days <= Compliance::EXPIRING_WINDOW,
+                    "text-gray-600": days > Compliance::EXPIRING_WINDOW) %>">
+                <%= days.zero? ? "today" : days %>
+              </td>
+              <td class="px-4 py-2">
+                <% projects = needed_on.fetch(certificate.id, []) %>
+                <% if projects.any? %>
+                  <div class="flex flex-wrap gap-1">
+                    <% projects.each do |project| %>
+                      <%= link_to project.code || project.name, project_compliance_path(project), title: project.display_name,
+                            class: "rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-700 hover:bg-gray-200" %>
+                    <% end %>
+                  </div>
+                <% else %>
+                  <span class="text-gray-400">—</span>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</section>

@@ -1,0 +1,50 @@
+<%# locals: (report:, editor:) %>
+<%# Sticky header row and first column; the wrapper scrolls both ways on wide projects.
+    Cells are inlined (no per-cell partial) to keep 50 × 15 matrices fast. %>
+<div class="max-h-[calc(100vh-16rem)] overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+  <table class="min-w-full border-separate border-spacing-0 text-sm" id="compliance_matrix">
+    <thead>
+      <tr>
+        <th scope="col" class="sticky top-0 left-0 z-30 border-r border-b border-gray-200 bg-gray-50 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+          Crew member
+        </th>
+        <% report.columns.each do |type| %>
+          <th scope="col" title="<%= type.name %>" class="sticky top-0 z-20 whitespace-nowrap border-b border-gray-200 bg-gray-50 px-2 py-2 text-center text-xs font-semibold text-gray-700">
+            <%= type.code %><span class="sr-only"> (<%= type.name %>)</span>
+          </th>
+        <% end %>
+      </tr>
+    </thead>
+    <%# Cell styling lives on tbody so each of the 750 cells stays small. %>
+    <tbody class="[&_td]:whitespace-nowrap [&_td]:border-b [&_td]:border-gray-100 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-center">
+      <% report.rows.each do |row| %>
+        <% member = row.crew_member %>
+        <% gap_count = row.gaps.size %>
+        <tr id="<%= dom_id(member, :compliance_row) %>" class="group hover:bg-gray-50">
+          <th scope="row" class="sticky left-0 z-10 whitespace-nowrap border-r border-b border-gray-100 bg-white px-3 py-1.5 text-left font-normal group-hover:bg-gray-50">
+            <%= link_to member.sort_name, crew_member_path(member), title: member.display_name,
+                  class: "font-medium text-gray-900 hover:text-blue-700 hover:underline" %>
+            <div class="flex items-center gap-2 text-xs text-gray-500">
+              <span><%= row.role&.name || "No role" %></span>
+              <% if member.employer.present? %><span class="max-w-40 truncate" title="<%= member.employer %>">· <%= member.employer %></span><% end %>
+              <% if gap_count.positive? %><span class="font-medium text-red-700">· <%= pluralize(gap_count, "gap") %></span><% end %>
+            </div>
+          </th>
+          <% row.cells.each do |cell| %>
+            <% type = cell.certificate_type %>
+            <td data-status="<%= cell.status %>" data-type="<%= type.code %>">
+              <% if cell.certificate %>
+                <%= link_to compliance_badge(cell), crew_member_certificate_path(member, cell.certificate), class: "rounded-full hover:opacity-75" %>
+              <% elsif editor && cell.status == "missing" %>
+                <%= link_to compliance_badge(cell), new_crew_member_certificate_path(member, certificate_type_id: type.id),
+                      class: "rounded-full hover:opacity-75", title: "Add #{type.name} for #{member.display_name}" %>
+              <% else %>
+                <%= compliance_badge(cell) %>
+              <% end %>
+            </td>
+          <% end %>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</div>

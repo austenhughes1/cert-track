@@ -1,0 +1,12 @@
+# juan_flagger (expires ~10 days out) already had its d30 email sent to both digest users.
+juan_flagger_d30_admin:
+  certificate: juan_flagger
+  threshold: d30
+  recipient_email: admin@example.com
+  sent_at: <%= 20.days.ago %>
+
+juan_flagger_d30_manager:
+  certificate: juan_flagger
+  threshold: d30
+  recipient_email: manager@example.com
+  sent_at: <%= 20.days.ago %>

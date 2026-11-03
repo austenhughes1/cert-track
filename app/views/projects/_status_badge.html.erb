@@ -1,0 +1,5 @@
+<%# locals: (project:) %>
+<span class="<%= class_names("inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
+      "bg-sky-100 text-sky-800": project.planned?,
+      "bg-green-100 text-green-800": project.active?,
+      "bg-gray-100 text-gray-600": project.closed?) %>"><%= project.status.humanize %></span>

@@ -1,0 +1,164 @@
+<%
+  today = Date.current
+  juan_flagger_done = (today + 10) << 36      # expires ~10 days out
+  juan_flagger_old_done = juan_flagger_done << 36
+  juan_first_aid_done = (today + 60) << 24    # expires ~60 days out
+  juan_first_aid_old_done = juan_first_aid_done << 24
+  juan_climber_done = (today + 400) << 24     # expires ~400 days out
+  maria_first_aid_done = (today - 5) << 24    # expired ~5 days ago
+  li_first_aid_done = (today - 400) << 24     # expired ~400 days ago
+  dave_flagger_done = today - 400
+  sam_flagger_done = (today + 7) << 36        # expires ~7 days out
+%>
+# Status on tower_2417 (ends today + 120) in brackets. All current unless marked superseded.
+# juan_ortiz:   juan_osha30 [valid, never expires], juan_flagger [expiring, ~10d],
+#               juan_first_aid [lapses_on_project, ~60d], juan_climber [valid, ~400d],
+#               juan_flagger_old + juan_first_aid_old (superseded history)
+# maria_garcia: maria_osha30 [valid], maria_first_aid [expired ~5d ago], flagger [missing]
+# li_chen:      li_osha30 [valid], li_flagger [valid, printed ~500d, from import],
+#               li_first_aid [expired ~400d ago], climber [missing]
+# dave_miller:  dave_osha30 [valid], dave_flagger [valid ~695d], dave_cdl_a [expiring, printed 25d],
+#               first_aid [missing]
+# sam_inactive: sam_osha30 [valid], sam_flagger [expiring ~7d; member inactive]
+juan_osha30:
+  crew_member: juan_ortiz
+  certificate_type: osha30
+  certificate_number: "30-1234567"
+  issued_by: Example Safety Training LLC
+  completed_on: <%= today - 700 %>
+  expires_on_source: none
+  source: manual
+
+juan_flagger_old:
+  crew_member: juan_ortiz
+  certificate_type: flagger
+  certificate_number: "FL-10001"
+  issued_by: ATSSA
+  completed_on: <%= juan_flagger_old_done %>
+  expires_on: <%= juan_flagger_old_done >> 36 %>
+  expires_on_source: computed
+  source: manual
+  superseded_at: <%= juan_flagger_done.in_time_zone + 9.hours %>
+
+juan_flagger:
+  crew_member: juan_ortiz
+  certificate_type: flagger
+  certificate_number: "FL-20002"
+  issued_by: ATSSA
+  completed_on: <%= juan_flagger_done %>
+  expires_on: <%= juan_flagger_done >> 36 %>
+  expires_on_source: computed
+  source: manual
+
+juan_first_aid_old:
+  crew_member: juan_ortiz
+  certificate_type: first_aid
+  issued_by: American Red Cross
+  completed_on: <%= juan_first_aid_old_done %>
+  expires_on: <%= juan_first_aid_old_done >> 24 %>
+  expires_on_source: computed
+  source: manual
+  superseded_at: <%= juan_first_aid_done.in_time_zone + 9.hours %>
+
+juan_first_aid:
+  crew_member: juan_ortiz
+  certificate_type: first_aid
+  certificate_number: "RC-778899"
+  issued_by: American Red Cross
+  completed_on: <%= juan_first_aid_done %>
+  expires_on: <%= juan_first_aid_done >> 24 %>
+  expires_on_source: computed
+  source: manual
+
+juan_climber:
+  crew_member: juan_ortiz
+  certificate_type: climber
+  issued_by: Tower Safety Inc
+  completed_on: <%= juan_climber_done %>
+  expires_on: <%= juan_climber_done >> 24 %>
+  expires_on_source: computed
+  source: manual
+
+maria_osha30:
+  crew_member: maria_garcia
+  certificate_type: osha30
+  certificate_number: "30-7654321"
+  completed_on: <%= today - 1200 %>
+  expires_on_source: none
+  source: manual
+
+maria_first_aid:
+  crew_member: maria_garcia
+  certificate_type: first_aid
+  completed_on: <%= maria_first_aid_done %>
+  expires_on: <%= maria_first_aid_done >> 24 %>
+  expires_on_source: computed
+  source: manual
+
+li_osha30:
+  crew_member: li_chen
+  certificate_type: osha30
+  completed_on: <%= today - 365 %>
+  expires_on_source: none
+  source: manual
+
+li_flagger:
+  crew_member: li_chen
+  certificate_type: flagger
+  certificate_number: "FL-55501"
+  issued_by: Skyline Safety
+  completed_on: <%= today - 730 %>
+  expires_on: <%= today + 500 %>
+  expires_on_source: printed
+  source: import
+  import_item: accepted_li_flagger
+  verified_by: manager
+  verified_at: <%= 1.day.ago %>
+
+li_first_aid:
+  crew_member: li_chen
+  certificate_type: first_aid
+  completed_on: <%= li_first_aid_done %>
+  expires_on: <%= li_first_aid_done >> 24 %>
+  expires_on_source: computed
+  source: manual
+
+dave_osha30:
+  crew_member: dave_miller
+  certificate_type: osha30
+  completed_on: <%= today - 90 %>
+  expires_on_source: none
+  source: manual
+
+dave_flagger:
+  crew_member: dave_miller
+  certificate_type: flagger
+  completed_on: <%= dave_flagger_done %>
+  expires_on: <%= dave_flagger_done >> 36 %>
+  expires_on_source: computed
+  source: manual
+
+dave_cdl_a:
+  crew_member: dave_miller
+  certificate_type: cdl_a
+  certificate_number: "CO-123456789"
+  issued_by: Colorado DMV
+  completed_on: <%= today - 1800 %>
+  expires_on: <%= today + 25 %>
+  expires_on_source: manual
+  source: manual
+
+sam_osha30:
+  crew_member: sam_inactive
+  certificate_type: osha30
+  completed_on: <%= today - 900 %>
+  expires_on_source: none
+  source: manual
+
+sam_flagger:
+  crew_member: sam_inactive
+  certificate_type: flagger
+  completed_on: <%= sam_flagger_done %>
+  expires_on: <%= sam_flagger_done >> 36 %>
+  expires_on_source: computed
+  source: manual

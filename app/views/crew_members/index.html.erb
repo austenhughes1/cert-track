@@ -1,0 +1,121 @@
+<% content_for :title, "Crew" %>
+
+<div class="mb-4 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-semibold">Crew</h1>
+    <p class="mt-1 text-sm text-gray-500">Everyone whose certificates we track, including subcontractor workers. Status covers active projects.</p>
+  </div>
+  <div class="flex items-center gap-3">
+    <%= link_to "Roles", crew_roles_path, class: "text-sm text-blue-700 hover:underline" %>
+    <% if can?(:editor) %>
+      <%= link_to "Add crew member", new_crew_member_path, class: "rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+    <% end %>
+  </div>
+</div>
+
+<% select_class = "rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+<%= form_with url: crew_members_path, method: :get, id: "crew_member_filters",
+      class: "mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm",
+      data: { controller: "auto-submit", turbo_frame: "crew_members_results", turbo_action: "advance" } do |form| %>
+  <div class="min-w-56 flex-1">
+    <%= label_tag :q, "Search names", class: "block text-xs font-medium text-gray-600" %>
+    <%= search_field_tag :q, @filters[:q], placeholder: "Name or alias, typos are fine", autocomplete: "off",
+          data: { action: "input->auto-submit#debouncedSubmit" },
+          class: "mt-1 block w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+  </div>
+  <div>
+    <%= label_tag :active, "Show", class: "block text-xs font-medium text-gray-600" %>
+    <%= select_tag :active, options_for_select(crew_member_active_filter_options, @filters[:active]),
+          data: { action: "change->auto-submit#submit" }, class: "mt-1 block #{select_class}" %>
+  </div>
+  <div>
+    <%= label_tag :employer, "Employer", class: "block text-xs font-medium text-gray-600" %>
+    <%= select_tag :employer, options_for_select(@employers, @filters[:employer]), include_blank: "Any employer",
+          data: { action: "change->auto-submit#submit" }, class: "mt-1 block #{select_class}" %>
+  </div>
+  <div>
+    <%= label_tag :crew_role_id, "Role", class: "block text-xs font-medium text-gray-600" %>
+    <%= select_tag :crew_role_id, options_for_select(crew_member_role_filter_options(@crew_roles), @filters[:crew_role_id]),
+          include_blank: "Any role", data: { action: "change->auto-submit#submit" }, class: "mt-1 block #{select_class}" %>
+  </div>
+  <div>
+    <%= label_tag :status, "Status", class: "block text-xs font-medium text-gray-600" %>
+    <%= select_tag :status, options_for_select(crew_member_status_filter_options, @filters[:status]),
+          include_blank: "Any status", data: { action: "change->auto-submit#submit" }, class: "mt-1 block #{select_class}" %>
+  </div>
+  <%= form.submit "Search", name: nil, class: "cursor-pointer rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" %>
+<% end %>
+
+<%= turbo_frame_tag "crew_members_results", target: "_top" do %>
+  <div class="mb-2 flex items-center justify-between text-sm text-gray-500">
+    <p id="crew_members_count">
+      <% if @total_count > @crew_members.size %>
+        Showing first <%= @crew_members.size %> of <%= number_with_delimiter(@total_count) %> crew members. Narrow the search to see the rest.
+      <% else %>
+        <%= pluralize(@total_count, "crew member") %>
+      <% end %>
+    </p>
+    <% if crew_member_filters_applied?(@filters) %>
+      <%= link_to "Clear filters", crew_members_path, class: "text-blue-700 hover:underline" %>
+    <% end %>
+  </div>
+
+  <% if @crew_members.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
+      <% if crew_member_filters_applied?(@filters) %>
+        <p class="text-sm font-medium text-gray-900">No crew members match</p>
+        <p class="mt-1 text-sm text-gray-500">Try a shorter search, or <%= link_to "clear the filters", crew_members_path, class: "text-blue-700 hover:underline" %>.</p>
+      <% else %>
+        <p class="text-sm font-medium text-gray-900">No crew members yet</p>
+        <p class="mt-1 text-sm text-gray-500">
+          <% if can?(:editor) %>
+            <%= link_to "Add the first crew member", new_crew_member_path, class: "text-blue-700 hover:underline" %> to start tracking certificates.
+          <% else %>
+            An admin or manager adds crew members.
+          <% end %>
+        </p>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+      <table class="min-w-full divide-y divide-gray-200 text-sm">
+        <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <tr>
+            <th scope="col" class="px-4 py-2">Name</th>
+            <th scope="col" class="px-4 py-2">Role</th>
+            <th scope="col" class="px-4 py-2">Employer</th>
+            <th scope="col" class="px-4 py-2 text-right" title="Current (not superseded) certificates">Certs</th>
+            <th scope="col" class="px-4 py-2" title="Worst requirement status across active projects">Status</th>
+            <th scope="col" class="px-4 py-2">Contact</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          <% @crew_members.each do |crew_member| %>
+            <tr id="<%= dom_id(crew_member) %>" class="<%= class_names("hover:bg-gray-50", "text-gray-500": !crew_member.active?) %>">
+              <td class="whitespace-nowrap px-4 py-2">
+                <%= link_to crew_member.sort_name, crew_member, class: "font-medium text-blue-700 hover:underline" %>
+                <% if crew_member.preferred_name.present? %>
+                  <span class="text-xs text-gray-500">(<%= crew_member.preferred_name %>)</span>
+                <% end %>
+                <% unless crew_member.active? %>
+                  <span class="ml-1 inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">Inactive</span>
+                <% end %>
+              </td>
+              <td class="whitespace-nowrap px-4 py-2"><%= crew_member.crew_role&.name || tag.span("—", class: "text-gray-400") %></td>
+              <td class="whitespace-nowrap px-4 py-2"><%= crew_member.employer || tag.span("—", class: "text-gray-400") %></td>
+              <td class="whitespace-nowrap px-4 py-2 text-right tabular-nums"><%= @current_certificate_counts.fetch(crew_member.id, 0) %></td>
+              <td class="whitespace-nowrap px-4 py-2">
+                <% if (status = @worst_statuses[crew_member.id]) %>
+                  <%= compliance_badge(status) %>
+                <% else %>
+                  <span class="text-gray-400" title="Not on an active project">—</span>
+                <% end %>
+              </td>
+              <td class="whitespace-nowrap px-4 py-2"><%= crew_member_contact(crew_member) %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+<% end %>

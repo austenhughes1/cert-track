@@ -1,0 +1,119 @@
+<%# locals: (certificate:, crew_member:) %>
+<% input_class = "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+<% types = CertificateType.active.ordered.to_a %>
+<% types.unshift(certificate.certificate_type) if certificate.certificate_type && !types.include?(certificate.certificate_type) %>
+<% type_options = types.map { |type| [ "#{type.name} (#{type.code}) · #{type.never_expires? ? "never expires" : "valid #{pluralize(type.validity_months, "month")}"}", type.id ] } %>
+<% selected_type = certificate.certificate_type %>
+<%# Direct uploads that already finished before a validation error; resubmitted so nothing is uploaded twice. %>
+<% carried_over = certificate.files.reject(&:persisted?).map(&:blob).select do |blob|
+     blob.persisted? && Certificate::ALLOWED_CONTENT_TYPES.include?(blob.content_type) && blob.byte_size <= Certificate::MAX_FILE_SIZE
+   end %>
+<% accept = (Certificate::ALLOWED_CONTENT_TYPES + %w[.pdf .jpg .jpeg .png .heic .heif .webp]).join(",") %>
+
+<%= form_with model: [ crew_member, certificate ], class: "space-y-5" do |form| %>
+  <% if certificate.errors.any? %>
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" id="error_explanation">
+      <p class="font-medium"><%= pluralize(certificate.errors.count, "problem") %> to fix:</p>
+      <ul class="mt-1 list-disc space-y-1 pl-5">
+        <% certificate.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="grid gap-5 sm:grid-cols-2">
+    <div class="sm:col-span-2">
+      <%= form.label :certificate_type_id, "Certificate type", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.select :certificate_type_id, type_options, { include_blank: "Choose a type" },
+            required: true, autofocus: selected_type.nil?, class: "#{input_class} bg-white" %>
+      <% if can?(:admin) %>
+        <p class="mt-1 text-xs text-gray-500">Missing a type? <%= link_to "Add it to the master list", new_certificate_type_path, class: "text-blue-700 hover:underline" %>.</p>
+      <% end %>
+    </div>
+
+    <div>
+      <%= form.label :certificate_number, "Certificate or card number", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :certificate_number, autocomplete: "off", class: "#{input_class} font-mono" %>
+    </div>
+    <div>
+      <%= form.label :issued_by, "Issued by", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :issued_by, autocomplete: "off", placeholder: "Trainer or provider", class: input_class %>
+    </div>
+
+    <div>
+      <%= form.label :completed_on, "Completed on", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.date_field :completed_on, required: true, max: Date.current, autofocus: selected_type.present?, class: input_class %>
+    </div>
+    <div>
+      <%= form.label :expires_on, "Expires on", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.date_field :expires_on, aria: { describedby: "expires_on_hint" }, class: input_class %>
+      <p id="expires_on_hint" class="mt-1 text-xs text-gray-500">
+        Use the date printed on the card. Leave blank to work it out from the type:
+        <% if selected_type %>
+          <% if selected_type.never_expires? %>
+            <%= selected_type.name %> never expires, so blank means no expiry.
+          <% else %>
+            completed date plus <%= pluralize(selected_type.validity_months, "month") %> for <%= selected_type.name %>.
+          <% end %>
+        <% else %>
+          completed date plus the validity shown next to each type, or no expiry for types that never expire.
+        <% end %>
+        <% if certificate.persisted? && certificate.expiry_computed? %>
+          The current date was computed, so it follows changes to the completed date or type.
+        <% end %>
+      </p>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :notes, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_area :notes, rows: 3, class: input_class %>
+  </div>
+
+  <div data-controller="file-drop"
+       data-file-drop-max-bytes-value="<%= Certificate::MAX_FILE_SIZE %>"
+       data-file-drop-extensions-value="<%= %w[pdf jpg jpeg png heic heif webp].to_json %>"
+       data-action="dragenter->file-drop#dragOver dragover->file-drop#dragOver dragleave->file-drop#dragLeave drop->file-drop#drop
+                    direct-upload:initialize->file-drop#uploadInitialize direct-upload:start->file-drop#uploadStart
+                    direct-upload:progress->file-drop#uploadProgress direct-upload:error->file-drop#uploadError
+                    direct-upload:end->file-drop#uploadEnd">
+    <span class="block text-sm font-medium text-gray-700"><%= certificate.persisted? ? "Add files" : "Files" %></span>
+    <div data-file-drop-target="zone"
+         class="mt-1 rounded-lg border-2 border-dashed border-gray-300 bg-white px-4 py-6 text-center transition-colors focus-within:border-blue-600">
+      <p class="text-sm text-gray-700">Drag files here, or choose them below.</p>
+      <p class="mt-1 text-xs text-gray-500">
+        PDF, JPG, PNG, HEIC or WEBP, up to 25 MB each. Add every page that belongs to this certificate: front and back,
+        wallet card and full certificate. HEIC phone photos are converted to JPG.
+      </p>
+      <%= form.label :files, "Choose files", class: "sr-only" %>
+      <%= form.file_field :files, multiple: true, direct_upload: true, accept: accept,
+            data: { file_drop_target: "input", action: "change->file-drop#select" },
+            class: "mx-auto mt-3 block max-w-xs text-sm text-gray-600 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100" %>
+    </div>
+    <p data-file-drop-target="message" class="mt-2 text-sm text-red-700" role="alert" hidden></p>
+    <ul data-file-drop-target="list" class="mt-2 space-y-1" aria-label="Files to upload"></ul>
+
+    <% if carried_over.any? %>
+      <div class="mt-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" id="carried_over_files">
+        <p class="text-gray-700">Already uploaded; attached when you save:</p>
+        <ul class="mt-1 list-disc pl-5 text-gray-600">
+          <% carried_over.each do |blob| %>
+            <li>
+              <%= blob.filename %> (<%= number_to_human_size(blob.byte_size) %>)
+              <%= hidden_field_tag "certificate[files][]", blob.signed_id, id: nil %>
+            </li>
+          <% end %>
+        </ul>
+      </div>
+    <% end %>
+  </div>
+
+  <div class="flex items-center gap-3 border-t border-gray-100 pt-5">
+    <%= form.submit certificate.new_record? ? "Add certificate" : "Save changes",
+          data: { turbo_submits_with: "Uploading and saving…" },
+          class: "cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:cursor-wait disabled:opacity-60" %>
+    <%= link_to "Cancel", certificate.persisted? ? crew_member_certificate_path(crew_member, certificate) : crew_member_path(crew_member),
+          class: "text-sm text-gray-600 hover:underline" %>
+  </div>
+<% end %>

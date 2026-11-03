@@ -1,0 +1,13 @@
+<% today = Date.current %>
+# Workers AI usage: today (Denver date) well under budget, yesterday near the 9,000 budget.
+workers_ai_today:
+  day: <%= today %>
+  provider: workers_ai
+  units_used: 1200
+  requests: 8
+
+workers_ai_yesterday:
+  day: <%= today - 1 %>
+  provider: workers_ai
+  units_used: 8800
+  requests: 61

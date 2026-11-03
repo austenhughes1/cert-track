@@ -1,1 +1,25 @@
-<h1 class="text-2xl font-semibold">Dashboard</h1>
+<% content_for :title, "Dashboard" %>
+
+<%= render "dashboard/email_cap_banner" %>
+
+<div class="mb-4 flex items-end justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-semibold">Dashboard</h1>
+    <p class="mt-1 text-sm text-gray-500">
+      Compliance across active projects as of <%= format_date(@today) %>.
+    </p>
+  </div>
+</div>
+
+<% if !@has_crew || !@has_projects %>
+  <%= render "dashboard/setup", type_count: @type_count, timed_type_count: @timed_type_count, has_crew: @has_crew, has_projects: @has_projects %>
+<% end %>
+
+<% if @has_crew || @has_projects %>
+  <%= render "dashboard/tiles", overview: @overview, review_count: @review_count %>
+
+  <div class="mt-6 space-y-6">
+    <%= render "dashboard/upcoming", certificates: @upcoming, needed_on: @needed_on, today: @today %>
+    <%= render "dashboard/projects", reports: @reports %>
+  </div>
+<% end %>

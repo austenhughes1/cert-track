@@ -8,6 +8,8 @@ Rails.application.configure do
   config.active_record.encryption.primary_key = "test-primary-key-0123456789abcdef"
   config.active_record.encryption.deterministic_key = "test-deterministic-key-0123456789"
   config.active_record.encryption.key_derivation_salt = "test-key-derivation-salt-0123456789"
+  # Fixtures can hold plain certificate numbers; Rails encrypts them on load.
+  config.active_record.encryption.encrypt_fixtures = true
 
   # Settings specified here will take precedence over those in config/application.rb.
 

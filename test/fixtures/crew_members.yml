@@ -1,0 +1,51 @@
+# juan_ortiz   climber, ABA Ventures, aliases incl. "Jon Ortiz", opted in to expiry emails
+# maria_garcia foreman, preferred name "Mari", accented alias
+# li_chen      operator at a subcontractor (assigned as climber on tower_2417)
+# dave_miller  operator, preferred name "Dave", no email
+# sam_inactive laborer, active: false
+juan_ortiz:
+  first_name: Juan
+  last_name: Ortiz
+  name_aliases: ["Jon Ortiz", "Juan Ortiz-Ruiz"]
+  email: juan.ortiz@example.com
+  phone: 303-555-0101
+  employer: ABA Ventures
+  crew_role: climber
+  active: true
+  expiry_emails_opt_in: true
+
+maria_garcia:
+  first_name: Maria
+  last_name: Garcia
+  preferred_name: Mari
+  name_aliases: ["María García-López"]
+  email: maria.garcia@example.com
+  phone: 303-555-0102
+  employer: ABA Ventures
+  crew_role: foreman
+  active: true
+
+li_chen:
+  first_name: Li
+  last_name: Chen
+  email: li.chen@skyline.example.com
+  employer: Skyline Tower Services
+  crew_role: operator
+  active: true
+
+dave_miller:
+  first_name: David
+  last_name: Miller
+  preferred_name: Dave
+  employer: ABA Ventures
+  crew_role: operator
+  active: true
+
+sam_inactive:
+  first_name: Sam
+  last_name: Price
+  email: sam.price@example.com
+  employer: ABA Ventures
+  crew_role: laborer
+  active: false
+  notes: Left the company.
