@@ -46,7 +46,7 @@ env:
     MAIL_FROM: "CertTrack <certtrack@notify.abaventures.net>"
     # Reply-To on crew expiry notices, which ask crew to reply with their renewed certificate.
     # Must be a real, monitored inbox: notify.abaventures.net only sends and has no MX.
-    OFFICE_EMAIL: office@abaventures.net
+    OFFICE_EMAIL: austen@abaventures.net
     R2_BUCKET: certtrack-files
     R2_BACKUP_BUCKET: certtrack-backups
     AI_PROVIDER: workers_ai

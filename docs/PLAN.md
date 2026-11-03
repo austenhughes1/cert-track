@@ -78,7 +78,7 @@ Every layer runs on a free tier, so steady-state cost is **$0/month**. The only 
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | R2 credentials |
 | `R2_BUCKET`, `R2_BACKUP_BUCKET` | Files bucket and backups bucket |
 | `RESEND_API_KEY`, `MAIL_FROM` | Outbound email |
-| `OFFICE_EMAIL` | Office inbox that crew expiry notices reply to, e.g. `office@abaventures.net`. Not on the send-only `notify` subdomain |
+| `OFFICE_EMAIL` | Office inbox that crew expiry notices reply to, currently `austen@abaventures.net`. Not on the send-only `notify` subdomain |
 | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_AI_API_TOKEN` | Workers AI |
 | `AI_PROVIDER` | `workers_ai` (default), `ollama` or `anthropic` |
 | `EXTRACTION_MODEL`, `EXTRACTION_VISION_MODEL` | Model IDs, chosen in the Phase 3 accuracy spike |

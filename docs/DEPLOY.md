@@ -124,7 +124,7 @@ curl -s "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai
 3. Click **Verify** and wait for "Verified" (minutes to a few hours).
 4. API Keys → Create API key, permission **Sending access**, restricted to `notify.abaventures.net`. It goes into `RESEND_API_KEY`.
 5. Nothing else to configure. Production sends over SMTP: `smtp.resend.com:587`, STARTTLS, user `resend`, password `RESEND_API_KEY` (`config/environments/production.rb`), from `MAIL_FROM`. Oracle blocks outbound port 25, but 587 is open. The free plan allows 100 emails/day and 3,000/month.
-6. **The office inbox.** `notify.abaventures.net` only sends and can't receive mail. Crew expiry notices ask crew to reply with their renewed certificate, so their Reply-To is `OFFICE_EMAIL` (`config/deploy.yml`, default `office@abaventures.net`). Make sure that address is a real, monitored inbox on the main domain, such as a Google Workspace user, group or alias, and send it a test email. If it isn't, change `OFFICE_EMAIL` before crew notices go out.
+6. **The office inbox.** `notify.abaventures.net` only sends and can't receive mail. Crew expiry notices ask crew to reply with their renewed certificate, so their Reply-To is `OFFICE_EMAIL` (`config/deploy.yml`, set to `austen@abaventures.net`). Make sure that address is a real, monitored inbox on the main domain, such as a Google Workspace user, group or alias, and send it a test email. If it isn't, change `OFFICE_EMAIL` before crew notices go out.
 
 ## 6. DNS for the app
 
@@ -184,7 +184,7 @@ An unset variable becomes an **empty** secret without any warning, so don't skip
 | `R2_BUCKET`, `R2_BACKUP_BUCKET` | `config/deploy.yml` | `certtrack-files`, `certtrack-backups` |
 | `RESEND_API_KEY` | your shell | Resend API key (SMTP password) |
 | `MAIL_FROM` | `config/deploy.yml` | `CertTrack <certtrack@notify.abaventures.net>` |
-| `OFFICE_EMAIL` | `config/deploy.yml` | `office@abaventures.net`, the Reply-To on crew expiry notices. It must be a real, monitored inbox on the main domain: `notify.abaventures.net` is send-only, so replies sent there bounce |
+| `OFFICE_EMAIL` | `config/deploy.yml` | `austen@abaventures.net`, the Reply-To on crew expiry notices. It must be a real, monitored inbox on the main domain: `notify.abaventures.net` is send-only, so replies sent there bounce |
 | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_AI_API_TOKEN` | your shell | Workers AI |
 | `AI_PROVIDER` | `config/deploy.yml` | `workers_ai` (or `ollama`, `anthropic`) |
 | `EXTRACTION_MODEL`, `EXTRACTION_VISION_MODEL` | `config/deploy.yml` | Set after the Phase 3 accuracy spike (commented out until then) |
