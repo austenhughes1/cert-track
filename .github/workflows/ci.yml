@@ -5,13 +5,22 @@ on:
   push:
     branches: [ main ]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Mirrors config/ci.rb (run locally with bin/ci). Ruby comes from .ruby-version.
 jobs:
   scan_ruby:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -20,16 +29,17 @@ jobs:
 
       - name: Scan for common Rails security vulnerabilities using static analysis
         run: bin/brakeman --no-pager
-      
+
       - name: Scan for known security vulnerabilities in gems used
         run: bin/bundler-audit
-      
+
   scan_js:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -41,11 +51,12 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       RUBOCOP_CACHE_ROOT: tmp/rubocop
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -53,7 +64,7 @@ jobs:
           bundler-cache: true
 
       - name: Prepare RuboCop cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         env:
           DEPENDENCIES_HASH: ${{ hashFiles('.ruby-version', '**/.rubocop.yml', '**/.rubocop_todo.yml', 'Gemfile.lock') }}
         with:
@@ -66,86 +77,124 @@ jobs:
         run: bin/rubocop -f github
 
   test:
-    runs-on: ubuntu-latest
+    # Pinned (not ubuntu-latest) because the apt package names below are specific to 24.04 (noble).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     services:
       postgres:
-        image: postgres
+        # Match production (PostgreSQL 17 Kamal accessory).
+        image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         ports:
           - 5432:5432
-        options: --health-cmd="pg_isready" --health-interval=10s --health-timeout=5s --health-retries=3
+        options: --health-cmd="pg_isready -U postgres" --health-interval=10s --health-timeout=5s --health-retries=5
 
-      # redis:
-      #   image: valkey/valkey:8
-      #   ports:
-      #     - 6379:6379
-      #   options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+    # No RAILS_MASTER_KEY: config/environments/test.rb sets fixed Active Record encryption keys.
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432
 
     steps:
+      # libvips42t64 is 8.15 on Ubuntu 24.04 (Rails 8.1 needs >= 8.13); the libde265 plugin lets libheif decode HEIC.
+      # poppler-utils and tesseract back text extraction. postgresql-client-17 comes from PGDG because backup
+      # tests run pg_dump/psql against the 17 server and the runner image only ships PostgreSQL 16.
       - name: Install packages
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev libvips
+        run: |
+          if [ ! -x /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh ]; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y postgresql-common
+          fi
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install --no-install-recommends -y \
+            libpq-dev libvips42t64 libheif1 libheif-plugin-libde265 \
+            poppler-utils tesseract-ocr tesseract-ocr-eng postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
 
+      - name: Check system tools
+        run: |
+          pg_dump --version
+          pg_dump --version | grep -q ' 17\.' || { echo "::error::pg_dump must be version 17 to dump the 17 server"; exit 1; }
+          psql --version
+          pdftotext -v 2>&1 | head -n 1
+          tesseract --version 2>&1 | head -n 1
+          bundle exec ruby -e '
+            require "vips"
+            abort "libvips #{Vips.version_string} is older than 8.13" unless Vips.at_least_libvips?(8, 13)
+            abort "libvips #{Vips.version_string} has no HEIF loader" if Vips.type_find("VipsOperation", "heifload").zero?
+            puts "libvips #{Vips.version_string} (HEIF loader present)"
+          '
+
       - name: Run tests
-        env:
-          RAILS_ENV: test
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432
-          # RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
-          # REDIS_URL: redis://localhost:6379/0
         run: bin/rails db:test:prepare test
 
+      - name: Check seeds
+        run: bin/rails db:seed:replant
+
   system-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     services:
       postgres:
-        image: postgres
+        image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         ports:
           - 5432:5432
-        options: --health-cmd="pg_isready" --health-interval=10s --health-timeout=5s --health-retries=3
+        options: --health-cmd="pg_isready -U postgres" --health-interval=10s --health-timeout=5s --health-retries=5
 
-      # redis:
-      #   image: valkey/valkey:8
-      #   ports:
-      #     - 6379:6379
-      #   options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432
 
     steps:
-      - name: Install packages
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev libvips
-
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
+
+      # `bin/rails test:system` raises LoadError when test/system is absent, so skip cleanly until system tests exist.
+      - name: Look for system tests
+        id: system_tests
+        run: |
+          if find test/system -name '*_test.rb' -print -quit 2>/dev/null | grep -q .; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No system tests in test/system; skipping."
+          fi
+
+      - name: Install packages
+        if: steps.system_tests.outputs.present == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libpq-dev libvips42t64 libheif1 libheif-plugin-libde265 \
+            poppler-utils tesseract-ocr tesseract-ocr-eng
 
       - name: Set up Ruby
+        if: steps.system_tests.outputs.present == 'true'
         uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
 
       - name: Run System Tests
-        env:
-          RAILS_ENV: test
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432
-          # RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
-          # REDIS_URL: redis://localhost:6379/0
+        if: steps.system_tests.outputs.present == 'true'
         run: bin/rails db:test:prepare test:system
 
       - name: Keep screenshots from failed system tests
-        uses: actions/upload-artifact@v4
-        if: failure()
+        uses: actions/upload-artifact@v7
+        if: failure() && steps.system_tests.outputs.present == 'true'
         with:
           name: screenshots
           path: ${{ github.workspace }}/tmp/screenshots

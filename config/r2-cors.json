@@ -1,0 +1,9 @@
+[
+  {
+    "AllowedOrigins": ["https://certs.abaventures.net"],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedHeaders": ["Content-Type", "Content-MD5", "Content-Disposition", "x-amz-*"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]

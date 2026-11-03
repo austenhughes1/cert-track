@@ -1,0 +1,54 @@
+<%# locals: (user:) %>
+<%= form_with model: user, class: "space-y-5" do |form| %>
+  <% if user.errors.any? %>
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" id="error_explanation">
+      <p class="font-medium"><%= pluralize(user.errors.count, "problem") %> to fix:</p>
+      <ul class="mt-1 list-disc space-y-1 pl-5">
+        <% user.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="grid gap-5 sm:grid-cols-2">
+    <div>
+      <%= form.label :name, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :name, autofocus: user.new_record?, autocomplete: "off",
+            class: "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+    </div>
+
+    <div>
+      <%= form.label :email_address, "Email", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.email_field :email_address, required: true, autocomplete: "off",
+            class: "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :role, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.select :role, User.roles.keys.map { |role| [ role.humanize, role ] }, {},
+          aria: { describedby: "role_hint" },
+          class: "mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 sm:w-60" %>
+    <p id="role_hint" class="mt-1 text-xs text-gray-500">
+      Admin: everything, including users and the master list. Manager: edits crew, certificates, projects and imports. Viewer: read-only.
+      <% if user.persisted? && user.last_admin? %>
+        <strong class="font-medium text-gray-700">This is the only admin, so the role can't change.</strong>
+      <% end %>
+    </p>
+  </div>
+
+  <div class="flex items-start gap-2">
+    <%= form.check_box :receives_digest, class: "mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" %>
+    <div>
+      <%= form.label :receives_digest, "Receives digest emails", class: "text-sm font-medium text-gray-700" %>
+      <p class="text-xs text-gray-500">Daily expiry alerts and the Monday summary. Only admins and managers receive them.</p>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-3 border-t border-gray-100 pt-5">
+    <%= form.submit user.new_record? ? "Send invite" : "Save changes",
+          class: "cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+    <%= link_to "Cancel", users_path, class: "text-sm text-gray-600 hover:underline" %>
+  </div>
+<% end %>

@@ -1,0 +1,9 @@
+Hi <%= @user.name.presence || "there" %>,
+
+You've been given <%= @user.role.humanize.downcase %> access to CertTrack, the ABA Ventures certificate tracker. Set your password to get started:
+
+<%= @url %>
+
+This link expires in <%= distance_of_time_in_words(0, User::INVITATION_EXPIRES_IN) %> and works once. If it has expired, ask an admin to resend your invite, or use "Forgot password?" on the sign-in page.
+
+Your sign-in email is <%= @user.email_address %>.

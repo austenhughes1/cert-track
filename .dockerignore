@@ -49,3 +49,9 @@
 # Ignore Docker-related files
 /.dockerignore
 /Dockerfile*
+
+# Real certificates for the Phase 3 accuracy harness hold personal data; never bake them into an image.
+/test/fixtures/import_samples/
+
+# Docs (PLAN.md, DEPLOY.md) are not needed at runtime.
+/docs/

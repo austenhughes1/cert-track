@@ -1,0 +1,73 @@
+<% content_for :title, "Users" %>
+
+<div class="mb-4 flex items-end justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-semibold">Users</h1>
+    <p class="mt-1 text-sm text-gray-500">Invite people, set roles and choose who gets the expiry digest emails.</p>
+  </div>
+  <div class="flex items-center gap-2">
+    <%= button_to "Send test digest to me", send_test_digest_users_path,
+          class: "cursor-pointer rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50",
+          title: "Emails you today's daily digest built from current data. Nothing is logged, so the real digest still goes out.",
+          data: { turbo_submits_with: "Sending…" } %>
+    <%= link_to "Invite user", new_user_path, class: "rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+  </div>
+</div>
+
+<% if @users.empty? %>
+  <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
+    <p class="text-sm font-medium text-gray-900">No users yet</p>
+    <p class="mt-1 text-sm text-gray-500">Invite someone to give them access.</p>
+  </div>
+<% else %>
+  <% admin_count = @users.count(&:admin?) %>
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <tr>
+          <th scope="col" class="px-4 py-2">Name</th>
+          <th scope="col" class="px-4 py-2">Email</th>
+          <th scope="col" class="px-4 py-2">Role</th>
+          <th scope="col" class="px-4 py-2">Digest</th>
+          <th scope="col" class="px-4 py-2" title="Most recent sign-in that is still open; signing out clears it">Last sign-in</th>
+          <th scope="col" class="px-4 py-2"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        <% @users.each do |user| %>
+          <tr id="<%= dom_id(user) %>" class="hover:bg-gray-50">
+            <td class="whitespace-nowrap px-4 py-2 font-medium text-gray-900">
+              <%= user.name || "—" %>
+              <% if user == Current.user %><span class="ml-1 text-xs font-normal text-gray-400">(you)</span><% end %>
+            </td>
+            <td class="whitespace-nowrap px-4 py-2 text-gray-700"><%= user.email_address %></td>
+            <td class="whitespace-nowrap px-4 py-2">
+              <span class="<%= class_names("inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
+                    "bg-purple-100 text-purple-800": user.admin?,
+                    "bg-blue-100 text-blue-800": user.manager?,
+                    "bg-gray-100 text-gray-700": user.viewer?) %>"><%= user.role.humanize %></span>
+            </td>
+            <td class="whitespace-nowrap px-4 py-2"><%= user.receives_digest? ? "Yes" : "No" %></td>
+            <td class="whitespace-nowrap px-4 py-2 text-gray-700">
+              <% if (signed_in_at = user.last_signed_in_at) %>
+                <time datetime="<%= signed_in_at.iso8601 %>"><%= signed_in_at.strftime("%b %-d, %Y %-l:%M %p") %></time>
+              <% else %>
+                <span class="text-gray-400">—</span>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-4 py-2">
+              <div class="flex items-center justify-end gap-3">
+                <%= link_to "Edit", edit_user_path(user), class: "text-blue-700 hover:underline" %>
+                <%= button_to "Resend invite", resend_invite_user_path(user), class: "cursor-pointer text-blue-700 hover:underline" %>
+                <% if user != Current.user && !(user.admin? && admin_count == 1) %>
+                  <%= button_to "Delete", user_path(user), method: :delete, class: "cursor-pointer text-red-700 hover:underline",
+                        form: { data: { turbo_confirm: "Delete #{user.display_name}? They lose access immediately." } } %>
+                <% end %>
+              </div>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+<% end %>

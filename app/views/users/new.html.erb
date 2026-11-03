@@ -1,0 +1,14 @@
+<% content_for :title, "Invite user" %>
+
+<div class="max-w-2xl">
+  <%= link_to "← Users", users_path, class: "text-sm text-blue-700 hover:underline" %>
+  <h1 class="mt-2 text-2xl font-semibold">Invite a user</h1>
+  <p class="mt-1 text-sm text-gray-500">
+    They get an email with a link to set their password. The link works for
+    <%= distance_of_time_in_words(0, User::INVITATION_EXPIRES_IN) %>; you can resend it from the Users list.
+  </p>
+
+  <div class="mt-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+    <%= render "form", user: @user %>
+  </div>
+</div>

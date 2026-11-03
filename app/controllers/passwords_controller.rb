@@ -1,3 +1,6 @@
+# Password resets and invite acceptance share the set-password form. Reset links
+# expire in 15 minutes; invite links (UserMailer.invite) last User::INVITATION_EXPIRES_IN.
+# Both die once the password changes because both tokens are keyed on the password salt.
 class PasswordsController < ApplicationController
   allow_unauthenticated_access
   before_action :set_user_by_token, only: %i[ edit update ]
@@ -18,18 +21,32 @@ class PasswordsController < ApplicationController
   end
 
   def update
-    if @user.update(params.permit(:password, :password_confirmation))
+    if change_password
       @user.sessions.destroy_all
-      redirect_to new_session_path, notice: "Password has been reset."
+      notice = @invitation ? "Password set. Sign in to get started." : "Password has been reset."
+      redirect_to new_session_path(email_address: @user.email_address), notice: notice
     else
-      redirect_to edit_password_path(params[:token]), alert: "Passwords did not match."
+      render :edit, status: :unprocessable_entity
     end
   end
 
   private
     def set_user_by_token
-      @user = User.find_by_password_reset_token!(params[:token])
-    rescue ActiveSupport::MessageVerifier::InvalidSignature
-      redirect_to new_password_path, alert: "Password reset link is invalid or has expired."
+      if @user = User.find_by_password_reset_token(params[:token])
+        @invitation = false
+      elsif @user = User.find_by_invitation_token(params[:token])
+        @invitation = true
+      else
+        redirect_to new_password_path, alert: "That link is invalid or has expired. Request a new one below."
+      end
+    end
+
+    def change_password
+      if params[:password].blank?
+        @user.errors.add(:password, :blank)
+        false
+      else
+        @user.update(params.permit(:password, :password_confirmation))
+      end
     end
 end

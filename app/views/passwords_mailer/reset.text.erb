@@ -1,4 +1,6 @@
-You can reset your password on
+Someone asked to reset the CertTrack password for <%= @user.email_address %>.
+
+Choose a new password here:
 <%= edit_password_url(@user.password_reset_token) %>
 
-This link will expire in <%= distance_of_time_in_words(0, @user.password_reset_token_expires_in) %>.
+This link expires in <%= distance_of_time_in_words(0, @user.password_reset_token_expires_in) %>. If you didn't ask for this, ignore this email; your password stays the same.

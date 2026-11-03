@@ -85,12 +85,16 @@ test:
 # Read https://guides.rubyonrails.org/configuring.html#configuring-a-database
 # for a full overview on how database connection configuration can be specified.
 #
+# Production talks to the Kamal Postgres 17 accessory (DB_HOST=cert_track-db, see config/deploy.yml).
+# cert_track is the accessory's POSTGRES_USER, a superuser, so bin/docker-entrypoint's db:prepare
+# creates all four databases on first boot.
 production:
   primary: &primary_production
     <<: *default
+    host: <%= ENV["DB_HOST"] %>
     database: cert_track_production
     username: cert_track
-    password: <%= ENV["CERT_TRACK_DATABASE_PASSWORD"] %>
+    password: <%= ENV["POSTGRES_PASSWORD"] %>
   cache:
     <<: *primary_production
     database: cert_track_production_cache

@@ -1,5 +1,7 @@
 # Audit all gems listed in the Gemfile for known security problems by running bin/bundler-audit.
-# CVEs that are not relevant to the application can be enumerated on the ignore list below.
+# Ignore an advisory only when it cannot affect CertTrack, and say why next to it, e.g.:
+#
+#   ignore:
+#     - CVE-2099-0001 # only affects the X adapter, which we don't use
 
-ignore:
-  - CVE-THAT-DOES-NOT-APPLY
+ignore: []
