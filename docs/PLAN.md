@@ -429,11 +429,11 @@ There are six phases, each shippable on its own: the tracker is useful after Pha
 
 Owner, by hand:
 
-- [ ] Create an Oracle Cloud account with a US West home region. Create one A1 VM (2 OCPU, 12 GB, Ubuntu 24.04 LTS, 100 GB boot volume) and upgrade the tenancy to Pay As You Go. Open ports 80 and 443 in the security list.
-- [ ] Create a Cloudflare account, R2 buckets `certtrack-files` and `certtrack-backups`, an R2 API token, and a Workers AI API token. Note the account ID. Add a Cloudflare budget alert so R2 spend past the free 10 GB is never a surprise.
-- [ ] Turn on 2-Step Verification for the sending Workspace account (`austen@abaventures.net`), create a CertTrack app password, publish a DMARC record for abaventures.net (it has none; `docs/DEPLOY.md` section 5, step 10), and after the first deploy confirm SPF, DKIM and DMARC pass for abaventures.net.
-- [ ] On the VM, before the first deploy, create the folder for the nightly file copy (`docs/DEPLOY.md`, "File copies").
-- [ ] Add a DNS A record pointing `certs.abaventures.net` at the VM's public IP.
+- [ ] Create an Oracle Cloud account with a US West home region. Create one A1 VM (2 OCPU, 12 GB, Ubuntu 24.04 LTS, 100 GB boot volume) and upgrade the tenancy to Pay As You Go. Open ports 80 and 443 in the security list. (Nov 4, 2026: done in Phoenix, except the Pay As You Go upgrade; the tenancy is still on the Free Trial.)
+- [x] Create a Cloudflare account, R2 buckets `certtrack-files` and `certtrack-backups`, an R2 API token, and a Workers AI API token. Note the account ID. Add a Cloudflare budget alert so R2 spend past the free 10 GB is never a surprise.
+- [ ] Turn on 2-Step Verification for the sending Workspace account (`austen@abaventures.net`), create a CertTrack app password, publish a DMARC record for abaventures.net (it has none; `docs/DEPLOY.md` section 5, step 10), and after the first deploy confirm SPF, DKIM and DMARC pass for abaventures.net. (Nov 4, 2026: all done except the SPF/DKIM/DMARC check on the first email, the admin invitation.)
+- [x] On the VM, before the first deploy, create the folder for the nightly file copy (`docs/DEPLOY.md`, "File copies").
+- [x] Add a DNS A record pointing `certs.abaventures.net` at the VM's public IP.
 
 Claude Code:
 
@@ -448,6 +448,8 @@ Claude Code:
 Done when: `https://certs.abaventures.net/up` returns 200 with a valid certificate, the admin can sign in, and a backup restores into a scratch database.
 
 Status (Nov 2, 2026): code complete; the app lives in the `cert-track` repo (Rails app name `CertTrack`). Backup and restore are tested locally against Postgres. Still open, and blocked on the owner's accounts and VM: the first `kamal setup`, the live `/up` and TLS check, and a restore drill on the server. The Dockerfile has not been built yet, because Docker isn't available on the dev machine. Steps are in `docs/DEPLOY.md`.
+
+Status (Nov 4, 2026): deployed. `https://certs.abaventures.net/up` returns 200 with a Let's Encrypt certificate, and HTTP redirects to HTTPS. `certtrack:backup_now` uploaded an encrypted backup to `certtrack-backups`, and `certtrack:restore_latest` restored it into a scratch database on the server (1 user, matching production), which was then dropped. The admin `austen@abaventures.net` exists and was sent an invitation; the last done-when item is the owner signing in. The first deploy found the credentials encrypted with a `RAILS_MASTER_KEY` exported for another project, not `config/master.key`. They were regenerated with fresh values before any data existed, and `config/boot.rb` now ignores a mismatching env key.
 
 ### Phase 1: Core tracker
 
