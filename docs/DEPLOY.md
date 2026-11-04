@@ -15,8 +15,9 @@ How to stand up, deploy, back up and rebuild CertTrack on its $0 stack: one Orac
 ## 0. On your machine
 
 - Ruby 3.4.12 and `bundle install` in the repo, so `bin/kamal` works.
-- The Docker CLI with the buildx plugin (`docker buildx version`), and a running local Docker daemon for `kamal registry login`. The image itself is built on the VM (the VM is arm64; this machine is x86), so the local daemon does almost no work.
-- `config/master.key`. Keep a copy in your password manager. It decrypts the Rails credentials, which hold the Active Record encryption keys and the backup encryption key. **Without it, the backups cannot be decrypted.**
+- The Docker CLI with the buildx plugin (`docker buildx version`). No local Docker daemon is needed: `kamal registry login` logs in client-side when none is running, and the image is built on the VM (the VM is arm64; this machine is x86).
+- If Docker is the snap (`snap list docker`), it has a private `/tmp` and can't see the clone Kamal builds from (`/tmp/kamal-clones`), so the build fails with `open Dockerfile: no such file or directory`. Point Kamal at a folder in your home directory instead: `mkdir -p ~/kamal-tmp`, then add `export TMPDIR="$HOME/kamal-tmp"` to `deploy.env` (section 7).
+- `config/master.key`. Keep a copy in your password manager. It decrypts the Rails credentials, which hold the Active Record encryption keys and the backup encryption key. **Without it, the backups cannot be decrypted.** If your shell exports a `RAILS_MASTER_KEY` for another app, `config/boot.rb` ignores it here (with a warning) whenever it doesn't match `config/master.key`. Before Nov 4, 2026 it didn't, and the credentials had been encrypted with that other key by mistake.
 - SSH key. Create one if you don't have one:
 
   ```bash
@@ -397,6 +398,8 @@ R2 still holds every file and the last 14 backups. The nightly file copies are l
 
 ## Troubleshooting
 
+- **`kamal setup` or `kamal deploy` fails at once with `failed to read dockerfile: open Dockerfile: no such file or directory`.** The local Docker is the snap and can't see Kamal's clone in `/tmp`. Set `TMPDIR` as in section 0 and run the command again.
+- **The app container restarts with `ActiveSupport::MessageEncryptor::InvalidMessage` and the deploy times out.** The `RAILS_MASTER_KEY` Kamal sends (`config/master.key`) doesn't decrypt the committed `config/credentials.yml.enc`. Check it locally with that key alone: `env -u RAILS_MASTER_KEY bin/rails runner 'p Rails.application.credentials.config.keys'`.
 - **No TLS certificate / `kamal setup` hangs on the proxy.** Check that `dig +short certs.abaventures.net` returns `KAMAL_HOST`, that the Cloudflare record is DNS only, and that 80/443 are open in **both** the security list and iptables. `bin/kamal proxy logs` shows the ACME errors.
 - **`Blocked hosts` error page.** The request's host isn't `APP_HOST`. Only `certs.abaventures.net` is allowed (`config.hosts`), and `/up` is exempt.
 - **Direct uploads fail with a CORS error in the browser console.** Check the R2 CORS policy (section 3, step 6). The origin must be exactly `https://certs.abaventures.net`, with no trailing slash.
