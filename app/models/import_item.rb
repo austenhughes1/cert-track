@@ -11,14 +11,13 @@ class ImportItem < ApplicationRecord
 
   # matched_crew_member / matched_certificate_type hold the exact match or the top suggestion;
   # these say which. Suggestions are [{ "id" =>, "name" =>, "similarity" => }] best first.
-  # After a reviewer's "Save edits", matched_crew_member may instead be a person picked by
-  # hand, stored with person_match unmatched (shown as "Picked by hand"; Imports::Accept
-  # learns no alias from it). A type picked by hand is stored as type_match matched.
-  enum :person_match, { unmatched: 0, suggested: 1, matched: 2 }, prefix: :person, default: :unmatched
+  # picked: a reviewer chose the person by hand and saved it ("Save edits"); shown as
+  # "Picked by hand", and Imports::Accept learns no alias from it. A type picked by hand is
+  # stored as type_match matched.
+  enum :person_match, { unmatched: 0, suggested: 1, matched: 2, picked: 3 }, prefix: :person, default: :unmatched
   enum :type_match, { unmatched: 0, suggested: 1, matched: 2 }, prefix: :type, default: :unmatched
-  # A proposed_expires_on with no source is one a reviewer typed and saved ("Save edits");
-  # Imports::Accept records it as manual.
-  enum :proposed_expires_on_source, { printed: 0, computed: 1, none: 2 }, prefix: :proposed_expiry
+  # manual: a reviewer typed the expiry and saved it ("Save edits").
+  enum :proposed_expires_on_source, { printed: 0, computed: 1, none: 2, manual: 3 }, prefix: :proposed_expiry
 
   belongs_to :import_batch
   belongs_to :source_item, class_name: "ImportItem", optional: true, inverse_of: :split_items # the file this page range came from
@@ -53,9 +52,11 @@ class ImportItem < ApplicationRecord
   scope :review_queue, -> { needs_review.order(arel_table[:skipped_at].asc.nulls_first, :id) }
   # Parked until the AI allocation resets (next_attempt_at still ahead).
   scope :waiting_for_budget, ->(now = Time.current) { in_pipeline.where(arel_table[:next_attempt_at].gt(now)) }
-  # Accepted or rejected items whose extracted_text/extraction are past the 30-day retention.
+  # Finished items (accepted, rejected, duplicate or failed) whose extracted_text/extraction
+  # are past the 30-day retention, counted from the review or, without one, the last change.
+  # Failed items and split-off duplicates hold OCR text too. needs_review items are kept.
   scope :purgeable, ->(now: Time.current) {
-    where(status: %i[accepted rejected])
+    terminal
       .where("coalesce(import_items.reviewed_at, import_items.updated_at) < ?", now - PURGE_AFTER)
       .where("import_items.extracted_text IS NOT NULL OR import_items.extraction IS NOT NULL")
   }
@@ -77,6 +78,19 @@ class ImportItem < ApplicationRecord
         .where.not(status: %i[duplicate failed])
         .order(arel_table[:source_item_id].asc.nulls_first, :id)
         .first
+    end
+
+    # original_file_for for many files in one query: { sha256 => item } for each digest that
+    # has an original.
+    def original_files_for(sha256s)
+      digests = Array(sha256s).map { |digest| digest.to_s.strip.downcase }.uniq
+      return {} if digests.empty?
+
+      where(sha256: digests)
+        .where.not(status: %i[duplicate failed])
+        .select("DISTINCT ON (import_items.sha256) import_items.*")
+        .order(:sha256, arel_table[:source_item_id].asc.nulls_first, :id)
+        .index_by(&:sha256)
     end
 
     # Clears extracted_text and extraction on purgeable items. Returns the number cleared.
@@ -112,5 +126,16 @@ class ImportItem < ApplicationRecord
 
   def mark_duplicate_of!(original)
     update!(status: :duplicate, duplicate_of: original)
+  end
+
+  # The expiry printed on this item's card that the AI could not read as a date ("06/2027"),
+  # or nil. Imports::Extraction::Normalizer keeps it under "unreadable". The item's own
+  # certificate is the first in extraction: Imports::Splitter leaves the first on the file's
+  # item and gives each split-off item only its own.
+  def unreadable_expires_on
+    data = extraction.is_a?(Hash) ? extraction.deep_stringify_keys : {}
+    certificate = Array(data["certificates"]).find { |entry| entry.is_a?(Hash) }
+    unreadable = certificate&.dig("unreadable")
+    unreadable["expires_on"].to_s.squish.presence if unreadable.is_a?(Hash)
   end
 end

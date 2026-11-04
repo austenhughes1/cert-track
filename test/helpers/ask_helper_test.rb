@@ -54,6 +54,16 @@ class AskHelperTest < ActionView::TestCase
     assert_equal [ "View Mari Garcia" ], fragment(ask_check_links(result)).css("a").map(&:text)
   end
 
+  test "ask_requirement_roles and ask_requirement_coverage" do
+    requirement = Ask::Requirement.new(certificate_type: certificate_types(:flagger), crew_roles: [], notes: [], needed: 4, missing: 1)
+
+    assert_equal "Everyone", ask_requirement_roles(requirement)
+    assert_equal "Climber, Operator", ask_requirement_roles(requirement.with(crew_roles: [ crew_roles(:climber), crew_roles(:operator) ]))
+    assert_equal "1 of 4 missing", ask_requirement_coverage(requirement)
+    assert_equal "All current (4)", ask_requirement_coverage(requirement.with(missing: 0))
+    assert_equal "Nobody needs it", ask_requirement_coverage(requirement.with(needed: 0, missing: 0))
+  end
+
   test "ask_columns drops the column every row shares" do
     holders = AskQuery.new("Who has flagger?", user: users(:viewer)).call
     assert_equal({ person: true, certificate_type: false }, ask_columns(holders))
@@ -72,5 +82,8 @@ class AskHelperTest < ActionView::TestCase
 
     expired = AskQuery.new("Whose first aid is expired?", user: users(:viewer)).call
     assert_equal({ person: true, certificate_type: false }, ask_columns(expired))
+
+    requirements = AskQuery.new("What's required on 2417?", user: users(:viewer)).call
+    assert_equal({ person: true, certificate_type: true }, ask_columns(requirements))
   end
 end

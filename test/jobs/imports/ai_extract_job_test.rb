@@ -4,7 +4,7 @@ require "support/import_samples"
 class Imports::AiExtractJobTest < ActiveJob::TestCase
   include ActiveSupport::Testing::TimeHelpers
 
-  AI_ENV = %w[CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_AI_API_TOKEN EXTRACTION_MODEL EXTRACTION_VISION_MODEL].freeze
+  AI_ENV = %w[CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_AI_API_TOKEN EXTRACTION_MODEL EXTRACTION_VISION_MODEL OLLAMA_URL].freeze
   AFTERNOON_UTC = Time.utc(2026, 11, 3, 15, 30)
   NEXT_RESET = Time.utc(2026, 11, 4, 0, 5)
 
@@ -38,6 +38,15 @@ class Imports::AiExtractJobTest < ActiveJob::TestCase
     assert_equal item.ai_units_used, Ai::Budget.used_today("fake")
   end
 
+  test "a second read of an item adds its AI units to the first one's" do
+    item = extracting_item(ImportSamples.certificate_text)
+    item.update!(ai_units_used: 140) # an earlier read (Imports::Reread keeps it)
+
+    Imports::AiExtractJob.perform_now(item)
+
+    assert_equal 140 + Ai::Budget.used_today("fake"), item.reload.ai_units_used
+  end
+
   test "a simulated quota error reschedules the job for exactly 00:05 UTC the next day" do
     item = extracting_item(ImportSamples.certificate_text)
     Ai::FakeProvider.fail_next!
@@ -66,6 +75,27 @@ class Imports::AiExtractJobTest < ActiveJob::TestCase
         Imports::AiExtractJob.perform_now(item)
       end
     end
+  end
+
+  test "a quota error just after midnight UTC parks the item until 00:05 that day, and it runs then" do
+    item = extracting_item(ImportSamples.certificate_text)
+    Ai::FakeProvider.fail_next!
+    reset = Time.utc(2026, 11, 4, 0, 5)
+
+    travel_to Time.utc(2026, 11, 4, 0, 2) do
+      assert_enqueued_with(job: Imports::AiExtractJob, args: [ item ], at: reset) do
+        Imports::AiExtractJob.perform_now(item)
+      end
+    end
+    assert_equal reset, item.reload.next_attempt_at
+
+    travel_to reset + 1.second do
+      assert_enqueued_with(job: Imports::ProcessExtractionJob, args: [ item ]) do
+        Imports::AiExtractJob.perform_now(item)
+      end
+    end
+    assert_nil item.reload.next_attempt_at
+    assert Imports::Extractor.finished?(item.extraction)
   end
 
   test "after a quota error the rest of the UTC day is used up, so other items wait without calling the API" do
@@ -206,6 +236,23 @@ class Imports::AiExtractJobTest < ActiveJob::TestCase
     assert_match "CLOUDFLARE_AI_API_TOKEN", item.error_message
     assert @batch.reload.failed?
     assert_equal 1, @batch.error_count
+  end
+
+  test "an OLLAMA_URL off this machine's network fails the item before anything is sent" do
+    item = extracting_item(ImportSamples.certificate_text)
+    ENV["OLLAMA_URL"] = "http://203.0.113.9:11434/v1"
+    ENV["EXTRACTION_MODEL"] = "llama3.2"
+
+    Ai::Config.with(provider: "ollama") do
+      assert_no_enqueued_jobs(only: Imports::AiExtractJob) { Imports::AiExtractJob.perform_now(item) }
+    end
+
+    item.reload
+    assert item.failed?
+    assert_match "OLLAMA_URL points at 203.0.113.9", item.error_message
+    assert_match "certificate text would leave the VM", item.error_message
+    assert_empty Ai::FakeProvider.calls
+    assert_nil item.extraction
   end
 
   test "provider errors are retried, then fail the item" do

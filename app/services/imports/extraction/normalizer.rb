@@ -8,7 +8,10 @@ module Imports
     #   - dates: valid ISO YYYY-MM-DD strings, else null. The dropped value is mentioned in
     #     notes and kept, capped, under "unreadable" ({ "expires_on" => "06/2027" }; the key
     #     is only there when a date was dropped), so the pipeline can tell "not printed" from
-    #     "printed but unreadable" and never computes an expiry in place of a printed one
+    #     "printed but unreadable" and never computes an expiry in place of a printed one. An
+    #     expiry that says there is none ("Never", "Does not expire", "Lifetime": NO_EXPIRY) is
+    #     not printed: null with a note, not unreadable, so the type's rule gives the expiry
+    #     (computed, or none when the type never expires) and the reviewer needn't make one up
     #   - confidence: a number clamped to 0..1, rounded DOWN to 2 places (0.849 is 0.84, so it
     #     can't pass a 0.85 threshold); missing means 0
     #   - strings squished and capped in length; "null", "N/A", "unknown" and "" become null
@@ -24,6 +27,12 @@ module Imports
       DATE_FIELDS = %w[completed_on expires_on].freeze
       BLANK_VALUES = %w[null nil none n/a na unknown - ?].freeze
       ISO_DATE = /\A(\d{4})-(\d{2})-(\d{2})(?:[T ][\d:.]+Z?)?\z/
+      # An expiry that says there is none, the whole text, perhaps after a label: "Never",
+      # "Expiration date: never", "Does not expire", "No expiration date", "Non-expiring",
+      # "Lifetime", "Valid indefinitely", "Expires: N/A". Anything with a date in it is not.
+      NO_EXPIRY = /\A(?:(?:expires|expiration|expiry|exp|valid)(?:\s(?:date|on|until|thru|through))?\W+)?
+        (?:never(?:\sexpires?)?|does\s?n[o'’]?t\sexpire|no\s(?:expiration|expiry)(?:\sdate)?|non[-\s]?expiring|
+          lifetime|for\slife|permanent|indefinite(?:ly)?|not\sapplicable|none|n\/?a)\W*\z/ix
       UNREADABLE_LIMIT = 40
       CONTENT_FIELDS = %w[holder_name certificate_type_code certificate_name_as_printed certificate_number completed_on expires_on].freeze
 
@@ -94,6 +103,11 @@ module Imports
 
           match = ISO_DATE.match(text)
           return format("%04d-%02d-%02d", *match.captures.map(&:to_i)) if match && Date.valid_date?(*match.captures.map(&:to_i))
+
+          if field == "expires_on" && NO_EXPIRY.match?(text) # no date printed, so the type's rule applies
+            notes << "No expiry date printed (the card says #{text.truncate(30).inspect})."
+            return
+          end
 
           notes << "Unreadable #{field} #{text.truncate(30).inspect} dropped."
           unreadable[field] = text.truncate(UNREADABLE_LIMIT)

@@ -43,7 +43,9 @@ class ImportsController < ApplicationController
     @progress = @batch.progress
     @items = @batch.import_items.order(:id).limit(ITEMS_LIMIT)
       .includes(:matched_crew_member, :matched_certificate_type, :duplicate_of, :certificate)
+      .with_attached_file # "Read again" (Imports::Reread.allowed?) checks the file
       .to_a
+    @reread_context = Imports::Reread.context_for(@items.select { |item| item.rejected? || item.failed? })
   end
 
   private

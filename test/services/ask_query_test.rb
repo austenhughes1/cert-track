@@ -72,6 +72,19 @@ class AskQueryTest < ActiveSupport::TestCase
     { q: "does mike johnson have first aid", scenario: :nicknames, intent: :check, status: :yes, person: "Michael Johnson", type: :first_aid },
     { q: "does chuy ramos have osha 30", scenario: :nicknames, intent: :check, status: :no, person: "Jesus Ramos", type: :osha30 },
 
+    # --- first names that are also verbs: Will, May ---
+    { q: "Does Will have flagger?", scenario: :will_and_may, intent: :check, status: :no, person: "Will Turner", type: :flagger,
+      answer: "No. Will Turner has no Flagger certificate on file." },
+    { q: "Is May certified for first aid?", scenario: :will_and_may, intent: :check, status: :yes, person: "May Lopez", type: :first_aid },
+    { q: "What does Will Turner have?", scenario: :will_and_may, intent: :list_certificates, status: :list, person: "Will Turner",
+      answer: "Will Turner has no certificates on file." },
+    { q: "Will Turner's certs", scenario: :will_and_may, intent: :list_certificates, status: :list, person: "Will Turner" },
+    { q: "Will's certs", scenario: :will_and_may, intent: :list_certificates, status: :list, person: "Will Turner" },
+    { q: "Will Juan's flagger expire soon?", scenario: :will_and_may, intent: :check, status: :yes, person: :juan_ortiz, type: :flagger },
+    { q: "When will Juan's flagger expire?", scenario: :will_and_may, intent: :check, status: :yes, person: :juan_ortiz, type: :flagger },
+    { q: "May I see who has CPR?", scenario: :will_and_may, intent: :list_holders, status: :list, person: nil, type: :first_aid },
+    { q: "What expires in May?", scenario: :will_and_may, intent: :expiring, status: :list, person: nil },
+
     # --- OSHA 10 is not OSHA 30 ---
     { q: "Does Juan Ortiz have OSHA 10?", intent: :check, status: :not_found, person: :juan_ortiz, type: nil,
       answer: "I couldn't find a certificate type matching “OSHA 10”. Did you mean OSHA 30 Construction?",
@@ -144,6 +157,7 @@ class AskQueryTest < ActiveSupport::TestCase
     { q: "who doesn't have scuba", intent: :lacking, status: :not_found, type: nil, answer: "I couldn't find a certificate type matching “scuba”." },
     { q: "who needs flagger on 2417", intent: :gaps, status: :list, type: :flagger, project: :tower_2417, members: %i[maria_garcia],
       answer: "2417 · Tower 2417 Upgrade has 1 Flagger gap (1 missing): Mari Garcia (missing)." },
+    { q: "Who needs flagger on 2417?", intent: :gaps, status: :list, type: :flagger, project: :tower_2417, members: %i[maria_garcia] },
 
     # --- what does X have ---
     { q: "What does Juan Ortiz have?", intent: :list_certificates, status: :list, person: :juan_ortiz,
@@ -209,6 +223,23 @@ class AskQueryTest < ActiveSupport::TestCase
       answer: /\A2 certificates on 2417 · Tower 2417 Upgrade have expired: / },
     { q: "Has anything of Juan's expired?", intent: :expired, status: :list, person: :juan_ortiz, certificates: [],
       answer: "No certificates held by Juan Ortiz have expired." },
+    { q: "who has a lapsed first aid", intent: :expired, status: :list, type: :first_aid, certificates: %i[maria_first_aid li_first_aid] },
+    { q: "any lapses?", intent: :expired, status: :list, certificates: %i[maria_first_aid li_first_aid] },
+    { q: "lapses on 2417", intent: :expired, status: :list, project: :tower_2417, certificates: %i[maria_first_aid li_first_aid] },
+    { q: "what's out of date", intent: :expired, status: :list, certificates: %i[maria_first_aid li_first_aid],
+      answer: /\A2 certificates have expired: Mari Garcia's First Aid/ },
+    { q: "Which certificates are out of date?", intent: :expired, status: :list, certificates: %i[maria_first_aid li_first_aid] },
+    { q: "who is out of date on first aid", intent: :expired, status: :list, type: :first_aid, certificates: %i[maria_first_aid li_first_aid] },
+    { q: "which certificates are no longer valid", intent: :expired, status: :list, certificates: %i[maria_first_aid li_first_aid] },
+    { q: "is anything no longer valid?", intent: :expired, status: :list, certificates: %i[maria_first_aid li_first_aid] },
+    { q: "Is Juan's first aid out of date?", intent: :check, status: :yes, person: :juan_ortiz, type: :first_aid,
+      answer: /\ANo\. Juan Ortiz has First Aid\/CPR\/AED, completed / },
+    { q: "Is Mari's first aid no longer valid?", intent: :check, status: :no, person: :maria_garcia, type: :first_aid,
+      answer: /\AYes\. Mari Garcia has no current First Aid/ },
+    { q: "what has expired so far", intent: :expired, status: :list, certificates: %i[maria_first_aid li_first_aid], candidates: [],
+      notes: /\AIgnored “so far”\.\z/ },
+    { q: "which certs lapse next month", intent: :expiring, status: :list, certificates: %i[juan_flagger dave_cdl_a] },
+    { q: "What will lapse soon?", intent: :expiring, status: :list, certificates: %i[juan_flagger dave_cdl_a] },
 
     # --- missing / gaps ---
     { q: "What's missing on 2417?", intent: :gaps, status: :list, project: :tower_2417,
@@ -221,9 +252,34 @@ class AskQueryTest < ActiveSupport::TestCase
       answer: /\AMari Garcia has 2 gaps \(1 expired, 1 missing\) on 1 active project\. 2417 · Tower 2417 Upgrade: Flagger \(missing\) and First Aid/ },
     { q: "who's missing flagger on 2417", intent: :gaps, status: :list, type: :flagger, project: :tower_2417, members: %i[maria_garcia],
       answer: "2417 · Tower 2417 Upgrade has 1 Flagger gap (1 missing): Mari Garcia (missing)." },
+    { q: "Who is missing what on 2417?", intent: :gaps, status: :list, project: :tower_2417, answer: /has 5 gaps/ },
+    { q: "gaps on 2417", intent: :gaps, status: :list, project: :tower_2417, answer: /has 5 gaps/ },
     { q: "what's missing on 9999", intent: :gaps, status: :not_found, project: nil,
-      answer: "I couldn't find a project, crew member or certificate type matching “9999”. Did you mean 2417 · Tower 2417 Upgrade?",
+      answer: "I couldn't find a project, crew member or certificate type matching “9999”.", candidates: [] },
+    { q: "what's missing on 2471", intent: :gaps, status: :not_found, project: nil,
+      answer: "I couldn't find a project, crew member or certificate type matching “2471”. Did you mean 2417 · Tower 2417 Upgrade?",
       candidates: [ "2417 · Tower 2417 Upgrade" ] },
+    { q: "What's expiring for Bob?", intent: :expiring, status: :not_found, candidates: [],
+      answer: "I couldn't find a project, crew member or certificate type matching “Bob”." },
+
+    # --- what a project requires ---
+    { q: "What's required on 2417?", intent: :requirements, status: :list, project: :tower_2417, type: nil,
+      answer: "2417 · Tower 2417 Upgrade requires 5 certificate types: OSHA 30 Construction, Flagger, First Aid/CPR/AED, " \
+        "Authorized Climber (Climber role), and CDL Class A (Operator role). 3 of 4 assigned crew are missing at least one: " \
+        "Li Chen, Mari Garcia, and Dave Miller.",
+      members: %i[li_chen maria_garcia dave_miller], certificates: %i[li_first_aid maria_first_aid], sections: { requirements: 5, gaps: 5 } },
+    { q: "what does project 2417 require", intent: :requirements, status: :list, project: :tower_2417, answer: /\A2417 · Tower 2417 Upgrade requires 5 certificate types: / },
+    { q: "requirements for 2417", intent: :requirements, status: :list, project: :tower_2417, answer: /3 of 4 assigned crew are missing at least one/ },
+    { q: "what does 2417 need?", intent: :requirements, status: :list, project: :tower_2417 },
+    { q: "Is flagger required on 2417?", intent: :requirements, status: :list, project: :tower_2417, type: :flagger, members: %i[maria_garcia],
+      answer: "2417 · Tower 2417 Upgrade requires Flagger for everyone on the crew. 1 of 4 on the crew who need it is missing it: Mari Garcia (missing).",
+      sections: { requirements: 1, gaps: 1 } },
+    { q: "Does 2417 require a CDL?", intent: :requirements, status: :list, project: :tower_2417, type: :cdl_a, members: [],
+      answer: "2417 · Tower 2417 Upgrade requires CDL Class A for the Operator role. Everyone on the crew who needs it (1 person) holds a current one.",
+      sections: { requirements: 1 } },
+    { q: "What do I need for 2417?", intent: :requirements, status: :list, project: :tower_2417 },
+    { q: "What is required on 2417 for Juan?", intent: :gaps, status: :list, project: :tower_2417, person: :juan_ortiz,
+      answer: "Juan Ortiz has no gaps on 2417 · Tower 2417 Upgrade." },
 
     # --- not a question we can answer ---
     { q: "asdf qwerty", intent: :unknown, status: :unknown, answer: "I'm not sure what you're asking. #{AskQuery::HELP}" },
@@ -372,6 +428,97 @@ class AskQueryTest < ActiveSupport::TestCase
     assert_match(/\ANobody holds a current First Aid\/CPR\/AED certificate\. Expired: /, ask("Who has first aid?").answer)
   end
 
+  test "requirements name each type's roles, notes and how the crew stands" do
+    result = ask("What's required on 2417?")
+
+    requirements = result.sections.find { |section| section.key == :requirements }.items
+    assert_equal %i[osha30 flagger first_aid climber cdl_a].map { |name| certificate_types(name) }, requirements.map(&:certificate_type)
+    climber = requirements.find { |requirement| requirement.certificate_type == certificate_types(:climber) }
+    assert_equal [ crew_roles(:climber) ], climber.crew_roles
+    assert_equal [ "Anyone working above 6 ft on the tower." ], climber.notes
+    assert_equal [ 2, 1 ], [ climber.needed, climber.missing ] # Juan, and Li as a climber on this project
+    first_aid = requirements.find { |requirement| requirement.certificate_type == certificate_types(:first_aid) }
+    assert first_aid.everyone?
+    assert_equal [ 4, 3 ], [ first_aid.needed, first_aid.missing ]
+    gaps = result.sections.find { |section| section.key == :gaps }
+    assert_equal "Missing or expired", gaps.title
+    assert_equal [ projects(:tower_2417) ], gaps.items.map(&:project).uniq
+    assert_nil result.window
+  end
+
+  test "a type required of everyone and of a role is required of everyone" do
+    ProjectRequirement.create!(project: projects(:tower_2417), certificate_type: certificate_types(:flagger), crew_role: crew_roles(:climber))
+    ProjectRequirement.create!(project: projects(:tower_2417), certificate_type: certificate_types(:cdl_a), crew_role: crew_roles(:foreman))
+
+    answer = ask("What's required on 2417?").answer
+
+    assert_match(/OSHA 30 Construction, Flagger, First Aid/, answer)
+    assert_match(/CDL Class A \(Foreman and Operator roles\)\./, answer)
+  end
+
+  test "requirements without crew, without gaps and without requirements" do
+    empty = Project.create!(name: "Empty Site", code: "3001", status: :active)
+    assert_equal "3001 · Empty Site has no certificate requirements yet.", ask("What's required on 3001?").answer
+    assert_empty ask("What's required on 3001?").sections
+
+    empty.project_requirements.create!(certificate_type: certificate_types(:osha30))
+    assert_equal "3001 · Empty Site requires 1 certificate type: OSHA 30 Construction. Nobody is on the crew.", ask("What's required on 3001?").answer
+
+    empty.project_assignments.create!(crew_member: crew_members(:juan_ortiz))
+    result = ask("requirements for 3001")
+    assert_equal "3001 · Empty Site requires 1 certificate type: OSHA 30 Construction. " \
+      "Everyone on the crew (1 person) holds a current certificate for each type they need.", result.answer
+    assert_equal [ :requirements ], result.sections.map(&:key)
+
+    assert_equal "3001 · Empty Site requires OSHA 30 Construction for everyone on the crew. " \
+      "Everyone on the crew who needs it (1 person) holds a current one.", ask("Is OSHA 30 required on 3001?").answer
+  end
+
+  test "a type the project doesn't require, and a closed project" do
+    result = ask("Is climber required on 2390?")
+
+    assert_equal :requirements, result.intent
+    assert_equal "2390 · Rooftop 2390 doesn't require Authorized Climber. 2390 · Rooftop 2390 is closed.", result.answer
+    assert_empty result.sections
+  end
+
+  test "a role requirement nobody on the crew holds the role for" do
+    ProjectRequirement.where(project: projects(:tower_2417), certificate_type: certificate_types(:cdl_a)).update_all(crew_role_id: crew_roles(:laborer).id)
+
+    assert_equal "2417 · Tower 2417 Upgrade requires CDL Class A for the Laborer role. Nobody on the crew needs it.",
+      ask("Does 2417 require a CDL?").answer
+  end
+
+  test "an unrelated leftover in an expiry or compliance question is noted, not chased" do
+    Project.create!(name: "Golden Water Tank Repaint", code: "GW-12", status: :active)
+
+    %w[expiring expired missing].each do |word|
+      result = ask("what's #{word} recently blah")
+      assert_equal :list, result.status, result.answer
+      assert_empty result.candidates
+      assert_includes result.notes, "Ignored “blah”."
+    end
+  end
+
+  test "a project chip shows the project once, with its status only when not active" do
+    choice = ask("what's missing on 2471").candidates.sole
+    assert_equal "2417 · Tower 2417 Upgrade", choice.label
+    assert_equal "", choice.detail
+    assert_equal "what's missing on 2417", choice.question
+    assert_equal({ project_id: projects(:tower_2417).id }, choice.pins)
+
+    closed = ask("what's missing on 2391").candidates.sole
+    assert_equal [ "2390 · Rooftop 2390", "closed" ], [ closed.label, closed.detail ]
+  end
+
+  test "Will and May are only people where a name fits" do
+    scenario_will_and_may
+
+    assert_nil ask("Will anyone's first aid expire?").crew_member
+    assert_nil ask("who will need flagger on 2417").crew_member
+    assert_equal "Will Turner", ask("certs for Will").crew_member&.full_name
+  end
+
   # --- candidates and pins ---
 
   test "ambiguous people come with re-ask questions and pins" do
@@ -456,7 +603,9 @@ class AskQueryTest < ActiveSupport::TestCase
       "missing" => 6,
       "Does Juan Orteg have flagger?" => 5,
       "Who doesn't have flagger?" => 5,
-      "Which certificates have expired?" => 4
+      "Which certificates have expired?" => 4,
+      "What's required on 2417?" => 7,
+      "Does Will have flagger?" => 5
     }.each do |question, limit|
       queries = count_queries { ask(question) }
       assert_operator queries, :<=, limit, "#{question.inspect} ran #{queries} queries"
@@ -532,5 +681,11 @@ class AskQueryTest < ActiveSupport::TestCase
 
     def scenario_pedro
       CrewMember.create!(first_name: "Pedro", last_name: "Ortiz", crew_role: crew_roles(:laborer))
+    end
+
+    def scenario_will_and_may
+      CrewMember.create!(first_name: "Will", last_name: "Turner")
+      may = CrewMember.create!(first_name: "May", last_name: "Lopez")
+      may.certificates.create!(certificate_type: certificate_types(:first_aid), completed_on: Date.current - 30)
     end
 end

@@ -23,7 +23,7 @@ module Imports
   # SystemStackError (a parser recursing on a hostile file) is not a StandardError and would
   # fail the same way again, so it fails the item at once.
   class ProcessExtractionJob < ApplicationJob
-    queue_as :default
+    queue_as :imports # the import worker (config/queue.yml); see Imports::ExpandJob
 
     NO_CERTIFICATE = "The AI found no certificate in this file. Reject it if that is right; " \
                      "if it is a certificate, fill in the fields and accept it.".freeze

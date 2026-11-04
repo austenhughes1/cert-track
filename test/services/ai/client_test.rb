@@ -125,9 +125,21 @@ class Ai::ClientTest < ActiveSupport::TestCase
     chat = Ai::Client.new(provider: "ollama", model: "llama3.2").build_chat(system: "rules")
     assert_equal "http://localhost:11434/v1", chat.provider.api_base
 
-    ENV["OLLAMA_URL"] = "http://gpu-box:11434/v1"
+    ENV["OLLAMA_URL"] = "http://10.0.0.5:11434/v1"
     chat = Ai::Client.new(provider: "ollama", model: "llama3.2").build_chat(system: "rules")
-    assert_equal "http://gpu-box:11434/v1", chat.provider.api_base
+    assert_equal "http://10.0.0.5:11434/v1", chat.provider.api_base
+  end
+
+  test "an OLLAMA_URL outside this machine's network is refused by the client itself, before anything is sent" do
+    ENV["OLLAMA_URL"] = "http://203.0.113.7:11434/v1" # a public address (TEST-NET-3)
+    sent = []
+    client = Ai::Client.new(provider: "ollama", model: "llama3.2", transport: ->(chat) { sent << chat.render })
+
+    error = assert_raises(Ai::ConfigurationError) { client.json(system: "rules", prompt: certificate_prompt) }
+    assert_match "OLLAMA_URL points at 203.0.113.7, which is outside this machine", error.message
+    assert_raises(Ai::ConfigurationError) { client.build_chat(system: "rules") }
+    assert_empty sent
+    assert_equal 0, AiUsageDay.count
   end
 
   # --- sending (through a stub transport) ---------------------------------------------

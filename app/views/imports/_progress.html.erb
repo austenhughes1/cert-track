@@ -1,12 +1,16 @@
-<%# locals: (batch:, progress:, items:, items_total:) %>
+<%# locals: (batch:, progress:, items:, items_total:, reread_context: nil) %>
 <%# Live progress. While files are still being read, frame-refresh reloads this frame every
     3 s (every 60 s when everything left is parked until the AI allocation resets at 00:05 UTC);
-    the refresh stops once nothing is pending. Links leave the frame (target _top). %>
+    the refresh stops once nothing is pending. Links and the "Read again" buttons leave the
+    frame (target _top). reread_context: Imports::Reread.context_for the rejected and failed
+    rows, so the buttons don't cost queries per row. %>
 <% counts = import_progress_counts(progress) %>
 <% in_flight = counts["pending"] + counts["extracting"] %>
 <% live = batch.receiving? || batch.processing? || in_flight.positive? %>
-<% only_waiting = in_flight.positive? && counts["waiting_for_budget"] >= in_flight %>
+<% only_waiting = import_only_waiting?(progress) %>
 <% done = counts.except("pending", "extracting", "waiting_for_budget").values.sum %>
+<% found = counts.except("waiting_for_budget").values.sum %>
+<% can_reread = can?(:editor) %>
 <% first_to_review = items.find(&:needs_review?) %>
 <% tiles = [
   [ "pending", "Queued" ], [ "extracting", "Reading" ], [ "needs_review", "Needs review" ], [ "accepted", "Accepted" ],
@@ -15,7 +19,7 @@
 
 <%= turbo_frame_tag "import_batch_progress", target: "_top" do %>
   <div id="batch_progress" data-status="<%= batch.status %>" data-live="<%= live %>"
-       <%= tag.attributes(data: { controller: "frame-refresh", frame_refresh_interval_value: only_waiting ? 60_000 : 3000 }) if live %>>
+       <%= tag.attributes(data: { controller: "frame-refresh", frame_refresh_interval_value: import_refresh_interval([ progress ]) }) if live %>>
     <section class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm"
              aria-label="Batch status">
       <div class="flex items-center gap-3">
@@ -28,8 +32,10 @@
             Waiting to unpack the upload…
           <% elsif live && only_waiting %>
             Today's free AI allocation is used up. The remaining <%= pluralize(in_flight, "item") %> continue after 00:05 UTC.
+          <% elsif live && found.zero? %>
+            Unpacking the upload…
           <% elsif live %>
-            Reading files: <%= done %> of <%= pluralize(counts.except("waiting_for_budget").values.sum, "item") %> done. This page updates every few seconds.
+            Reading files: <%= done %> of <%= pluralize(found, "item") %> done. This page updates every few seconds.
           <% elsif batch.needs_review? || counts["needs_review"].positive? %>
             Finished reading. <%= pluralize(counts["needs_review"], "item") %> <%= counts["needs_review"] == 1 ? "needs" : "need" %> review.
           <% elsif batch.failed? %>
@@ -136,6 +142,8 @@
                   <% if item.needs_review? %>
                     <%= link_to "Review", import_review_path(item), class: "font-medium text-blue-700 hover:underline",
                           aria: { label: "Review #{item.original_filename}" } %>
+                  <% elsif can_reread && (item.rejected? || item.failed?) && Imports::Reread.allowed?(item, context: reread_context) %>
+                    <%= render "imports/reread_button", item: item %>
                   <% end %>
                 </td>
               </tr>

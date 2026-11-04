@@ -53,8 +53,10 @@ env:
     AI_DAILY_NEURON_BUDGET: 9000
     AUTO_ACCEPT_ENABLED: "false"
     # Sized for 2 OCPU (2 Ampere cores) / 12 GB: one Puma worker per core (3 threads each, see
-    # config/puma.rb) and one Solid Queue worker process (3 threads, config/queue.yml). Import jobs
-    # shell out to tesseract/pdftoppm and are CPU-bound, so more job processes would starve web.
+    # config/puma.rb). JOB_CONCURRENCY is processes per Solid Queue worker (config/queue.yml): one
+    # for imports (2 threads) and one for everything else (2 threads), so an import backlog never
+    # holds up backups or email. Import jobs shell out to tesseract/pdftoppm and are CPU-bound, so
+    # raising it would starve web.
     WEB_CONCURRENCY: 2
     JOB_CONCURRENCY: 1
     # Model IDs are chosen in Phase 3/4; uncomment once picked. Until EXTRACTION_MODEL is set,

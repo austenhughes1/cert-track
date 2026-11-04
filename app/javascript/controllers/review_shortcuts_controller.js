@@ -2,10 +2,10 @@ import { Controller } from "@hotwired/stimulus"
 
 const KEYS = { a: "accept", r: "reject", s: "skip" }
 
-// Keyboard shortcuts on the import review screen: a = accept, r = reject, s = skip. Each
-// clicks its button, so the button's own form (and any edits in it) is what gets submitted.
-// Keys typed into a field, with a modifier, or held down are ignored, and so is everything
-// while one of the screen's forms is submitting.
+// Keyboard shortcuts on the import review screen: a = accept, r = reject, s = skip, in either
+// case (Caps Lock). Each clicks its button, so the button's own form (and any edits in it) is
+// what gets submitted. Keys typed into a field, with a modifier (Shift included), or held down
+// are ignored, and so is everything while one of the screen's forms is submitting.
 //
 //   <div data-controller="review-shortcuts"
 //        data-action="keydown@document->review-shortcuts#press
@@ -32,7 +32,7 @@ export default class extends Controller {
     if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
     if (typing(event.target)) return
 
-    const name = KEYS[event.key]
+    const name = KEYS[(event.key || "").toLowerCase()]
     if (!name || !this[`has${capitalize(name)}Target`]) return
 
     const button = this[`${name}Target`]

@@ -45,7 +45,11 @@
     <% else %>
       <% columns = ask_columns(result) %>
       <% result.sections.each do |section| %>
-        <%= render "section", section: section, columns: columns, today: today %>
+        <% if section.key == :requirements %>
+          <%= render "requirements", section: section, project: result.project %>
+        <% else %>
+          <%= render "section", section: section, columns: columns, today: today %>
+        <% end %>
       <% end %>
     <% end %>
   <% end %>

@@ -38,6 +38,11 @@ module ImportsHelper
   # Common reasons offered in the reject box (free text is fine too).
   REJECT_REASONS = [ "Not a certificate", "Unreadable", "Not one of our crew", "Already on file", "Expired long ago" ].freeze
 
+  # frame-refresh intervals (ms) while a batch is being read, and once all that is left is
+  # parked until the AI allocation resets at 00:05 UTC.
+  REFRESH_INTERVAL = 3_000
+  WAITING_REFRESH_INTERVAL = 60_000
+
   def import_batch_status_badge(batch)
     label, classes = BATCH_STATUSES.fetch(batch.status) { [ batch.status.humanize, "bg-gray-100 text-gray-700" ] }
     tag.span(label, class: "#{BADGE_BASE} #{classes}", data: { status: batch.status })
@@ -59,17 +64,38 @@ module ImportsHelper
     tag.span(label, class: "#{BADGE_BASE} #{classes}", data: { status: item.status })
   end
 
-  # The badge state for an item's person: its person_match, or "picked" when a reviewer
-  # saved someone the matcher didn't propose ("Save edits" stores that pick as unmatched).
+  # The badge state for an item's person: its person_match, which is "picked" when a reviewer
+  # saved someone the matcher didn't propose ("Save edits").
   def import_person_match_state(item)
-    item.person_unmatched? && item.matched_crew_member_id.present? ? "picked" : item.person_match.to_s
+    item.person_match.to_s
   end
 
-  # A badge for person_match / type_match ("matched", "suggested", "unmatched"), or "picked"
-  # (see import_person_match_state).
+  # A badge for person_match / type_match ("matched", "suggested", "unmatched", "picked").
   def import_match_badge(state)
     label, classes = MATCH_STATES.fetch(state.to_s, MATCH_STATES["unmatched"])
     tag.span(label, class: "#{BADGE_BASE} #{classes}", data: { match: state })
+  end
+
+  # Who "Create crew member from this" may repeat (ImportReviewsController#possible_duplicates):
+  # "Juan Ortiz is already on the crew list." and, for inactive members, "Sam Price is on the
+  # crew list but inactive (reactivate them from their crew page)." link: true links each name
+  # to their crew page (the form's warning); otherwise plain text (an error message).
+  def import_duplicate_members_sentence(members, link: false)
+    active, inactive = members.partition(&:active?)
+    sentences = []
+    sentences << [ active, "#{active.one? ? "is" : "are"} already on the crew list." ] if active.any?
+    if inactive.any?
+      sentences << [ inactive, "#{inactive.one? ? "is" : "are"} on the crew list but inactive " \
+                               "(reactivate them from their crew #{"page".pluralize(inactive.size)})." ]
+    end
+
+    texts = sentences.map do |group, rest|
+      next "#{group.map(&:display_name).to_sentence} #{rest}" unless link
+
+      names = group.map { |member| link_to(member.display_name, crew_member_path(member), class: "font-medium underline", target: "_blank") }
+      safe_join([ to_sentence(names), " ", rest ])
+    end
+    link ? safe_join(texts, " ") : texts.join(" ")
   end
 
   # "92%", coloured by the auto-accept bar (0.85) and the person-suggestion bar (0.6).
@@ -116,17 +142,29 @@ module ImportsHelper
     certificate&.dig("notes").presence
   end
 
+  # Page numbers of the original file the AI skipped: OCR could not read them and no vision
+  # model is set (Imports::Extractor's "unread_pages"). The whole-file extraction has them;
+  # a further item split from the file finds them on its source item.
+  def import_unread_pages(item)
+    extraction = [ item.extraction, item.source_item&.extraction ].find { |data| data.is_a?(Hash) && data.key?("unread_pages") }
+    pages = extraction&.fetch("unread_pages")
+    pages.is_a?(Array) ? pages.filter_map { |page| Integer(page.to_s, exception: false) }.uniq.sort : []
+  end
+
   # Options for a picker with the matcher's suggestions first ("Juan Ortiz · 72% match", plus
   # any note such as "inactive crew member"), then every record. Only the first option for
-  # selected_id is marked selected.
-  #   suggestions: [{ "id" =>, "name" =>, "similarity" =>, "note" => }]; records: [[label, id], ...]
-  def import_picker_options(suggestions:, records:, selected_id:, blank:)
+  # selected_id is marked selected. A record's attributes (e.g. data for a Stimulus
+  # controller) also go on its suggestion. The select's own include_blank is the placeholder.
+  #   suggestions: [{ "id" =>, "name" =>, "similarity" =>, "note" => }]
+  #   records: [[label, id], ...] or [[label, id, { data: { ... } }], ...]
+  def import_picker_options(suggestions:, records:, selected_id:)
     selected_id = selected_id.presence&.to_i
+    attributes = records.to_h { |_label, id, extra| [ id, extra || {} ] }
     selected_done = false
     option = lambda do |label, id|
       selected = !selected_done && id == selected_id
       selected_done ||= selected
-      tag.option(label, value: id, selected: selected)
+      tag.option(label, value: id, selected: selected, **attributes.fetch(id, {}))
     end
 
     suggested = Array(suggestions).filter_map do |suggestion|
@@ -139,10 +177,30 @@ module ImportsHelper
     end
     everything = records.map { |label, id| option.call(label, id) }
 
-    groups = [ tag.option(blank, value: "") ]
+    groups = []
     groups << tag.optgroup(safe_join(suggested), label: "Suggested") if suggested.any?
     groups << tag.optgroup(safe_join(everything), label: "All") if everything.any?
     safe_join(groups)
+  end
+
+  # A type picker option's data for the review-expiry controller, which keeps the expiry
+  # hint in step with the type picked.
+  def import_type_option_attributes(type)
+    rule = type.never_expires? ? { never_expires: true } : { validity_months: type.validity_months }
+    { data: { name: type.name, **rule } }
+  end
+
+  # The end of the review form's expiry hint ("Leave it blank to work it out from the
+  # type..."): what a blank expiry works out to for this type and completion date.
+  # review_expiry_controller.js builds the same text in the browser.
+  def import_expiry_rule(type, completed_on)
+    return "." if type.nil?
+    return ": #{type.name} never expires." if type.never_expires?
+
+    months = pluralize(type.validity_months, "month")
+    return ": completed date plus #{months}." if completed_on.nil?
+
+    ": #{format_date(type.expiry_for(completed_on))} (completed plus #{months})."
   end
 
   # ImportBatch#progress with string keys: every item status plus "waiting_for_budget",
@@ -150,6 +208,20 @@ module ImportsHelper
   def import_progress_counts(progress)
     progress = progress.to_h.stringify_keys
     [ *ImportItem.statuses.keys, "waiting_for_budget" ].index_with { |key| progress.fetch(key, 0).to_i }
+  end
+
+  # True when a batch's progress has items left to read and every one of them is parked
+  # until the AI allocation resets.
+  def import_only_waiting?(progress)
+    counts = import_progress_counts(progress)
+    in_flight = counts["pending"] + counts["extracting"]
+    in_flight.positive? && counts["waiting_for_budget"] >= in_flight
+  end
+
+  # frame-refresh interval (ms) for live batches' progress: slow only when every one of them
+  # is just waiting for the 00:05 UTC reset (a batch still being unpacked has no items yet).
+  def import_refresh_interval(progresses)
+    progresses.all? { |progress| import_only_waiting?(progress) } ? WAITING_REFRESH_INTERVAL : REFRESH_INTERVAL
   end
 
   # "Nov 4, 2026 5:05 PM MST"; times are shown in the app's zone (America/Denver).

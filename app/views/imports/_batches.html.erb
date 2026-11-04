@@ -1,14 +1,17 @@
 <%# locals: (batches:) %>
 <%# Recent batches, with counts preloaded by ImportBatch.preload_progress. While any is still
-    being read, frame-refresh reloads just this frame every 3 s (the drop zone is left alone). %>
-<% live = batches.any? { |batch| batch.receiving? || batch.processing? } %>
+    being read, frame-refresh reloads just this frame every 3 s, or every 60 s when all that is
+    left is parked until the AI allocation resets at 00:05 UTC (the drop zone is left alone). %>
+<% live_batches = batches.select { |batch| batch.receiving? || batch.processing? } %>
+<% live = live_batches.any? %>
+<% interval = import_refresh_interval(live_batches.map(&:progress)) if live %>
 <% columns = [ [ "accepted", "Accepted" ], [ "needs_review", "Review" ], [ "duplicate", "Duplicates" ], [ "rejected", "Rejected" ], [ "failed", "Failed" ] ] %>
 
 <section class="mt-8" aria-labelledby="recent_imports_heading">
   <h2 id="recent_imports_heading" class="mb-2 text-lg font-semibold">Recent batches</h2>
 
   <%= turbo_frame_tag "recent_imports", target: "_top" do %>
-    <div <%= tag.attributes(data: { controller: "frame-refresh", frame_refresh_interval_value: 3000 }) if live %>>
+    <div <%= tag.attributes(data: { controller: "frame-refresh", frame_refresh_interval_value: interval }) if live %>>
       <% if batches.empty? %>
         <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
           <p class="text-sm font-medium text-gray-900">No imports yet</p>

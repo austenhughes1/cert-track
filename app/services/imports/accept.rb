@@ -8,14 +8,20 @@ module Imports
   # certificate_number, issued_by and notes; a key that is present but blank clears the value.
   # Without overrides the item's proposals are used (matched_crew_member and
   # matched_certificate_type hold the match or top suggestion, or a reviewer's pick saved with
-  # "Save edits").
+  # "Save edits": person_match picked, type_match matched).
   #
   # Expiry: a printed proposal is kept as printed. A computed or missing one is left for the
   # Certificate model to derive from the final type and completion date (computed, or none
-  # when the type never expires). A proposed date with no source is one a reviewer typed and
-  # saved ("Save edits"), so it is manual. An overridden date is printed when it equals a
-  # printed proposal, re-derived when it equals a computed one (so a changed type or
-  # completion date is followed), blank means derive, and any other date is manual.
+  # when the type never expires). A proposal a reviewer typed and saved ("Save edits",
+  # source manual; older items saved it with no source) is manual. An overridden date is
+  # printed when it equals a printed proposal, re-derived when it equals a computed one (so a
+  # changed type or completion date is followed), blank means derive, and any other date is
+  # manual. When the card's printed expiry could not be read (ImportItem#unreadable_expires_on,
+  # on this item or a merged one), the expiry is never derived: unless the reviewer gives a
+  # date (or the item's own printed one is kept), the accept is refused with
+  # UNREADABLE_EXPIRY_MESSAGE, so a guessed date can't stand in for the one on the card.
+  # Wording that says there is no expiry ("Never", "Does not expire") is not unreadable: the
+  # normalizer treats it as not printed, so it is derived like any other.
   #
   # The certificate gets source import, import_item: item, the item's file (the same blob),
   # and verified_by/verified_at when a user accepts. Older certificates of the same type are
@@ -26,20 +32,22 @@ module Imports
   # holder name is a new spelling for them, that spelling is added to their name_aliases
   # (CrewMember#add_alias!). A person picked by hand learns nothing, since the AI may have
   # misread the name: one chosen here, any other listed candidate, or one saved with
-  # "Save edits" (which stores the pick with person_match unmatched). Nor is a spelling
-  # learned that is already an exact name of another member: that member's own cards would
-  # stop matching exactly.
+  # "Save edits" (person_match picked). Nor is a spelling learned that is already an exact
+  # name of another member: that member's own cards would stop matching exactly.
   #
   # All or nothing (a savepoint, so it nests in the pipeline's transaction). Raises
-  # ActiveRecord::RecordInvalid with the certificate's errors (e.g. "Crew member must exist"),
-  # or NotReviewable (a RecordInvalid) when the item was already accepted, rejected, is a
-  # duplicate, failed or is still processing. Afterwards (unless auto, where the pipeline
-  # does it) each affected batch runs check_completion!.
+  # ActiveRecord::RecordInvalid with the certificate's errors (e.g. "Crew member must exist",
+  # or the unreadable-expiry message on base), or NotReviewable (a RecordInvalid) when the
+  # item was already accepted, rejected, is a duplicate, failed or is still processing.
+  # Afterwards (unless auto, where the pipeline does it) each affected batch runs
+  # check_completion!.
   class Accept
     # The item's status doesn't allow this review action. errors are on the item.
     class NotReviewable < ActiveRecord::RecordInvalid; end
 
     OVERRIDABLE_ATTRIBUTES = %i[crew_member_id certificate_type_id completed_on expires_on certificate_number issued_by notes].freeze
+    # %s is the text the AI read, e.g. "2027-06".
+    UNREADABLE_EXPIRY_MESSAGE = %(The card's expiry ("%s") could not be read. Type the expiry date from the card.).freeze
     REVIEWABLE_STATUSES = %w[needs_review].freeze
     AUTO_ACCEPT_STATUSES = (ImportItem::PIPELINE_STATUSES + REVIEWABLE_STATUSES).freeze # the pipeline accepts mid-processing
     STATUS_MESSAGES = {
@@ -78,6 +86,7 @@ module Imports
       certificate = ImportItem.transaction(requires_new: true) do
         lock_items!
         certificate = build_certificate
+        refuse_unread_expiry!(certificate)
         certificate.save!
         all_items.each { |accepted| finish(accepted, certificate) }
         certificate
@@ -143,13 +152,28 @@ module Imports
         end
       end
 
+      # A card whose printed expiry the AI couldn't read gets no derived (computed or none)
+      # expiry: the reviewer must type it. Raises RecordInvalid with the message on base,
+      # alongside any other errors the certificate has.
+      def refuse_unread_expiry!(certificate)
+        return if certificate.expires_on.present? # printed and read, or typed by the reviewer
+
+        text = all_items.lazy.filter_map(&:unreadable_expires_on).first
+        return unless text
+
+        certificate.validate
+        certificate.errors.add(:base, format(UNREADABLE_EXPIRY_MESSAGE, text))
+        raise ActiveRecord::RecordInvalid, certificate
+      end
+
       def finish(accepted, certificate)
         accepted.update!(status: :accepted, certificate:, reviewed_by: user, reviewed_at: Time.current)
         learn_alias(accepted, certificate.crew_member)
       end
 
+      # Only from the matcher's own proposal (matched or suggested), never a hand pick.
       def learn_alias(accepted, crew_member)
-        return if accepted.holder_name_raw.blank? || accepted.person_unmatched?
+        return if accepted.holder_name_raw.blank? || !(accepted.person_matched? || accepted.person_suggested?)
         return if accepted.matched_crew_member_id != crew_member.id || spelling_of_another_member?(accepted.holder_name_raw, crew_member)
 
         crew_member.add_alias!(accepted.holder_name_raw)

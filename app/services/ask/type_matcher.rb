@@ -88,7 +88,7 @@ module Ask
 
         if numbers_conflict?(window, names)
           @near_misses << hit
-        elsif kind != :fuzzy || (hit.score >= ACCEPT && content_length(window) >= MIN_FUZZY_LENGTH)
+        elsif kind != :fuzzy || (hit.score >= ACCEPT && content_length(window) >= MIN_FUZZY_LENGTH && !trailing_stopword?(window))
           @hits << hit
         else
           @near_misses << hit
@@ -103,6 +103,12 @@ module Ask
         window.content.delete(" ").length
       end
 
+      # Only a whole name may end in a stopword ("CDL Class A"); a fuzzy window doesn't
+      # take the words after its content ("hazwoper required on", "flager for May").
+      def trailing_stopword?(window)
+        Question::STOPWORDS.include?(@question.words[window.range.last])
+      end
+
       # Consecutive tokens no other match has taken.
       def free_runs
         @question.tokens.reject { |token| @exclude.include?(token.index) }
@@ -110,7 +116,7 @@ module Ask
       end
 
       # Windows start on a content word and hold at least one; stopwords may follow
-      # ("CDL Class A").
+      # ("CDL Class A"), though only an exact name may end on one (#trailing_stopword?).
       def windows_in(run)
         (1..MAX_WINDOW).flat_map do |size|
           run.each_cons(size).filter_map do |tokens|

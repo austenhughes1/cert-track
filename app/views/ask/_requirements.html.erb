@@ -1,0 +1,33 @@
+<%# locals: (section:, project:) %>
+<%# A project's requirements (Ask::Section of Ask::Requirement): who needs each type and how many on the crew lack it. %>
+<div class="mt-5" id="ask_section_<%= section.key %>">
+  <h2 class="mb-2 text-sm font-semibold text-gray-700"><%= section.title %> <span class="font-normal text-gray-500">(<%= section.total %>)</span></h2>
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <tr>
+          <th scope="col" class="px-4 py-2">Certificate</th>
+          <th scope="col" class="px-4 py-2">Required of</th>
+          <th scope="col" class="px-4 py-2">On the crew</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        <% section.items.each do |requirement| %>
+          <% type = requirement.certificate_type %>
+          <tr class="hover:bg-gray-50" data-certificate-type-id="<%= type.id %>">
+            <td class="px-4 py-2 text-gray-900">
+              <%= type.name %>
+              <span class="ml-1 font-mono text-xs text-gray-400"><%= type.code %></span>
+              <% requirement.notes.each do |note| %>
+                <p class="text-xs text-gray-500"><%= note %></p>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-4 py-2 text-gray-700"><%= ask_requirement_roles(requirement) %></td>
+            <td class="whitespace-nowrap px-4 py-2 tabular-nums text-gray-600" data-missing="<%= requirement.missing %>"><%= ask_requirement_coverage(requirement) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-1 text-xs"><%= link_to "View the compliance matrix", project_compliance_path(project), class: "font-medium text-blue-700 hover:underline" %></p>
+</div>

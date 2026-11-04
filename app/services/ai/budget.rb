@@ -2,7 +2,9 @@ module Ai
   # The daily free-allocation guard. Workers AI gives 10,000 neurons a day, reset at 00:00 UTC;
   # the app allows itself Ai::Config.daily_budget (9,000) of them and records what each call
   # costs in ai_usage_days, keyed by the UTC day. A quota error from the provider marks the day
-  # as used up, so every waiting job sleeps until just after the reset.
+  # as used up, so every waiting job sleeps until just after the reset (00:05 UTC). A refusal
+  # between 00:00 and 00:05 UTC is put on the day before: the jobs it parks wake at 00:05, and
+  # marking the new day would send them back to sleep for another 24 hours.
   #
   #   Ai::Budget.exhausted?                  # => true once today's (UTC) usage reaches the budget
   #   Ai::Budget.record!(provider: "workers_ai", model: "@cf/...", input_tokens: 1800, output_tokens: 240)
@@ -53,12 +55,14 @@ module Ai
       end
 
       # The provider said no for quota reasons: count today as fully used so every other job
-      # waits for the reset instead of hitting the API again. Returns the units added.
+      # waits for the reset instead of hitting the API again. Returns the units added. Between
+      # 00:00 and 00:05 UTC the day before is filled instead (see the class comment).
       def mark_exhausted!(provider = Ai::Config.provider, now: Time.current)
         return 0 unless limited?(provider)
 
-        shortfall = remaining(provider, now: now)
-        AiUsageDay.record!(provider: provider, units: shortfall, day: utc_day(now), requests: 0)
+        day = refusal_day(now)
+        shortfall = [ Ai::Config.daily_budget - AiUsageDay.used_on(day, provider), 0 ].max
+        AiUsageDay.record!(provider: provider, units: shortfall, day: day, requests: 0)
         shortfall
       end
 
@@ -72,6 +76,12 @@ module Ai
       private
         def utc_day(now)
           now.utc.to_date
+        end
+
+        # The UTC day a quota refusal at now counts against: yesterday before today's reset.
+        def refusal_day(now)
+          utc = now.utc
+          utc < utc.beginning_of_day + RESET_OFFSET ? utc_day(now) - 1 : utc_day(now)
         end
     end
   end

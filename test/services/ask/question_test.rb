@@ -65,6 +65,49 @@ class Ask::QuestionTest < ActiveSupport::TestCase
     assert Ask::Question.new("who needs flagger on 2417").gaps?
     assert Ask::Question.new("what is required on 2417").gaps?
     assert_not Ask::Question.new("I need to know who has flagger").gaps?
+    assert_not Ask::Question.new("we need someone with flagger").gaps?
+    assert Ask::Question.new("what do I need for 2417").gaps?
+  end
+
+  test "every way of saying a certificate has already run out" do
+    [
+      "who has an expired first aid", "whose first aid lapsed", "did anything lapse", "what's past due", "anything overdue",
+      "what's out of date", "which certs are outdated", "which certificates are no longer valid", "is it no longer current",
+      "any lapses?", "lapses on 2417", "a lapse in first aid", "is there a lapse"
+    ].each { |text| assert Ask::Question.new(text).expired?, text }
+  end
+
+  test "lapse as a present-tense verb looks ahead, like expire" do
+    [ "which certs lapse next month", "what will lapse soon", "does juan's flagger lapse", "out of compliance", "no longer on the crew" ]
+      .each { |text| assert_not Ask::Question.new(text).expired?, text }
+  end
+
+  test "requirements questions ask what is required, not who falls short" do
+    [ "What's required on 2417?", "requirements for 2417", "what does project 2417 require", "what does 2417 need", "what do I need for 2417" ]
+      .each { |text| assert Ask::Question.new(text).requirements?, text }
+    [ "who needs flagger on 2417", "what's missing on 2417", "is 2417 compliant", "gaps on 2417", "I need a list of the crew" ]
+      .each { |text| assert_not Ask::Question.new(text).requirements?, text }
+  end
+
+  test "possessive? reads the text after a token" do
+    question = Ask::Question.new("Will's certs and Chris’ flagger")
+
+    assert question.possessive?(0)
+    assert_not question.possessive?(1)
+    assert question.possessive?(3)
+  end
+
+  test "reference? tells a name or code from a stray word" do
+    question = Ask::Question.new("what's missing on 9999")
+    assert question.reference?(3..3)
+
+    { "what's expiring for bob" => 3..3, "what's expiring, Bob" => 2..2, "what has expired of Bob's" => 4..4,
+      "what's missing on the tower job" => 4..4, "what scuba certs expired" => 1..1, "what's missing at golden" => 3..3 }.each do |text, range|
+      assert Ask::Question.new(text).reference?(range), text
+    end
+    { "what has expired so far" => 3..4, "what's expiring asap" => 2..2, "Recently expired" => 0..0 }.each do |text, range|
+      assert_not Ask::Question.new(text).reference?(range), text
+    end
   end
 
   test "normalize gives the comparable form of a name" do

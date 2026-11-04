@@ -106,13 +106,63 @@ class Ai::ConfigTest < ActiveSupport::TestCase
   test "ollama reads EXTRACTION_MODEL and OLLAMA_URL with a local default" do
     Ai::Config.with(provider: "ollama") do
       assert_equal "http://localhost:11434/v1", Ai::Config.ollama_url
-      assert_match "EXTRACTION_MODEL", Ai::Config.problems.first
+      assert_match "EXTRACTION_MODEL", Ai::Config.problems.sole
 
       ENV["EXTRACTION_MODEL"] = "llama3.2"
-      ENV["OLLAMA_URL"] = "http://ollama.internal:11434/v1"
+      ENV["OLLAMA_URL"] = "http://10.0.3.7:11434/v1"
       assert Ai::Config.ready?
-      assert_equal "http://ollama.internal:11434/v1", Ai::Config.ollama_url
+      assert_equal "http://10.0.3.7:11434/v1", Ai::Config.ollama_url
     end
+  end
+
+  test "OLLAMA_URL must be this machine or its private network" do
+    local = %w[http://localhost:11434/v1 http://127.0.0.1:11434 http://[::1]:11434/v1 http://10.1.2.3:11434
+      http://172.18.0.4:11434/v1 http://192.168.1.20:11434 https://[fd12:3456::7]:11434
+      http://[::ffff:10.0.0.1]:11434]
+    local.each { |url| assert_nil Ai::Config.ollama_url_problem(url), url }
+
+    # Link-local too: 169.254.169.254 is the cloud's instance-metadata service, outside the VM.
+    %w[http://203.0.113.9:11434/v1 https://8.8.8.8/v1 http://[2001:db8::1]:11434 http://[::ffff:8.8.8.8]:11434
+      http://169.254.169.254/v1 http://169.254.0.9:11434 http://[fe80::1]:11434].each do |url|
+      problem = Ai::Config.ollama_url_problem(url)
+      assert_match "certificate text would leave the VM", problem, url
+      assert_match "nothing is sent to it", problem
+    end
+
+    assert_match "is not an http(s) URL", Ai::Config.ollama_url_problem("ftp://localhost/v1")
+    assert_match "is not an http(s) URL", Ai::Config.ollama_url_problem("localhost:11434")
+    assert_match "is not a valid URL", Ai::Config.ollama_url_problem("http://exa mple:1")
+  end
+
+  test "an OLLAMA_URL host name counts as local only when every address it resolves to is" do
+    dns = { "cert_track-ollama" => [ "172.18.0.5" ], "mixed.example" => [ "10.0.0.2", "198.51.100.4" ],
+      "gpu.example.com" => [ "198.51.100.7" ], "gone.invalid" => [] }
+    problem = ->(url) { Ai::Config.ollama_url_problem(url, resolve: dns.method(:fetch)) }
+
+    assert_nil problem.("http://cert_track-ollama:11434/v1")
+    assert_match "mixed.example (198.51.100.4), which is outside", problem.("http://mixed.example:11434")
+    assert_match "gpu.example.com (198.51.100.7)", problem.("https://gpu.example.com/v1")
+    assert_match "gone.invalid can't be resolved", problem.("http://gone.invalid:11434")
+    assert_nil Ai::Config.ollama_url_problem("http://localhost.:11434"), "a real lookup: localhost. is loopback"
+  end
+
+  test "a non-local OLLAMA_URL is a blocking problem for ollama only, so nothing is sent" do
+    ENV["EXTRACTION_MODEL"] = "llama3.2"
+    ENV["OLLAMA_URL"] = "http://203.0.113.9:11434/v1"
+
+    Ai::Config.with(provider: "ollama") do
+      assert_not Ai::Config.ready?
+      assert_match "OLLAMA_URL points at 203.0.113.9", Ai::Config.problems.sole
+      error = assert_raises(Ai::ConfigurationError) { Ai::Config.ensure_ready! }
+      assert_match "certificate text would leave the VM", error.message
+    end
+
+    assert Ai::Config.ready?, "the fake provider ignores OLLAMA_URL"
+    ENV["CLOUDFLARE_ACCOUNT_ID"] = "acct-1"
+    ENV["CLOUDFLARE_AI_API_TOKEN"] = "token"
+    Ai::Config.with(provider: "workers_ai") { assert Ai::Config.ready? }
+    ENV["ANTHROPIC_API_KEY"] = "sk-ant-test"
+    Ai::Config.with(provider: "anthropic") { assert Ai::Config.ready? }
   end
 
   test "daily budget defaults to 9000 and ignores junk" do

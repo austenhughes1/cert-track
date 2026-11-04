@@ -5,6 +5,13 @@ class ImportItemTest < ActiveSupport::TestCase
     ImportItem.new({ import_batch: import_batches(:march_batch), sha256: "a" * 64 }.merge(attrs))
   end
 
+  def count_queries(&block)
+    count = 0
+    counter = ->(*, payload) { count += 1 unless payload[:name].in?(%w[SCHEMA TRANSACTION]) }
+    ActiveSupport::Notifications.subscribed(counter, "sql.active_record") { ActiveRecord::Base.uncached(&block) }
+    count
+  end
+
   test "statuses and default" do
     assert_equal %w[pending extracting needs_review accepted rejected duplicate failed], ImportItem.statuses.keys
     assert build.pending?
@@ -83,7 +90,7 @@ class ImportItemTest < ActiveSupport::TestCase
     assert item.file.attached?
   end
 
-  test "purge_stale_extractions! clears old accepted and rejected text only" do
+  test "purge_stale_extractions! clears old text from finished items only" do
     accepted = import_items(:accepted_li_flagger)
     review = import_items(:review_juan_first_aid)
     accepted.update_columns(reviewed_at: 31.days.ago)
@@ -95,6 +102,26 @@ class ImportItemTest < ActiveSupport::TestCase
     assert_nil accepted.extraction
     assert_not_nil review.reload.extracted_text
     assert_empty ImportItem.purgeable
+  end
+
+  test "failed items and split-off duplicates are purged too, 30 days after their last change" do
+    text = "=== page 1 ===\nCDL CLASS A\nLICENSE NO D1234567\nDOB 1980-01-01"
+    failed = build(sha256: "e" * 64, status: :failed, extracted_text: text, error_message: "AI extraction failed").tap(&:save!)
+    split_duplicate = build(sha256: "e" * 64, page_range: "2", status: :duplicate, extracted_text: text,
+      extraction: { "certificates" => [ { "holder_name" => "Li Chen" } ] }, duplicate_of: import_items(:accepted_li_flagger)).tap(&:save!)
+    recent_failure = build(sha256: "f" * 64, status: :failed, extracted_text: text).tap(&:save!)
+    rejected = build(sha256: "a" * 64, status: :rejected, extracted_text: text, reviewed_at: 31.days.ago).tap(&:save!)
+    [ failed, split_duplicate ].each { |item| item.update_columns(updated_at: 31.days.ago) }
+    rejected.update_columns(updated_at: 1.day.ago) # the review date counts, not a later change
+
+    assert_equal [ failed, split_duplicate, rejected ].map(&:id).sort, ImportItem.purgeable.pluck(:id).sort
+    assert_equal 3, ImportItem.purge_stale_extractions!
+    [ failed, split_duplicate, rejected ].each do |item|
+      assert_nil item.reload.extracted_text, item.status
+      assert_nil item.extraction, item.status
+    end
+    assert_equal text, recent_failure.reload.extracted_text
+    assert failed.failed? && split_duplicate.duplicate?, "only the text goes; the items stay"
   end
 
   test "a rejected item may have no digest; other items need one" do
@@ -145,6 +172,25 @@ class ImportItemTest < ActiveSupport::TestCase
 
     whole.update!(status: :failed)
     assert_equal "2", ImportItem.original_file_for(sha).page_range
+  end
+
+  test "original_files_for finds original_file_for's item for many files in one query" do
+    sha = "d" * 64
+    whole = build(sha256: sha, status: :rejected, page_range: "1").tap(&:save!)
+    build(sha256: sha, status: :needs_review, page_range: "2", source_item: whole).save!
+    other = "e" * 64
+    build(sha256: other, status: :failed).save!
+    later = build(sha256: other, status: :needs_review).tap(&:save!)
+    fixture = import_items(:accepted_li_flagger).sha256
+    digests = [ sha.upcase, other, fixture, "f" * 64 ]
+
+    originals = nil
+    queries = count_queries { originals = ImportItem.original_files_for(digests) }
+
+    assert_equal 1, queries
+    assert_equal({ sha => whole, other => later, fixture => import_items(:accepted_li_flagger) }, originals)
+    assert_equal digests.map { |digest| ImportItem.original_file_for(digest) }, digests.map { |digest| originals[digest.downcase] }
+    assert_equal({}, ImportItem.original_files_for([]))
   end
 
   test "filename is the last part of original_filename" do

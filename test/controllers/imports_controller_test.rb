@@ -89,9 +89,29 @@ class ImportsControllerTest < ActionDispatch::IntegrationTest
       assert_select "#ai_budget", /9,000\s+of\s+9,000\s+neurons used, the daily budget is used up/
       assert_select "#ai_waiting", /1 item waiting for the 00:05 UTC reset/
       assert_select "#ai_waiting time[datetime=?]", waiting.next_attempt_at.in_time_zone.iso8601
-      # A batch still being read keeps the recent-batches frame refreshing.
-      assert_select "turbo-frame#recent_imports [data-controller=frame-refresh][data-frame-refresh-interval-value=?]", "3000"
+      # A batch still being read keeps the recent-batches frame refreshing: slowly, as all it has left is parked.
+      assert_select "turbo-frame#recent_imports [data-controller=frame-refresh][data-frame-refresh-interval-value=?]", "60000"
     end
+  end
+
+  test "index slows the recent-batches refresh when every live batch only waits for the AI reset" do
+    parked = ImportBatch.create!(uploaded_by: users(:manager), status: :processing, files_count: 2)
+    2.times { new_item(batch: parked, status: :extracting, next_attempt_at: Ai::Budget.next_reset_at) }
+    new_item(batch: parked, status: :needs_review)
+    sign_in_as users(:manager)
+
+    get imports_path
+    assert_select "turbo-frame#recent_imports [data-controller=frame-refresh][data-frame-refresh-interval-value=?]", "60000"
+
+    reading = ImportBatch.create!(uploaded_by: users(:manager), status: :processing, files_count: 1)
+    new_item(batch: reading, status: :pending)
+    get imports_path
+    assert_select "turbo-frame#recent_imports [data-frame-refresh-interval-value=?]", "3000"
+
+    reading.destroy!
+    ImportBatch.create!(uploaded_by: users(:manager), status: :receiving) # still to be unpacked
+    get imports_path
+    assert_select "turbo-frame#recent_imports [data-frame-refresh-interval-value=?]", "3000"
   end
 
   test "index lists what to set when the AI provider is not configured" do
@@ -348,6 +368,97 @@ class ImportsControllerTest < ActionDispatch::IntegrationTest
     assert_select "#batch_progress", /Nothing found yet/
   end
 
+  test "show of a batch being unpacked says so instead of counting no items" do
+    batch = ImportBatch.create!(uploaded_by: users(:manager), status: :processing, files_count: 1)
+    sign_in_as users(:manager)
+
+    get import_path(batch)
+
+    assert_select "#batch_status_text", /Unpacking the upload…/
+    assert_select "#batch_status_text", text: /0 of 0/, count: 0
+    assert_select "[data-controller=frame-refresh][data-frame-refresh-interval-value=?]", "3000"
+  end
+
+  test "show offers Read again on the rejected and failed items Imports::Reread allows" do
+    batch = ImportBatch.create!(uploaded_by: users(:manager), status: :needs_review, files_count: 4)
+    rejected = new_item(batch:, status: :rejected, original_filename: "outline.pdf", rejection_reason: "Not a certificate")
+    failed = new_item(batch:, status: :failed, original_filename: "broken.pdf", error_message: "pdftotext timed out")
+    review = new_item(batch:, status: :needs_review, original_filename: "card.pdf")
+    duplicate = new_item(batch:, status: :duplicate, original_filename: "card (1).pdf", duplicate_of: review)
+    sign_in_as users(:manager)
+
+    allowing_reread(true) { get import_path(batch) }
+
+    [ rejected, failed ].each do |item|
+      assert_select "tr#import_item_#{item.id} form[action=?][method=post]", reread_import_review_path(item) do |forms|
+        assert_match(/uses part of today's free AI allocation/, forms.first["data-turbo-confirm"])
+        assert_select "button[aria-label=?]", "Read #{item.original_filename} again", text: "Read again"
+      end
+    end
+    assert_select "tr#import_item_#{review.id} a", text: "Review"
+    [ review, duplicate ].each do |item|
+      assert_select "tr#import_item_#{item.id} form[action=?]", reread_import_review_path(item), count: 0
+    end
+
+    allowing_reread(false) { get import_path(batch) }
+    assert_select "button", text: "Read again", count: 0
+  end
+
+  test "show asks Imports::Reread which items can be read again" do
+    batch = ImportBatch.create!(uploaded_by: users(:manager), status: :completed, files_count: 3)
+    with_file = new_item(batch:, status: :failed, original_filename: "broken.pdf", error_message: "pdftotext timed out")
+    with_file.file.attach(io: file_fixture("certificate.pdf").open, filename: "broken.pdf")
+    no_file = new_item(batch:, status: :rejected, sha256: nil, original_filename: "crew.zip/../evil.pdf", rejection_reason: "Unsafe path")
+    two = new_item(batch:, status: :accepted, original_filename: "two.pdf", page_range: "1")
+    part = new_item(batch:, status: :rejected, original_filename: "two.pdf", page_range: "2", source_item: two, rejection_reason: "Not a certificate")
+    part.file.attach(io: file_fixture("certificate.pdf").open, filename: "two p2.pdf")
+    sign_in_as users(:manager)
+
+    get import_path(batch)
+
+    assert_select "tr#import_item_#{with_file.id} form[action=?] button", reread_import_review_path(with_file), text: "Read again"
+    assert_select "tr#import_item_#{no_file.id} form", count: 0
+    assert_select "tr#import_item_#{part.id} form", count: 0
+  end
+
+  test "show hides Read again on a source with parts and on a failed file uploaded again later" do
+    batch = ImportBatch.create!(uploaded_by: users(:manager), status: :completed, files_count: 3)
+    source = new_item(batch:, status: :rejected, original_filename: "two.pdf", page_range: "1", rejection_reason: "Wrong person")
+    new_item(batch:, status: :needs_review, original_filename: "two.pdf", page_range: "2", source_item: source, sha256: source.sha256)
+    uploaded_again = new_item(batch:, status: :failed, original_filename: "broken.pdf", error_message: "pdftotext timed out")
+    new_item(batch: ImportBatch.create!(uploaded_by: users(:manager), status: :needs_review), status: :needs_review,
+      sha256: uploaded_again.sha256)
+    failed = new_item(batch:, status: :failed, original_filename: "other.pdf", error_message: "pdftotext timed out")
+    [ source, uploaded_again, failed ].each { |item| item.file.attach(io: file_fixture("certificate.pdf").open, filename: item.original_filename) }
+    sign_in_as users(:manager)
+
+    get import_path(batch)
+
+    assert_select "tr#import_item_#{source.id} form", count: 0
+    assert_select "tr#import_item_#{uploaded_again.id} form", count: 0
+    assert_select "tr#import_item_#{failed.id} form[action=?] button", reread_import_review_path(failed), text: "Read again"
+  end
+
+  test "show looks up what Read again needs once for the page, not once per row" do
+    sign_in_as users(:manager)
+
+    queries = [ 2, 12 ].map do |rows|
+      batch = ImportBatch.create!(uploaded_by: users(:manager), status: :processing)
+      new_item(batch:, status: :pending) # still live, so the frame refreshes every 3 s
+      rows.times do |n|
+        status = n.even? ? :failed : :rejected
+        item = new_item(batch:, status:, original_filename: "card-#{n}.pdf", error_message: ("OCR failed" if status == :failed))
+        item.file.attach(io: file_fixture("certificate.pdf").open, filename: "card-#{n}.pdf")
+      end
+
+      count = count_queries { get import_path(batch) }
+      assert_select "button", text: "Read again", count: rows
+      count
+    end
+
+    assert_equal queries.first, queries.last, "queries for 2 and 12 rows that can be read again"
+  end
+
   test "show of a completed batch" do
     batch = ImportBatch.create!(uploaded_by: users(:manager), status: :completed, files_count: 1)
     new_item(batch:, status: :rejected, rejection_reason: "Not a certificate")
@@ -359,6 +470,24 @@ class ImportsControllerTest < ActionDispatch::IntegrationTest
   end
 
   private
+    def allowing_reread(allowed)
+      original = Imports::Reread.method(:allowed?)
+      Imports::Reread.define_singleton_method(:allowed?) { |_item, **| allowed }
+      yield
+    ensure
+      Imports::Reread.define_singleton_method(:allowed?, original)
+    end
+
+    # Integration requests share the test's pinned connection, whose query cache
+    # survives between requests until a write, so clear it to count real queries.
+    def count_queries(&block)
+      ActiveRecord::Base.connection_pool.clear_query_cache
+      count = 0
+      counter = ->(*, payload) { count += 1 unless payload[:cached] || payload[:name].in?(%w[SCHEMA TRANSACTION]) }
+      ActiveSupport::Notifications.subscribed(counter, "sql.active_record", &block)
+      count
+    end
+
     def new_item(batch: @batch, status:, sha256: SecureRandom.hex(32), **attributes)
       ImportItem.create!(import_batch: batch, status: status, sha256: sha256, original_filename: "card.pdf", **attributes)
     end

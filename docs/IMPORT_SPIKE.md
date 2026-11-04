@@ -134,4 +134,5 @@ Then pick the text model with the best score. When two are close, take the one t
 
 1. Set both models in `config/deploy.yml` by uncommenting `EXTRACTION_MODEL` and `EXTRACTION_VISION_MODEL`. Check that both have rates in `config/ai_models.yml`, then commit and run `bin/kamal deploy`.
 2. If no model reaches 90%, keep `AUTO_ACCEPT_ENABLED: "false"` so every import goes through the review queue. Or switch to the Anthropic fallback (DEPLOY.md section 12). That choice is the owner's.
+   After switching models, an item's **Read again** button sends a file the old model misread (still in the queue, rejected or failed) through the new one. It works on whole files only. A card cut from a PDF that held several certificates is filled in by hand instead.
 3. After about 100 reviewed imports, decide whether to turn on `AUTO_ACCEPT_ENABLED`.

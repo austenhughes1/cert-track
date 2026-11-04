@@ -51,6 +51,18 @@ class Imports::ExtractTextJobTest < ActiveJob::TestCase
     assert_enqueued_jobs 1, only: Imports::AiExtractJob
   end
 
+  test "text already stored (an item read again) is used without running the tools" do
+    item = item_with(file("corrupt.pdf").tap { |path| File.write(path, "%PDF-1.4 not really a PDF") })
+    item.update!(extracted_text: "=== page 1 ===\nCERTIFICATE OF COMPLETION\nAwarded to: Li Chen")
+
+    Imports::ExtractTextJob.perform_now(item)
+
+    item.reload
+    assert item.extracting?, "pdftotext would have failed on this file"
+    assert_equal "=== page 1 ===\nCERTIFICATE OF COMPLETION\nAwarded to: Li Chen", item.extracted_text
+    assert_enqueued_with job: Imports::AiExtractJob, args: [ item ]
+  end
+
   test "items no longer waiting for text are left alone" do
     path = ScannedPdf.write_text_pdf(file("ortiz.pdf"), [ ORTIZ ])
 

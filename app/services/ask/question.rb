@@ -58,7 +58,7 @@ module Ask
       license licence licenses licences
       person people crew member members worker workers employee employees guy guys staff team folks men
       expire expires expired expiring expiration expirations expiry soon lapse lapses lapsing lapsed
-      due renew renewal renewals overdue already
+      due renew renewal renewals overdue already outdated longer
       missing gap gaps lack lacks lacking need needs needed require requires required requirement
       requirements compliance compliant noncompliant non out
       project projects job jobs site sites
@@ -71,12 +71,20 @@ module Ask
     CHECK_WORDS = Set.new(%w[does do did doesnt didnt has have had hasnt havent is isnt are was got hold holds carry carries possess possesses own owns can]).freeze
     GAP_WORDS = Set.new(%w[missing gap gaps lack lacks lacking noncompliant compliance compliant]).freeze
     EXPIRY_WORDS = Set.new(%w[lapse lapses lapsing lapsed due renew renewal renewals overdue]).freeze
-    EXPIRED_WORDS = Set.new(%w[expired lapsed overdue]).freeze
+    EXPIRED_WORDS = Set.new(%w[expired lapsed overdue outdated]).freeze
+    LAPSE_NOUN_LEADS = Set.new(%w[a an any no the some there me]).freeze # "any lapses", "a lapse in first aid"
+    NO_LONGER = Set.new(%w[valid current good active]).freeze # "no longer valid"
     NEED_WORDS = Set.new(%w[need needs needed require requires required]).freeze
+    REQUIREMENT_WORDS = Set.new(%w[require requires required requirement requirements]).freeze
     NEED_SUBJECTS = Set.new(%w[i we you]).freeze # "I need a list of ..." is not about requirements
     NEGATIONS = Set.new(%w[not dont doesnt didnt hasnt havent]).freeze
     POSSESSION_WORDS = Set.new(%w[have has had hold holds held got carry carries own owns possess possesses]).freeze
     PROJECT_WORDS = Set.new(%w[project projects job jobs site sites]).freeze
+    CERTIFICATE_WORDS = Set.new(%w[
+      certificate certificates certification certifications cert certs card cards training ticket tickets license licence
+    ]).freeze
+    REFERENCE_LEADS = Set.new(%w[on for at about]).freeze # "on 9999", "for bob"
+    ARTICLES = Set.new(%w[a an the]).freeze
 
     attr_reader :text, :tokens
 
@@ -105,6 +113,11 @@ module Ask
 
     def stopword?(index)
       STOPWORDS.include?(tokens.fetch(index).text)
+    end
+
+    # The token was written with a possessive: "Will's", "Chris'".
+    def possessive?(index)
+      text[tokens.fetch(index).stop].to_s.match?(/['’]/)
     end
 
     # The original text the tokens in range came from ("Jaun Ortis"), without a trailing
@@ -137,11 +150,18 @@ module Ask
     end
 
     # Asks about certificates that have already run out: "What has expired?", "whose first
-    # aid is expired", "Has Li's first aid lapsed?", "did anything expire", "what's past due".
+    # aid is expired", "Has Li's first aid lapsed?", "did anything expire", "what's past due",
+    # "what's out of date", "which certs are no longer valid", "any lapses?". "Lapse" as a
+    # present-tense verb looks ahead like "expire" ("which certs lapse next month"), so only
+    # the noun counts: first, or after "a", "any", "the", "there", ...
     def expired?
       words.any? { |word| EXPIRED_WORDS.include?(word) } ||
         (words.include?("did") && words.any? { |word| %w[expire lapse].include?(word) }) ||
-        words.each_cons(2).include?(%w[past due])
+        words.each_cons(2).include?(%w[past due]) || words.each_cons(3).include?(%w[out of date]) ||
+        words.each_cons(3).any? { |no, longer, state| no == "no" && longer == "longer" && NO_LONGER.include?(state) } ||
+        words.each_with_index.any? do |word, index|
+          %w[lapse lapses].include?(word) && (index.zero? || LAPSE_NOUN_LEADS.include?(words[index - 1]))
+        end
     end
 
     # Asks about compliance gaps ("missing", "gaps", "compliant", "out of compliance"), or
@@ -150,11 +170,20 @@ module Ask
       words.any? { |word| GAP_WORDS.include?(word) } || needs?
     end
 
-    # "who needs flagger", "required on 2417"; not "I need a list of ...".
+    # "who needs flagger", "required on 2417", "what do I need for 2417"; not "I need a
+    # list of ..." or "we need someone with ...".
     def needs?
       words.each_with_index.any? do |word, index|
-        NEED_WORDS.include?(word) && (index.zero? || !NEED_SUBJECTS.include?(words[index - 1]))
+        NEED_WORDS.include?(word) &&
+          (index.zero? || !NEED_SUBJECTS.include?(words[index - 1]) || (index > 1 && %w[do does did].include?(words[index - 2])))
       end
+    end
+
+    # Asks what is required rather than who falls short: "What's required on 2417?",
+    # "requirements for 2417", "what does 2417 need". Not "who needs ..." or "what's missing".
+    def requirements?
+      !who? && words.none? { |word| GAP_WORDS.include?(word) } &&
+        (words.any? { |word| REQUIREMENT_WORDS.include?(word) } || needs?)
     end
 
     # Negated possession: "who doesn't have flagger", "does not hold", "has no", "without".
@@ -173,6 +202,21 @@ module Ask
     # "When does ...", "what date ..." and "how long ...": the answer leads with the date.
     def asks_when?
       words.first == "when" || words.each_cons(2).any? { |pair| pair == %w[what date] || pair == %w[how long] }
+    end
+
+    # Whether the words in range read like a name or code someone meant, rather than a
+    # stray word: a number ("9999"), a capitalised word after the first ("Bob") or a
+    # possessive ("Bob's"), or words after "on", "for", "at", "about" or a project word,
+    # or before a project or certificate word ("for bob", "on the tower job", "scuba certs").
+    def reference?(range)
+      first = tokens.fetch(range.first)
+      before = range.first - 1
+      before -= 1 while before.positive? && ARTICLES.include?(words[before])
+      after = words[range.last + 1]
+
+      range.any? { |index| tokens.fetch(index).number? } || (range.first.positive? && text[first.start].match?(/[[:upper:]]/)) ||
+        possessive?(range.last) || (before >= 0 && (REFERENCE_LEADS.include?(words[before]) || PROJECT_WORDS.include?(words[before]))) ||
+        PROJECT_WORDS.include?(after) || CERTIFICATE_WORDS.include?(after)
     end
 
     private

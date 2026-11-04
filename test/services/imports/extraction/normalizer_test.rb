@@ -54,6 +54,30 @@ class Imports::Extraction::NormalizerTest < ActiveSupport::TestCase
     assert_not normalize({ "certificates" => [ certificate ] })["certificates"].sole.key?("unreadable"), "only there when a date was dropped"
   end
 
+  test "an expiry that says there is none is not printed, so it is null with a note but not unreadable" do
+    wordings = [ "Never", "NEVER EXPIRES", "Expires: Never", "Expiration Date: never", "Does not expire", "Doesn't expire.",
+      "doesnt expire", "No expiration", "No Expiration Date", "No expiry", "Non-expiring", "Lifetime", "Valid for life",
+      "Permanent", "Valid indefinitely", "Not applicable", "Expires: N/A" ]
+
+    wordings.each do |wording|
+      entry = normalize({ "certificates" => [ certificate("expires_on" => wording, "notes" => nil) ] })["certificates"].sole
+
+      assert_nil entry["expires_on"], wording
+      assert_not entry.key?("unreadable"), "#{wording.inspect} is not an unreadable date"
+      assert_equal "No expiry date printed (the card says #{wording.inspect}).", entry["notes"]
+    end
+  end
+
+  test "only a whole no-expiry wording counts, and only for the expiry" do
+    [ "Never before 2027", "06/2027", "Exp 2O27", "Expires: 06/2027", "Valid until 2027-06", "Life", "See back" ].each do |text|
+      entry = normalize({ "certificates" => [ certificate("expires_on" => text) ] })["certificates"].sole
+      assert_equal({ "expires_on" => text }, entry["unreadable"], text)
+    end
+
+    entry = normalize({ "certificates" => [ certificate("completed_on" => "Never") ] })["certificates"].sole
+    assert_equal({ "completed_on" => "Never" }, entry["unreadable"])
+  end
+
   test "confidence is clamped to 0..1, percentages are scaled and missing is 0" do
     values = [ 1.0, -0.2, "0.874", "92", "85%", 250, nil, "high" ].map do |confidence|
       normalize({ "certificates" => [ certificate("confidence" => confidence) ] })["certificates"].sole["confidence"]

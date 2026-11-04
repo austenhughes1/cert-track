@@ -18,9 +18,17 @@ module Imports
   #   (default RECORDS_PER_ENTRY x max_entries), counting every record: folders, junk and
   #   nested zips too, which are not files. rubyzip loads a zip's whole central directory
   #   before the first entry can be looked at, so the record count the zip declares (read
-  #   from its end record alone, Zip::File.count_entries; rubyzip never loads more) is
-  #   checked against what is left before the zip is opened. A zip listing more is rejected
-  #   unopened and expansion stops
+  #   from its end records alone, Zip::File.count_entries) is checked against what is left
+  #   before the zip is opened. A zip listing more is rejected unopened and expansion stops
+  # - and, also before opening, the bytes rubyzip would hold for those end records and that
+  #   directory (Directory reads the end record, or the Zip64 one, then walks the records'
+  #   fixed headers without keeping them): a Zip64 end record must sit next to its locator
+  #   (rubyzip reads everything between them), and the directory may take at most
+  #   DIRECTORY_BYTES_PER_RECORD per declared record. Long names, extra fields or comments
+  #   past that, a directory larger than its declared size allows, or one said to run past
+  #   the end of the file: that zip alone is rejected unopened (a zip whose end records are
+  #   cut short or apart is one that can't be read). Nested zips get the same checks, each
+  #   when it is reached
   # - the type comes from the bytes (Marcel, plus the HEIC/HEIF brands), not the name.
   #   Anything but PDF, JPEG, PNG, HEIC/HEIF and WEBP is rejected
   #
@@ -35,7 +43,10 @@ module Imports
   #
   # The block gets every file exactly once. entry.path is only valid inside the block:
   # files streamed out of a zip are deleted when it returns. Errors raised by the block
-  # propagate; a zip that can't be read becomes one rejected entry.
+  # propagate; a zip that can't be read becomes one rejected entry, and a file in it that
+  # can't be read another. rubyzip trips over some malformed structures (an extra field cut
+  # short after its ID) with a plain Ruby error rather than a Zip::Error: those are rejected
+  # the same way, and reported (Rails.error) so a new kind stays visible.
   class Archive
     # name: where the file came from, e.g. "crew.zip/cards/ortiz.jpg" (UTF-8, at most
     # MAX_NAME_LENGTH characters). path: the local copy (nil when rejected). sha256: hex
@@ -66,10 +77,161 @@ module Imports
     # Records a zip may hold per file allowed: room for folders and a __MACOSX twin of every
     # file (macOS Archive Utility), with plenty to spare. About 1 KB of memory per record.
     RECORDS_PER_ENTRY = 5
+    # Directory bytes a zip may hold per record it declares: the 46-byte header, a long name, a
+    # few extra fields (and the local extra field rubyzip reads with each) and a comment, with
+    # plenty to spare: real zips use 100 to 300. At most 20 MB for a whole batch's records.
+    DIRECTORY_BYTES_PER_RECORD = 2.kilobytes
     READ_ERRORS = [ Zip::Error, Zlib::Error, IOError, SystemCallError ].freeze
 
     class LimitReached < StandardError; end
     private_constant :LimitReached
+
+    # A zip's central directory, sized the way rubyzip (3.x, Zip::CentralDirectory) reads it, so
+    # the guard sees what rubyzip would load: the last end-of-central-directory record in the
+    # file's tail (and the Zip64 end record it points to when its fields are maxed out) gives
+    # the declared offset and size; then each of the declared records' fixed headers gives its
+    # real length (rubyzip reads records one after another from the offset, whatever size was
+    # declared), plus the local extra field rubyzip reads for each. Nothing is kept. Raises
+    # Zip::Error when the end records are missing or cut short, or a Zip64 end record outside
+    # the tail is more than ZIP64_EXTENSIBLE_LIMIT before its locator (new: rubyzip would read
+    # the whole span), or the directory is said to run past the end of the file (bytes).
+    class Directory
+      END_SIGNATURE = [ 0x06054b50 ].pack("V").b
+      ZIP64_END_SIGNATURE = [ 0x06064b50 ].pack("V").b
+      ZIP64_LOCATOR_SIGNATURE = [ 0x07064b50 ].pack("V").b
+      RECORD_SIGNATURE = 0x02014b50
+      LOCAL_SIGNATURE = 0x04034b50
+      END_LENGTH = 22
+      ZIP64_END_LENGTH = 56
+      ZIP64_LOCATOR_LENGTH = 20
+      ZIP64_EXTENSIBLE_LIMIT = 64.kilobytes # data a Zip64 end record may carry past its 56 bytes; real zips have none
+      TAIL_LENGTH = 0xFFFF + END_LENGTH + ZIP64_LOCATOR_LENGTH # the longest comment, as rubyzip reads it
+      RECORD_LENGTH = 46
+      LOCAL_LENGTH = 30
+      ZIP64_EXTRA_ID = 0x0001
+      MAX16 = 0xFFFF
+      MAX32 = 0xFFFFFFFF
+
+      attr_reader :offset, :declared_size
+
+      def initialize(path)
+        @path = path.to_s
+        File.open(@path, "rb") do |io|
+          @file_size = io.size
+          read_end(io)
+        end
+      end
+
+      # The bytes rubyzip would read for records records: the larger of the declared size and
+      # the measured one. Stops counting once over limit.
+      def bytes(records, limit:)
+        raise Zip::Error, "its central directory is said to run past the end of the file" if offset + declared_size > @file_size
+        return declared_size if declared_size > limit
+
+        total = 0
+        File.open(@path, "rb") do |io|
+          position = offset
+          records.times do
+            length, local_offset = record_at(io, position)
+            break unless length # rubyzip stops at the first record it can't read
+
+            total += length + local_extra_length(io, local_offset)
+            break if total > limit
+
+            position += length
+          end
+        end
+        [ total, declared_size ].max
+      end
+
+      private
+        def read_end(io)
+          start = [ @file_size - TAIL_LENGTH, 0 ].max
+          io.seek(start)
+          tail = io.read.to_s.b
+          at = tail.rindex(END_SIGNATURE) or raise Zip::Error, "no end of central directory record"
+          fields = tail.byteslice(at, END_LENGTH).unpack("VvvvvVVv")
+          raise Zip::Error, "the end of central directory record is cut short" if fields.include?(nil)
+
+          _, disk, directory_disk, disk_records, records, @declared_size, @offset = fields
+          return unless [ disk, directory_disk, disk_records, records ].include?(MAX16) || [ @declared_size, @offset ].include?(MAX32)
+
+          read_zip64_end(io, tail, at, start)
+        end
+
+        def read_zip64_end(io, tail, end_at, start)
+          locator = tail.rindex(ZIP64_LOCATOR_SIGNATURE, end_at) or raise Zip::Error, "no Zip64 end of central directory locator"
+          found = tail.rindex(ZIP64_END_SIGNATURE, locator)
+          record = if found
+            tail.byteslice(found, locator - found + 1) # rubyzip's slice, one byte into the locator
+          else
+            position = tail.byteslice(locator, ZIP64_LOCATOR_LENGTH).unpack("VVQ<V")[2]
+            # rubyzip reads from position up to the locator into one String: there must be a whole
+            # record there, and not much more (real zips put it right before the locator).
+            raise Zip::Error, "the Zip64 end of central directory locator is cut short" unless position
+
+            span = start + locator - position
+            raise Zip::Error, "the Zip64 end of central directory record is cut short" if span < ZIP64_END_LENGTH
+            raise Zip::Error, "the Zip64 end of central directory record is not next to its locator" if span > ZIP64_END_LENGTH + ZIP64_EXTENSIBLE_LIMIT
+
+            io.seek(position)
+            io.read(ZIP64_END_LENGTH).to_s.b
+          end
+          fields = record.byteslice(0, ZIP64_END_LENGTH).to_s.unpack("VQ<vvVVQ<Q<Q<Q<")
+          raise Zip::Error, "the Zip64 end of central directory record is cut short" if fields.include?(nil)
+
+          @declared_size, @offset = fields.last(2)
+        end
+
+        # [the record's length, the local header offset rubyzip will read], or nil when there
+        # is no readable record at position.
+        def record_at(io, position)
+          return if position + RECORD_LENGTH > @file_size
+
+          io.seek(position)
+          header = io.read(RECORD_LENGTH).to_s.b
+          fields = header.unpack("VCCvvvvvVVVvvvvvVV")
+          return unless fields.first == RECORD_SIGNATURE
+
+          compressed_size, size, name_length, extra_length, comment_length = fields.values_at(9..13)
+          io.seek(position + RECORD_LENGTH + name_length)
+          extra = io.read(extra_length).to_s.b
+          [ RECORD_LENGTH + name_length + extra_length + comment_length, local_offset(extra, fields.last, size, compressed_size) ]
+        end
+
+        # Like rubyzip: with a Zip64 extra field the offset comes from it (only when the
+        # header's is maxed out), else from the header.
+        def local_offset(extra, header_offset, size, compressed_size)
+          zip64 = zip64_extra(extra)
+          return header_offset unless zip64
+          return unless header_offset == MAX32
+
+          skip = (size == MAX32 ? 8 : 0) + (compressed_size == MAX32 ? 8 : 0)
+          zip64.byteslice(skip, 8)&.unpack1("Q<")
+        end
+
+        # The data of the record's last Zip64 extra field, or nil.
+        def zip64_extra(extra)
+          data = nil
+          at = 0
+          while at + 4 <= extra.bytesize
+            id, length = extra.byteslice(at, 4).unpack("vv")
+            data = extra.byteslice(at + 4, length).to_s if id == ZIP64_EXTRA_ID
+            at += 4 + length
+          end
+          data
+        end
+
+        # The extra field length in the local header at local_offset, which rubyzip reads too.
+        def local_extra_length(io, local_offset)
+          return 0 if local_offset.nil? || local_offset + LOCAL_LENGTH > @file_size
+
+          io.seek(local_offset)
+          signature, *, extra_length = io.read(LOCAL_LENGTH).to_s.b.unpack("VvvvvvVVVvv")
+          signature == LOCAL_SIGNATURE ? extra_length.to_i : 0
+        end
+    end
+    private_constant :Directory
 
     attr_reader :entries_seen, :bytes_read, :zip_records, :skipped, :limit_message
 
@@ -161,16 +323,23 @@ module Imports
       end
 
       # The opened Zip::File, or the rejected Entry for the zip. The record count the zip
-      # declares is checked before rubyzip loads its central directory (it loads no more).
+      # declares, and the bytes its directory takes, are checked before rubyzip loads that
+      # directory. Directory reads the end record first: rubyzip's own reader crashes (not a
+      # Zip::Error) on one that is cut short.
       def open_zip(path, name)
-        declared = Zip::File.count_entries(path.to_s) # reads the end record only
+        directory = Directory.new(path)
+        declared = Zip::File.count_entries(path.to_s) # reads the end records only, which Directory has sized
         return too_many_records(name, declared) if declared > @max_zip_records - @zip_records
+
+        limit = declared * DIRECTORY_BYTES_PER_RECORD
+        return oversized_directory(name, declared, limit) if directory.bytes(declared, limit: limit) > limit
 
         zip = Zip::File.open(path.to_s)
         @zip_records += declared
         zip
-      rescue *READ_ERRORS => error
+      rescue StandardError => error # nothing here yields, so no error of the caller's block passes through
         # Corrupt, truncated or not really a zip: the zip itself is one rejected file.
+        report_unexpected(error)
         @entries_seen += 1
         rejected(name, "Couldn't open this zip (#{error_text(error)})")
       end
@@ -232,6 +401,15 @@ module Imports
                        "(zip-bomb guard): not opened")
       end
 
+      # A zip whose list of files is bigger than its entries need: rejected unopened (just this
+      # zip; expansion goes on).
+      def oversized_directory(name, declared, limit)
+        @entries_seen += 1
+        size = ActiveSupport::NumberHelper.number_to_human_size(limit)
+        rejected(name, "This zip's list of files is larger than #{size} for its #{number(declared)} " \
+                       "#{"entry".pluralize(declared)} (zip-bomb guard): not opened")
+      end
+
       # Inflates zip_entry into path, hashing as it goes. Returns [byte_size, sha256], or a
       # rejected Entry: past max_uncompressed_bytes (counting the bytes actually produced),
       # or when the entry's data can't be read.
@@ -255,7 +433,8 @@ module Imports
         [ byte_size, digest.hexdigest ]
       rescue LimitReached
         over_byte_limit(name)
-      rescue *READ_ERRORS => error
+      rescue StandardError => error # nothing here yields either
+        report_unexpected(error)
         rejected(name, "Couldn't read this file from the zip (#{error_text(error)})")
       end
 
@@ -326,6 +505,14 @@ module Imports
 
       def error_text(error)
         "#{error.class.name.demodulize}: #{error.message.truncate(120)}"
+      end
+
+      # A zip that can't be read is expected (READ_ERRORS); anything else rubyzip raised is
+      # reported. No names: they can be people's.
+      def report_unexpected(error)
+        return if READ_ERRORS.any? { |kind| error.is_a?(kind) }
+
+        Rails.error.report(error, handled: true, source: "imports.archive")
       end
 
       def number(value)

@@ -1,6 +1,9 @@
-<%# locals: (item:, attributes:, errors:, crew_roles:, employers:) %>
+<%# locals: (item:, attributes:, errors:, duplicates:, crew_roles:, employers:) %>
 <%# "Create crew member from this": prefilled from the name on the card. Opens by itself when
-    nobody matched, or when the last attempt had errors. %>
+    nobody matched, or when the last attempt had errors. duplicates: people already on the
+    crew list it may repeat, inactive ones too (ImportReviewsController#possible_duplicates);
+    creating one then needs the confirm box ticked. Each name links to their crew page, where
+    an inactive one can be reactivated instead. %>
 <% input_class = "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
 <% attributes = (attributes || {}).to_h.symbolize_keys %>
 <% open = errors.any? || (item.person_unmatched? && item.person_suggestions.blank?) %>
@@ -21,6 +24,16 @@
     <p class="text-xs text-gray-500">
       Adds them to the crew list and picks them for this certificate. Accept it afterwards as usual.
     </p>
+    <% if duplicates.any? %>
+      <div class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" id="crew_member_duplicate_warning">
+        <p><%= import_duplicate_members_sentence(duplicates, link: true) %> Create another person anyway?</p>
+        <label class="mt-2 inline-flex items-center gap-2">
+          <%= check_box_tag "confirm_duplicate", "1", false, required: true, id: "crew_member_confirm_duplicate",
+                class: "rounded border-gray-300 text-blue-600 focus:ring-blue-600" %>
+          Yes, this is someone else
+        </label>
+      </div>
+    <% end %>
     <div class="grid gap-4 sm:grid-cols-2">
       <div>
         <%= form.label :first_name, class: "block text-sm font-medium text-gray-700" %>

@@ -107,7 +107,20 @@ class Imports::AcceptTest < ActiveSupport::TestCase
     assert certificate.expiry_computed?
   end
 
-  test "a proposed expiry with no source was typed by a reviewer, so it is manual" do
+  test "a proposed expiry saved with Save edits (source manual) stays manual" do
+    item = review_item(type: certificate_types(:flagger), proposed_completed_on: Date.new(2025, 3, 14),
+      proposed_expires_on: Date.new(2027, 8, 30), proposed_expires_on_source: :manual)
+
+    certificate = accept(item, attributes: { expires_on: "2027-08-30" })
+    assert_equal Date.new(2027, 8, 30), certificate.expires_on
+    assert certificate.expiry_manual?, "not re-derived as computed (flagger: 36 months would give 2028-03-14)"
+
+    untouched = review_item(type: certificate_types(:flagger), proposed_completed_on: Date.new(2025, 3, 14),
+      proposed_expires_on: Date.new(2027, 8, 30), proposed_expires_on_source: :manual)
+    assert accept(untouched).expiry_manual?
+  end
+
+  test "an older proposed expiry with no source was typed by a reviewer, so it is manual too" do
     item = review_item(type: certificate_types(:flagger), proposed_completed_on: Date.new(2025, 3, 14),
       proposed_expires_on: Date.new(2027, 8, 30), proposed_expires_on_source: nil)
 
@@ -145,13 +158,41 @@ class Imports::AcceptTest < ActiveSupport::TestCase
     assert_not_includes crew_members(:juan_ortiz).reload.name_aliases, "J. Ortiz"
   end
 
-  test "no alias for a person saved by hand with Save edits (stored unmatched)" do
+  test "no alias for a person picked by hand and saved with Save edits" do
+    item = review_item(member: crew_members(:li_chen), holder_name_raw: "Jaun Ortis", person_match: :picked)
+
+    accept(item)
+
+    assert_equal crew_members(:li_chen), item.reload.certificate.crew_member
+    assert_not_includes crew_members(:li_chen).reload.name_aliases, "Jaun Ortis"
+  end
+
+  test "no alias for a hand pick stored the older way (unmatched with a person)" do
     item = review_item(member: crew_members(:li_chen), holder_name_raw: "Jaun Ortis", person_match: :unmatched)
 
     accept(item)
 
     assert_equal crew_members(:li_chen), item.reload.certificate.crew_member
     assert_not_includes crew_members(:li_chen).reload.name_aliases, "Jaun Ortis"
+  end
+
+  test "an exact match learns a new printed spelling of the member's name" do
+    item = review_item(holder_name_raw: "Juan Ortiz Jr", person_match: :matched)
+
+    accept(item)
+
+    assert_includes crew_members(:juan_ortiz).reload.name_aliases, "Juan Ortiz Jr"
+  end
+
+  test "a merged hand-picked item teaches nothing while the matched one does" do
+    matched = review_item(holder_name_raw: "Jaun Ortis", person_match: :suggested)
+    picked = review_item(holder_name_raw: "J Ortez", person_match: :picked, original_filename: "back.jpg")
+
+    accept(matched, merged_items: [ picked ])
+
+    aliases = crew_members(:juan_ortiz).reload.name_aliases
+    assert_includes aliases, "Jaun Ortis"
+    assert_not_includes aliases, "J Ortez"
   end
 
   test "no alias when the spelling normalizes to a known name" do
@@ -194,6 +235,82 @@ class Imports::AcceptTest < ActiveSupport::TestCase
     assert_equal jonathan, item.reload.certificate.crew_member
     assert_empty jonathan.reload.name_aliases
     assert_equal [ :matched, crew_members(:juan_ortiz) ], Imports::PersonMatcher.new("Jon Ortiz").call.then { [ _1.match, _1.crew_member ] }
+  end
+
+  # --- a printed expiry the AI could not read ---
+
+  test "a card whose printed expiry could not be read is refused until the reviewer types one" do
+    item = unreadable_expiry_item("2027-06")
+
+    error = nil
+    assert_no_difference -> { Certificate.count } do
+      error = assert_raises(ActiveRecord::RecordInvalid) { accept(item) }
+    end
+    assert_not_kind_of Imports::Accept::NotReviewable, error
+    assert_equal [ %(The card's expiry ("2027-06") could not be read. Type the expiry date from the card.) ],
+      error.record.errors.full_messages
+    assert item.reload.needs_review?
+
+    assert_raises(ActiveRecord::RecordInvalid) { accept(item, attributes: { expires_on: "" }) }
+    assert_raises(ActiveRecord::RecordInvalid) { accept(item, attributes: { expires_on: "June 2027" }) }
+
+    certificate = accept(item, attributes: { expires_on: "2027-06-30" })
+    assert_equal Date.new(2027, 6, 30), certificate.expires_on
+    assert certificate.expiry_manual?
+    assert item.reload.accepted?
+  end
+
+  test "the refusal lists the certificate's other problems too" do
+    item = unreadable_expiry_item("06/2027", member: nil)
+
+    error = assert_raises(ActiveRecord::RecordInvalid) { accept(item) }
+    assert_includes error.record.errors.full_messages, "Crew member must exist"
+    assert_includes error.record.errors.full_messages, %(The card's expiry ("06/2027") could not be read. Type the expiry date from the card.)
+  end
+
+  test "an expiry typed with Save edits counts as the reviewer's" do
+    item = unreadable_expiry_item("2027-06", proposed_expires_on: Date.new(2027, 6, 30), proposed_expires_on_source: :manual)
+
+    certificate = accept(item)
+
+    assert_equal Date.new(2027, 6, 30), certificate.expires_on
+    assert certificate.expiry_manual?
+  end
+
+  test "a never-expiring type does not stand in for an unreadable printed expiry" do
+    item = unreadable_expiry_item("Exp 2O27", type: certificate_types(:osha30))
+
+    assert_raises(ActiveRecord::RecordInvalid) { accept(item) }
+  end
+
+  test "an unreadable expiry on a merged item blocks a derived expiry as well" do
+    front = review_item(type: certificate_types(:flagger), proposed_completed_on: Date.new(2025, 3, 14))
+    back = unreadable_expiry_item("2027-06", original_filename: "back.jpg")
+
+    error = assert_raises(ActiveRecord::RecordInvalid) { accept(front, merged_items: [ back ]) }
+    assert_match "2027-06", error.message
+
+    certificate = accept(front, merged_items: [ back ], attributes: { expires_on: "2027-06-30" })
+    assert_equal 2, certificate.files.count
+  end
+
+  test "auto-accept refuses an unreadable expiry as well" do
+    item = unreadable_expiry_item("2027-06", status: :extracting)
+
+    assert_raises(ActiveRecord::RecordInvalid) { accept(item, user: nil, auto: true) }
+    assert item.reload.extracting?
+  end
+
+  test "unreadable_expires_on reads the item's own certificate" do
+    item = unreadable_expiry_item("2027-06")
+    assert_equal "2027-06", item.unreadable_expires_on
+
+    second = certificate_entry(pages: [ 2 ]).merge("unreadable" => { "expires_on" => "13/13/2027" })
+    item.update!(extraction: extraction_with(certificate_entry, second))
+    assert_nil item.unreadable_expires_on, "the second certificate belongs to a split-off item"
+
+    item.update!(extraction: nil)
+    assert_nil item.unreadable_expires_on
   end
 
   test "a missing person or type raises RecordInvalid and changes nothing" do
@@ -285,4 +402,14 @@ class Imports::AcceptTest < ActiveSupport::TestCase
     assert_equal [ "image/heic" ], certificate.files.blobs.map(&:content_type)
     assert_enqueued_with(job: Certificates::ConvertHeicJob, args: [ certificate ])
   end
+
+  private
+    # A flagger card as ProcessExtractionJob leaves it when the expiry text wasn't a date:
+    # no proposed expiry, the raw text kept under "unreadable".
+    def unreadable_expiry_item(text, type: certificate_types(:flagger), **attrs)
+      entry = certificate_entry(code: type.code, name: type.name, completed: "2025-03-14")
+        .merge("unreadable" => { "expires_on" => text })
+      review_item(type:, extraction: extraction_with(entry), proposed_completed_on: Date.new(2025, 3, 14),
+        error_message: %(The expiration date "#{text}" is not a valid YYYY-MM-DD date.), **attrs)
+    end
 end

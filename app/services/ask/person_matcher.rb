@@ -10,6 +10,15 @@ module Ask
   #   part   a single word equal to one of their name words: "Ortiz", "Juan", "Mari"
   #   fuzzy  max(trigram score, letter-edit score), so "Jaun Ortis" still finds Juan Ortiz
   # Hits rank exact > part/fuzzy, then longer windows, then score (see Hit#key and Match.pick).
+  #
+  # "Will" and "May" are first names and also stopwords (verbs far more often: "Will Juan's
+  # flagger expire soon?", "May I see ..."). A window holding one counts only as an exact
+  # name: the whole window is someone's name ("Will Turner's certs", "What does Will Turner
+  # have?"), or the word alone is a name word of an active member and sits where a verb
+  # can't: written as a possessive ("Will's certs") or right after an auxiliary, "for" or
+  # "about" ("Does Will have flagger?", "Is May certified?", "certs for Will"). First in
+  # the question, or after a wh-word, pronoun or noun ("when will", "flagger will expire"),
+  # it stays a verb and matches nobody.
   class PersonMatcher
     MAX_WINDOW = 3
     SQL_FLOOR = 0.2 # rows the query returns; Ruby decides what counts
@@ -19,6 +28,8 @@ module Ask
     MIN_TOKEN_SIMILARITY = 0.6 # every word must be close for the edit score to count
     MARGIN = 0.15 # rivals this close to the best make the match ambiguous
     NICKNAME_PENALTY = 0.05 # "Rob" is Rob Jones before it is Robert Smith
+    NAME_STOPWORDS = Set.new(%w[will may]).freeze # stopwords that are also first names (see above)
+    NAME_LEADS = Set.new(%w[does do did doesnt didnt is isnt was has hasnt had for about]).freeze
 
     Window = Data.define(:range, :phrase, :nickname) do
       def single?
@@ -78,7 +89,7 @@ module Ask
         CrewMember.find_by_sql(scoring_sql).each do |member|
           window = windows.fetch(member.ask_window_idx - 1)
           hit = refine(member, window, member.ask_score.to_f)
-          next unless hit
+          next unless hit && stopword_name_allowed?(hit, window, member)
 
           accepted = hit.rank.positive? || hit.score >= (window.single? ? ACCEPT_SINGLE : ACCEPT_MULTI)
           if accepted
@@ -100,7 +111,19 @@ module Ask
       def name_like?(token)
         return false if @exclude.include?(token.index) || token.number?
 
-        token.initial? || !Question::STOPWORDS.include?(token.text)
+        token.initial? || !Question::STOPWORDS.include?(token.text) || NAME_STOPWORDS.include?(token.text)
+      end
+
+      # A window holding "will" or "may" is an exact name or nothing (see the class comment).
+      def stopword_name_allowed?(hit, window, member)
+        return true if window.range.none? { |index| NAME_STOPWORDS.include?(@question.words[index]) }
+        return hit.kind == :exact unless window.single?
+
+        hit.kind == :part && member.active? && name_position?(window.range.first)
+      end
+
+      def name_position?(index)
+        @question.possessive?(index) || (index.positive? && NAME_LEADS.include?(@question.words[index - 1]))
       end
 
       def windows_in(run)

@@ -9,10 +9,18 @@ module Imports
   # in storage is retried first. Any other error also fails the item, so a batch never
   # waits forever, and is re-raised so it shows in the jobs dashboard.
   #
+  # Text already stored is used as it is, without running the tools again: an item sent back
+  # through the pipeline (Imports::Reread, which clears a PDF item's text first: it may hold
+  # only the item's pages), or a run that died after saving it.
+  #
   # Items that are no longer pending or extracting (rejected, already done) are left
   # alone, and a deleted item discards the job.
   class ExtractTextJob < ApplicationJob
-    queue_as :default
+    queue_as :imports # the import worker (config/queue.yml); see Imports::ExpandJob
+    # OCR is the slow step, so it goes behind the quick pipeline jobs (Solid Queue runs lower
+    # numbers first; the rest have 0): a new batch unpacks, and files already read move on to
+    # the AI, while a big batch's OCR backlog drains.
+    queue_with_priority 10
 
     ERROR_MESSAGE_LIMIT = 1_000
 
@@ -36,10 +44,12 @@ module Imports
       raise TextExtractor::Error, "The import item has no file attached" unless item.file.attached?
 
       item.extracting!
-      result = item.file.open do |file|
-        TextExtractor.new(file.path, content_type: item.file.content_type, timeout: tool_timeout).call
+      if item.extracted_text.nil?
+        result = item.file.open do |file|
+          TextExtractor.new(file.path, content_type: item.file.content_type, timeout: tool_timeout).call
+        end
+        item.update!(extracted_text: result.text, error_message: nil)
       end
-      item.update!(extracted_text: result.text, error_message: nil)
 
       Imports::AiExtractJob.perform_later(item)
     end

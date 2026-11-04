@@ -26,7 +26,7 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
     patch import_review_path(@item), params: { review: review_params }
     assert_response :forbidden
-    %i[accept reject skip create_crew_member merge].each do |action|
+    %i[accept reject skip create_crew_member merge reread].each do |action|
       post send("#{action}_import_review_path", @item), params: { review: review_params, crew_member: { first_name: "A", last_name: "B" } }
       assert_response :forbidden, "#{action} should be forbidden to a viewer"
     end
@@ -164,6 +164,123 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[href='#new_crew_member']", /Create a crew member from this/
   end
 
+  test "each picker has one placeholder, and it shows when nothing is proposed" do
+    @item.update!(matched_certificate_type: nil, type_match: :unmatched, type_suggestions: [])
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+
+    { "crew_member_id" => "Choose a person", "certificate_type_id" => "Choose a type" }.each do |field, placeholder|
+      options = css_select("select[name='review[#{field}]'] option")
+      assert_equal [ placeholder ], options.select { |option| option["value"].to_s.empty? }.map(&:text), "#{field}: one blank option"
+      assert_equal placeholder, options.first.text, "#{field}: the placeholder comes first"
+      assert_empty options.select { |option| option["selected"] }, "#{field}: nothing selected, so the browser shows the placeholder"
+    end
+  end
+
+  test "type options carry their validity, so the expiry hint can follow the type picked" do
+    @item.update!(type_suggestions: [ { "id" => @first_aid.id, "name" => @first_aid.name, "similarity" => 0.81 } ])
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+
+    assert_select "form#review_form[data-controller~=review-expiry]" do
+      assert_select "select[name=?][data-review-expiry-target=type][data-action~=?]", "review[certificate_type_id]", "change->review-expiry#update"
+      assert_select "input[name=?][data-review-expiry-target=completed][data-action~=?]", "review[completed_on]", "input->review-expiry#update"
+      assert_select "option[value=?][data-name=?][data-validity-months='24']", @first_aid.id.to_s, @first_aid.name, count: 2 # suggested, and in All
+      assert_select "optgroup[label=All] option[value=?][data-name=?][data-never-expires]", certificate_types(:osha30).id.to_s, "OSHA 30 Construction"
+      assert_select "optgroup[label=All] option[value=?]:not([data-validity-months])", certificate_types(:osha30).id.to_s
+      assert_select "option[value='']:not([data-name])"
+    end
+    assert_select "#review_expires_on_hint [data-review-expiry-target=rule]",
+      ": #{format_date(@item.proposed_completed_on + 24.months)} (completed plus 24 months)."
+  end
+
+  test "the expiry hint says when the picked type never expires, or that it needs a completion date" do
+    osha30 = certificate_types(:osha30)
+    sign_in_as users(:manager)
+
+    patch import_review_path(@item), params: { review: review_params(certificate_type_id: osha30.id) }
+    get import_review_path(@item)
+    assert_select "#review_expires_on_hint [data-review-expiry-target=rule]", ": OSHA 30 Construction never expires."
+
+    post accept_import_review_path(@item), params: { review: review_params(completed_on: "", crew_member_id: "") }
+    assert_select "#review_expires_on_hint [data-review-expiry-target=rule]", ": completed date plus 24 months."
+
+    post accept_import_review_path(@item), params: { review: review_params(certificate_type_id: "", crew_member_id: "") }
+    assert_select "#review_expires_on_hint [data-review-expiry-target=rule]", "."
+  end
+
+  test "show lists the pages the AI could not read" do
+    @item.update!(extraction: { "certificates" => [ { "pages" => [ 2 ], "notes" => "Pages 3 and 4 were not read." } ],
+                                "non_certificate_pages" => [], "unread_pages" => [ 3, 4 ] })
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+
+    assert_select "#review_raw #raw_unread_pages" do
+      assert_select "dt", "Pages not read"
+      assert_select "dd", "3, 4. Set EXTRACTION_VISION_MODEL to read scanned pages."
+    end
+  end
+
+  test "an item split from a file reads the file's unread pages from its source item" do
+    @item.update!(extraction: { "certificates" => [ { "pages" => [ 2 ] } ], "non_certificate_pages" => [], "unread_pages" => [ 3 ] })
+    split = new_item(page_range: "1", source_item: @item, extraction: { "certificates" => [ { "pages" => [ 1 ] } ], "non_certificate_pages" => [] })
+    plain = new_item(extraction: { "certificates" => [ { "pages" => [ 1 ] } ], "non_certificate_pages" => [] })
+    sign_in_as users(:manager)
+
+    get import_review_path(split)
+    assert_select "#raw_unread_pages dd", "3. Set EXTRACTION_VISION_MODEL to read scanned pages."
+
+    get import_review_path(plain)
+    assert_select "#raw_unread_pages", count: 0
+  end
+
+  test "an expiry printed on the card but unreadable makes the expiry field required and says why" do
+    @item.update!(extraction: unreadable_expiry_extraction("06/2027"),
+      error_message: "The expiration date \"06/2027\" is not a valid YYYY-MM-DD date.")
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+
+    assert_select "input[type=date][name=?][required][aria-invalid=true][aria-describedby~=review_expires_on_unreadable]", "review[expires_on]"
+    assert_select "label[for=review_expires_on]", /Expires on\s+\(required\)/
+    assert_select "#review_expires_on_unreadable[role=alert]",
+      "The card's expiry (\"06/2027\") could not be read. Type the expiry date from the card."
+
+    typed = Date.current + 200 # once the reviewer has typed and saved it, it is still required but no longer flagged
+    patch import_review_path(@item), params: { review: review_params(expires_on: typed.iso8601) }
+    get import_review_path(@item)
+    assert_select "input[type=date][name=?][value=?][required]:not([aria-invalid])", "review[expires_on]", typed.iso8601
+    assert_select "#review_expires_on_unreadable:not([role])", /could not be read/
+
+    @item.update!(extraction: { "certificates" => [ { "pages" => [ 2 ], "holder_name" => "Jaun Ortis" } ] }, error_message: nil)
+    get import_review_path(@item)
+    assert_select "input[type=date][name=?]:not([required])", "review[expires_on]"
+    assert_select "#review_expires_on_unreadable", count: 0
+  end
+
+  test "a card that says it never expires is accepted with the expiry left blank" do
+    osha30 = certificate_types(:osha30)
+    printed = { "pages" => [ 2 ], "holder_name" => "Jaun Ortis", "certificate_type_code" => "OSHA30", "expires_on" => "Does not expire" }
+    @item.update!(matched_certificate_type: osha30, type_match: :matched,
+      extraction: Imports::Extraction::Normalizer.new(pages: [ 2 ], codes: [ "OSHA30" ]).call("certificates" => [ printed ]))
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+
+    assert_select "input[type=date][name=?]:not([required])", "review[expires_on]"
+    assert_select "#review_expires_on_unreadable", count: 0
+    assert_select "#review_expires_on_hint", /Leave it blank to work it out from the type: OSHA 30 Construction never expires\./
+    assert_select "#raw_notes", %(No expiry date printed (the card says "Does not expire").)
+
+    post accept_import_review_path(@item), params: { review: review_params(certificate_type_id: osha30.id, expires_on: "") }
+
+    assert @item.reload.accepted?
+    assert @item.certificate.expiry_none?
+  end
+
   test "show renders image items as images, HEIC through a variant" do
     freeze_time # blob links expire (urls_expire_in): the page's link and the expected one are minted at the same time
     jpeg = new_item(original_filename: "crew.zip/ortiz.jpg", page_range: nil)
@@ -284,6 +401,27 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert @item.reload.needs_review?
   end
 
+  test "Accept's refusal of an unreadable printed expiry shows on the review screen, and a typed one goes through" do
+    @item.update!(extraction: unreadable_expiry_extraction("2027-06"),
+      error_message: "The expiration date \"2027-06\" is not a valid YYYY-MM-DD date.")
+    sign_in_as users(:manager)
+
+    assert_no_difference -> { Certificate.count } do
+      post accept_import_review_path(@item), params: { review: review_params(expires_on: "") }
+    end
+
+    assert_response :unprocessable_entity
+    assert_select "#error_explanation", /could not be read\. Type the expiry date from the card\./
+    assert_select "input[type=date][name=?][required]", "review[expires_on]"
+    assert @item.reload.needs_review?
+
+    typed = Date.current + 200
+    post accept_import_review_path(@item), params: { review: review_params(expires_on: typed.iso8601) }
+    certificate = @item.reload.certificate
+    assert_equal typed, certificate.expires_on
+    assert certificate.expiry_manual?
+  end
+
   test "accept with a completion date in the future is refused" do
     sign_in_as users(:manager)
 
@@ -307,7 +445,7 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     @item.reload
     assert @item.needs_review?
     assert_equal @juan, @item.matched_crew_member
-    assert @item.person_unmatched?, "a person picked by hand is not the matcher's proposal"
+    assert @item.person_picked?, "a person picked by hand is not the matcher's proposal"
     assert_equal flagger, @item.matched_certificate_type
     assert @item.type_matched?, "a type picked by hand counts as matched"
     assert_equal Date.current - 20, @item.proposed_completed_on
@@ -363,7 +501,7 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     sign_in_as users(:manager)
 
     patch import_review_path(@item), params: { review: review_params(expires_on: typed.iso8601) }
-    assert_nil @item.reload.proposed_expires_on_source
+    assert @item.reload.proposed_expiry_manual?
     get import_review_path(@item)
     assert_select "input[type=date][name=?][value=?]", "review[expires_on]", typed.iso8601
     assert_select "#review_raw", /Typed in by a reviewer/
@@ -373,6 +511,29 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     certificate = @item.reload.certificate
     assert_equal typed, certificate.expires_on
     assert certificate.expiry_manual?
+  end
+
+  test "Save edits with an expiry other than the printed one saves it as manual" do
+    printed = Date.current + 400
+    @item.update!(proposed_expires_on: printed, proposed_expires_on_source: :printed)
+    sign_in_as users(:manager)
+
+    patch import_review_path(@item), params: { review: review_params(expires_on: (printed + 30).iso8601) }
+
+    @item.reload
+    assert_equal printed + 30, @item.proposed_expires_on
+    assert @item.proposed_expiry_manual?
+  end
+
+  test "Save edits with the person cleared saves nobody, unmatched" do
+    @item.update!(matched_crew_member: @juan, person_match: :suggested)
+    sign_in_as users(:manager)
+
+    patch import_review_path(@item), params: { review: review_params(crew_member_id: "") }
+
+    @item.reload
+    assert_nil @item.matched_crew_member
+    assert @item.person_unmatched?
   end
 
   test "Save edits with the printed expiry untouched keeps it printed" do
@@ -495,6 +656,92 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_select "select[name=?] option[value=?][selected]", "review[crew_member_id]", member.id.to_s
   end
 
+  test "an item matched to someone warns before creating a second person, and needs a deliberate confirm" do
+    @item.update!(holder_name_raw: "Juan Ortiz", matched_crew_member: @juan, person_match: :matched)
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+
+    assert_select "details#new_crew_member:not([open])" do
+      assert_select "#crew_member_duplicate_warning", /Juan Ortiz is already on the crew list\.\s+Create another person anyway\?/
+      assert_select "#crew_member_duplicate_warning a[href=?]", crew_member_path(@juan), text: "Juan Ortiz"
+      assert_select "input[type=checkbox][name=confirm_duplicate][value='1'][required]"
+    end
+
+    assert_no_difference -> { CrewMember.count } do
+      post create_crew_member_import_review_path(@item), params: { crew_member: { first_name: "Juan", last_name: "Ortiz" } }
+    end
+    assert_response :unprocessable_entity
+    assert_select "details#new_crew_member[open] #crew_member_errors", /Juan Ortiz is already on the crew list/
+    assert_select "input[name=?][value=?]", "crew_member[first_name]", "Juan"
+
+    assert_difference -> { CrewMember.count }, 1 do
+      post create_crew_member_import_review_path(@item),
+        params: { crew_member: { first_name: "Juan", last_name: "Ortiz" }, confirm_duplicate: "1" }
+    end
+    assert_redirected_to import_review_path(@item)
+    assert_not_equal @juan, @item.reload.matched_crew_member
+  end
+
+  test "a person picked by hand, or a name already on the crew list, also needs the confirm" do
+    li = crew_members(:li_chen)
+    @item.update!(matched_crew_member: li, person_match: :picked)
+    sign_in_as users(:manager)
+
+    get import_review_path(@item) # the card says "Jaun Ortis"; Li Chen was picked by hand
+    assert_select "#crew_member_duplicate_warning", /Li Chen is already on the crew list/
+
+    @item.update!(matched_crew_member: nil, person_match: :unmatched, holder_name_raw: "ORTIZ, JUAN A.")
+    get import_review_path(@item) # nobody matched when the card was read, but the name is on the list now
+    assert_select "#crew_member_duplicate_warning", /Juan Ortiz is already on the crew list/
+
+    assert_no_difference -> { CrewMember.count } do # a typed name is checked too, against preferred names and aliases
+      post create_crew_member_import_review_path(@item), params: { crew_member: { first_name: "Jon", last_name: "Ortiz" } }
+    end
+    assert_select "#crew_member_errors", /Juan Ortiz is already on the crew list/
+
+    @item.update!(holder_name_raw: "Jaun Ortis")
+    get import_review_path(@item)
+    assert_select "#crew_member_duplicate_warning", count: 0
+    assert_select "input[name=confirm_duplicate]", count: 0
+  end
+
+  test "an inactive crew member with the same name needs the confirm too, and the warning links to their page to reactivate them" do
+    sam = crew_members(:sam_inactive)
+    @item.update!(holder_name_raw: "Sam Price")
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+    assert_select "#crew_member_duplicate_warning" do
+      assert_select "p", /\ASam Price is on the crew list but inactive \(reactivate them from their crew page\)\.\s+Create another person anyway\?\z/
+      assert_select "a[href=?][target=_blank]", crew_member_path(sam), text: "Sam Price"
+      assert_select "input[type=checkbox][name=confirm_duplicate][value='1'][required]"
+    end
+
+    assert_no_difference -> { CrewMember.count } do
+      post create_crew_member_import_review_path(@item), params: { crew_member: { first_name: "Sam", last_name: "Price" } }
+    end
+    assert_response :unprocessable_entity
+    assert_select "#crew_member_errors li", "Sam Price is on the crew list but inactive (reactivate them from their crew page). " \
+      "Tick \"Yes, this is someone else\" to add another person anyway."
+
+    assert_difference -> { CrewMember.count }, 1 do
+      post create_crew_member_import_review_path(@item), params: { crew_member: { first_name: "Sam", last_name: "Price" }, confirm_duplicate: "1" }
+    end
+    assert_redirected_to import_review_path(@item)
+  end
+
+  test "the warning tells active and inactive members with the name apart" do
+    CrewMember.create!(first_name: "Sam", last_name: "Price", employer: "Skyline Tower Services")
+    @item.update!(holder_name_raw: "Sam Price")
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+
+    assert_select "#crew_member_duplicate_warning p", /\ASam Price is already on the crew list\. Sam Price is on the crew list but inactive/
+    assert_select "#crew_member_duplicate_warning a", count: 2
+  end
+
   test "create crew member errors re-render with the messages" do
     sign_in_as users(:manager)
 
@@ -549,7 +796,115 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_select "#error_explanation", /nothing left to merge/
   end
 
+  # --- read again ---
+
+  test "the review screen offers Read again, asking first, when Imports::Reread allows it" do
+    sign_in_as users(:manager)
+
+    allowing_reread(true) { get import_review_path(@item) }
+    assert_select "#review_reread form[action=?][method=post]", reread_import_review_path(@item) do |forms|
+      assert_match(/uses part of today's free AI allocation\. What it read before, and any edits or rejection, are cleared\./,
+        forms.first["data-turbo-confirm"])
+      assert_select "button", "Read again"
+    end
+
+    allowing_reread(false) { get import_review_path(@item) }
+    assert_select "#review_reread", count: 0
+  end
+
+  test "Read again hands the item to Imports::Reread and opens its batch" do
+    sign_in_as users(:manager)
+
+    calls = stub_reread { post reread_import_review_path(@item) }
+
+    assert_equal [ [ @item.id, users(:manager) ] ], calls
+    assert_redirected_to import_path(@item.import_batch_id)
+    assert_equal "Reading scan_0001.pdf again.", flash[:notice]
+  end
+
+  test "Read again on a failed whole file starts the pipeline over and opens the batch" do
+    failed = new_item(status: :failed, original_filename: "broken.pdf", page_range: nil, error_message: "pdftotext timed out")
+    failed.file.attach(blob("certificate.pdf"))
+    sign_in_as users(:manager)
+
+    assert_enqueued_with(job: Imports::ExtractTextJob, args: [ failed ]) do
+      post reread_import_review_path(failed)
+    end
+
+    assert_redirected_to import_path(failed.import_batch_id)
+    assert_equal "Reading broken.pdf again.", flash[:notice]
+    failed.reload
+    assert failed.pending?
+    assert_nil failed.error_message
+  end
+
+  test "Read again that Imports::Reread refuses changes nothing and says why" do
+    accepted = import_items(:accepted_li_flagger)
+    sign_in_as users(:manager)
+
+    assert_no_enqueued_jobs only: Imports::ExtractTextJob do
+      post reread_import_review_path(accepted), headers: { "HTTP_REFERER" => import_url(accepted.import_batch_id) }
+    end
+
+    assert_redirected_to import_url(accepted.import_batch_id)
+    assert_equal "Accepted items can't be read again.", flash[:alert]
+    assert accepted.reload.accepted?
+  end
+
+  test "Read again takes items that left the queue (the batch page offers it for rejected and failed ones)" do
+    failed = new_item(status: :failed, original_filename: "broken.pdf", page_range: nil, error_message: "pdftotext timed out")
+    sign_in_as users(:manager)
+
+    calls = stub_reread { post reread_import_review_path(failed) }
+
+    assert_equal [ [ failed.id, users(:manager) ] ], calls
+    assert_redirected_to import_path(failed.import_batch_id)
+    assert_equal "Reading broken.pdf again.", flash[:notice]
+  end
+
+  test "Read again refused goes back with the reason" do
+    sign_in_as users(:manager)
+    refusal = Imports::Reread::NotAllowed.new("Today's AI allocation is used up. Read it again after 00:05 UTC.")
+
+    stub_reread(error: refusal) do
+      post reread_import_review_path(@item), headers: { "HTTP_REFERER" => import_review_url(@item) }
+    end
+    assert_redirected_to import_review_url(@item)
+    assert_equal "Today's AI allocation is used up. Read it again after 00:05 UTC.", flash[:alert]
+
+    stub_reread(error: refusal) { post reread_import_review_path(@item) } # no referrer: the batch page
+    assert_redirected_to import_path(@item.import_batch_id)
+  end
+
   private
+    # Imports::Reread.new records [item id, user] and returns a reread whose call does nothing
+    # (or raises error). Returns the recorded calls.
+    def stub_reread(error: nil)
+      calls = []
+      Imports::Reread.define_singleton_method(:new) do |item, user:|
+        calls << [ item.id, user ]
+        Struct.new(:item) { define_method(:call) { error ? raise(error) : item } }.new(item)
+      end
+      yield
+      calls
+    ensure
+      Imports::Reread.singleton_class.remove_method(:new)
+    end
+
+    def allowing_reread(allowed)
+      original = Imports::Reread.method(:allowed?)
+      Imports::Reread.define_singleton_method(:allowed?) { |_item| allowed }
+      yield
+    ensure
+      Imports::Reread.define_singleton_method(:allowed?, original)
+    end
+
+    # The item's extraction when the AI saw an expiry on the card but could not read it as a date.
+    def unreadable_expiry_extraction(printed)
+      { "certificates" => [ { "pages" => [ 2 ], "holder_name" => "Jaun Ortis", "expires_on" => nil, "unreadable" => { "expires_on" => printed } } ],
+        "non_certificate_pages" => [] }
+    end
+
     def review_params(**overrides)
       { crew_member_id: @juan.id, certificate_type_id: @first_aid.id, completed_on: @item.proposed_completed_on.iso8601,
         expires_on: "", certificate_number: "FA-77001", issued_by: "Example Safety Training LLC" }.merge(overrides)

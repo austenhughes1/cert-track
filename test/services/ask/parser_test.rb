@@ -95,6 +95,23 @@ class Ask::ParserTest < ActiveSupport::TestCase
     assert result.person.matched?
   end
 
+  test "a fuzzy type doesn't take the stopwords after it" do
+    result = parse("Is hazwoper required on 2417")
+    assert_equal certificate_types(:retired_hazwoper), result.type.record
+    assert_equal 1..1, result.type.range
+
+    assert_equal "flager", parse("does juan have flager cert").type.phrase
+    assert_equal certificate_types(:cdl_a), parse("does dave have cdl class a").type.record
+  end
+
+  test "a fuzzy type doesn't swallow a first name that is also a stopword" do
+    will = CrewMember.create!(first_name: "Will", last_name: "Turner")
+
+    result = parse("is flager required for will")
+    assert_equal certificate_types(:flagger), result.type.record
+    assert_equal will, result.person&.record
+  end
+
   test "a time window claims its words" do
     result = parse("what expires in the next 60 days")
 

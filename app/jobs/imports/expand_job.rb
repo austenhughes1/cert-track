@@ -12,7 +12,9 @@ module Imports
   # trigger check_completion!) while the batch is still being unpacked. A run that died
   # half way (deploy, crash) is redone from scratch when Solid Queue runs the job again.
   class ExpandJob < ApplicationJob
-    queue_as :default
+    # Every pipeline job runs on the imports queue, which has its own worker (config/queue.yml):
+    # a big batch's OCR backlog never holds up backups, expiry emails or mail on default.
+    queue_as :imports
 
     LOCK_NAMESPACE = 0x1e2a # pg advisory lock key space for import batches
 

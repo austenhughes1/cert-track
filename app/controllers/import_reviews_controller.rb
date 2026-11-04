@@ -2,7 +2,8 @@
 # item, the file on the left and the AI's proposal on the right, editable. Accept, reject,
 # skip, "create crew member from this" and front/back merge go through the Imports::* review
 # services (which also run the batch's check_completion!); after each the reviewer moves on
-# to the next item. Editors only: the queue shows personal data from the cards.
+# to the next item. "Read again" (Imports::Reread) also takes rejected and failed items, from
+# the batch page. Editors only: the queue shows personal data from the cards.
 class ImportReviewsController < ApplicationController
   require_role :editor
 
@@ -14,7 +15,7 @@ class ImportReviewsController < ApplicationController
   Fields = Struct.new(*REVIEW_FIELDS, keyword_init: true)
 
   before_action :set_item, except: :index
-  before_action :require_reviewable, except: :index
+  before_action :require_reviewable, except: %i[index reread]
 
   def index
     queue = ImportItem.review_queue
@@ -66,19 +67,22 @@ class ImportReviewsController < ApplicationController
     redirect_to_next next_id, notice: "Skipped #{item_label}; it moves to the end of the queue."
   end
 
-  # Adds the card's holder to the crew, then comes back to this item with them picked.
+  # Adds the card's holder to the crew, then comes back to this item with them picked. Someone
+  # who may already be on the list (possible_duplicates) is only added with confirm_duplicate.
   def create_crew_member
+    duplicates = possible_duplicates(crew_member_params)
+    if duplicates.any? && params[:confirm_duplicate] != "1"
+      return render_crew_member_errors([ "#{helpers.import_duplicate_members_sentence(duplicates)} " \
+                                         "Tick \"Yes, this is someone else\" to add another person anyway." ])
+    end
+
     crew_member = Imports::CreateCrewMember.new(@item, user: Current.user, attributes: crew_member_params).call
     redirect_to import_review_path(@item), status: :see_other,
       notice: "Added #{crew_member.display_name} to the crew and picked them for this certificate."
   rescue Imports::Accept::NotReviewable => error
     redirect_to_next nil, alert: error.record.errors.full_messages.to_sentence
   rescue ActiveRecord::RecordInvalid => error
-    @fields = fields_from_item
-    @crew_member_errors = error.record.errors.full_messages
-    @crew_member_attributes = crew_member_params
-    load_review
-    render :show, status: :unprocessable_entity
+    render_crew_member_errors(error.record.errors.full_messages)
   end
 
   # Front and back photos of one card: one certificate holding every item's file.
@@ -95,6 +99,17 @@ class ImportReviewsController < ApplicationController
                                       "#{certificate.certificate_type.name} certificate for #{certificate.crew_member.display_name}."
   rescue ActiveRecord::RecordInvalid => error # includes Imports::Accept::NotReviewable for a partner reviewed meanwhile
     render_review_errors(error.record.errors.full_messages)
+  end
+
+  # Sends the whole file through the pipeline again (a needs_review item from the review
+  # screen, a rejected or failed one from the batch page); it uses some of the day's AI
+  # allocation. Imports::Reread decides what may be read again.
+  def reread
+    Imports::Reread.new(@item, user: Current.user).call
+    redirect_to import_path(@item.import_batch_id), status: :see_other,
+      notice: "Reading #{@item.original_filename.presence || "item #{@item.id}"} again."
+  rescue Imports::Reread::NotAllowed => error
+    redirect_back_or_to import_path(@item.import_batch_id), alert: error.message, status: :see_other
   end
 
   private
@@ -158,6 +173,14 @@ class ImportReviewsController < ApplicationController
       render :show, status: :unprocessable_entity
     end
 
+    def render_crew_member_errors(messages)
+      @fields = fields_from_item
+      @crew_member_errors = messages
+      @crew_member_attributes = crew_member_params
+      load_review
+      render :show, status: :unprocessable_entity
+    end
+
     # Everything the review screen shows besides the item and @fields.
     def load_review
       @queue_count = ImportItem.review_queue.count
@@ -168,17 +191,30 @@ class ImportReviewsController < ApplicationController
       @crew_roles = CrewRole.ordered.to_a
       @employers = CrewMember.employer_names
       @crew_member_attributes ||= Imports::CreateCrewMember.suggested_attributes(@item)
+      @crew_member_duplicates = possible_duplicates(@crew_member_attributes)
+    end
+
+    # People a crew member created from this item may repeat: the person it is already matched
+    # to (exactly, or picked by hand) and any member, active or not, whose name, preferred name
+    # or alias is the name entered (CrewMember.matching_normalized_name, active first). Someone
+    # who left and came back is better reactivated than added a second time.
+    def possible_duplicates(attributes)
+      attributes = attributes.to_h.symbolize_keys
+      name = [ attributes[:first_name], attributes[:last_name] ].compact_blank.join(" ")
+      matched = @item.matched_crew_member if @item.person_matched? || @item.person_picked?
+      [ matched, *CrewMember.matching_normalized_name(name) ].compact.uniq
     end
 
     # The form starts from the proposal. A computed expiry is left blank: blank means
-    # "work it out from the type", which then follows the reviewer's choice of type.
+    # "work it out from the type", which then follows the reviewer's choice of type. A printed
+    # or typed (manual) one is filled in.
     def fields_from_item
-      printed = @item.proposed_expires_on.present? && !@item.proposed_expiry_computed? && !@item.proposed_expiry_none?
+      given = @item.proposed_expires_on.present? && !@item.proposed_expiry_computed? && !@item.proposed_expiry_none?
       Fields.new(
         crew_member_id: @item.matched_crew_member_id,
         certificate_type_id: @item.matched_certificate_type_id,
         completed_on: @item.proposed_completed_on&.iso8601,
-        expires_on: (@item.proposed_expires_on.iso8601 if printed),
+        expires_on: (@item.proposed_expires_on.iso8601 if given),
         certificate_number: @item.proposed_certificate_number,
         issued_by: @item.issuer_raw
       )
@@ -191,11 +227,11 @@ class ImportReviewsController < ApplicationController
     end
 
     # Saved edits. The matcher's proposed person keeps its verdict (matched or suggested). A
-    # person picked by hand is saved with person_match :unmatched ("Picked by hand" on screen),
+    # person picked by hand is saved with person_match :picked ("Picked by hand" on screen),
     # so Imports::Accept never takes the pick for the matcher's proposal and teaches that
-    # person a name the AI may have misread. A type picked by hand counts as matched (types
-    # learn nothing from a review). The pipeline's date problems (error_message) are cleared:
-    # the dates saved here passed Imports::DateRules.
+    # person a name the AI may have misread; clearing the person saves :unmatched. A type
+    # picked by hand counts as matched (types learn nothing from a review). The pipeline's
+    # date problems (error_message) are cleared: the dates saved here passed Imports::DateRules.
     def proposal_attributes(member, type, dates)
       attributes = {
         proposed_completed_on: dates.completed_on,
@@ -205,7 +241,9 @@ class ImportReviewsController < ApplicationController
         issuer_raw: @fields.issued_by.to_s.squish.presence,
         error_message: nil
       }
-      attributes.merge!(matched_crew_member: member, person_match: :unmatched) if member&.id != @item.matched_crew_member_id
+      if member&.id != @item.matched_crew_member_id
+        attributes.merge!(matched_crew_member: member, person_match: member ? :picked : :unmatched)
+      end
       if type&.id != @item.matched_certificate_type_id
         attributes.merge!(matched_certificate_type: type, type_match: type ? :matched : :unmatched)
       end
@@ -213,12 +251,11 @@ class ImportReviewsController < ApplicationController
     end
 
     # DateRules calls any expiry it is given printed. It stays printed only when it is the
-    # date the AI read off the card; a date the reviewer typed is saved without a source,
-    # which Imports::Accept records as manual.
+    # date the AI read off the card; any other date is one the reviewer typed: manual.
     def saved_expiry_source(dates)
       return dates.expires_on_source unless dates.expires_on_source == :printed
 
-      :printed if @item.proposed_expiry_printed? && dates.expires_on == @item.proposed_expires_on
+      @item.proposed_expiry_printed? && dates.expires_on == @item.proposed_expires_on ? :printed : :manual
     end
 
     # Only items the screen offered (and that still match) are merged.

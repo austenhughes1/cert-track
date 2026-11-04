@@ -9,7 +9,8 @@ module Ai
   #
   # Providers are an allowlist (Ai::Config::PROVIDERS): Workers AI through its OpenAI-compatible
   # endpoint, a local Ollama, Anthropic when switched on, and Ai::FakeProvider. Certificate data
-  # goes nowhere else. Usage is recorded for every reply that comes back, even one that fails to
+  # goes nowhere else: an OLLAMA_URL off this machine's network raises Ai::ConfigurationError
+  # before anything is sent. Usage is recorded for every reply that comes back, even one that fails to
   # parse, because the provider has already counted it. Before every call to a provider with a
   # daily allocation, today's usage is checked: once it reaches Ai::Config.daily_budget the call
   # is not sent and Ai::QuotaExceeded is raised (Ai::Budget.exhausted?).
@@ -167,11 +168,22 @@ module Ai
             config.openai_protocol = :chat_completions # Workers AI has no Responses API for these models
             config.openai_use_system_role = true # send "system", not OpenAI's "developer" role
           when "ollama"
-            config.ollama_api_base = Ai::Config.ollama_url
+            config.ollama_api_base = local_ollama_url
           when "anthropic"
             config.anthropic_api_key = Ai::Config.anthropic_api_key
           end
         end
+      end
+
+      # PLAN.md allows Ollama only as a local model. Every caller runs Ai::Config.ensure_ready!
+      # first; this backstop keeps one that doesn't from sending to an OLLAMA_URL outside this
+      # machine and its private network (Ai::Config.ollama_url_problem).
+      def local_ollama_url
+        url = Ai::Config.ollama_url
+        problem = Ai::Config.ollama_url_problem(url)
+        raise ConfigurationError, problem if problem
+
+        url
       end
 
       def json_only(system, schema)

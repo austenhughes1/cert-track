@@ -140,6 +140,49 @@ class AskControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "a requirements question lists the requirements, then who is missing what" do
+    sign_in_as users(:viewer)
+    tower = projects(:tower_2417)
+
+    get ask_path(q: "What's required on 2417?")
+
+    assert_select "#ask_answer[data-intent=requirements][data-status=list]"
+    assert_select "#ask_answer_text", text: /\A2417 · Tower 2417 Upgrade requires 5 certificate types: .*3 of 4 assigned crew are missing at least one/
+    assert_select "#ask_section_requirements h2", text: /Requirements\s+\(5\)/
+    assert_select "#ask_section_requirements tbody tr", 5
+    assert_select "#ask_section_requirements tr[data-certificate-type-id='#{certificate_types(:climber).id}']" do
+      assert_select "td", text: "Climber"
+      assert_select "td[data-missing='1']", text: "1 of 2 missing"
+      assert_select "p", text: "Anyone working above 6 ft on the tower."
+    end
+    assert_select "#ask_section_requirements tr[data-certificate-type-id='#{certificate_types(:cdl_a).id}'] td", text: "All current (1)"
+    assert_select "#ask_section_requirements a[href=?]", project_compliance_path(tower), text: "View the compliance matrix"
+    assert_select "#ask_section_gaps tbody tr", 5
+    assert_select "#ask_section_gaps th", text: "Person"
+  end
+
+  test "a project chip names the project once" do
+    sign_in_as users(:viewer)
+
+    get ask_path(q: "what's missing on 2471")
+
+    assert_select "#ask_answer[data-status=not_found]"
+    assert_select "#ask_candidates a[href=?]", ask_path(q: "what's missing on 2417", project_id: projects(:tower_2417).id) do
+      assert_select "span", count: 1
+      assert_select "span", text: "2417 · Tower 2417 Upgrade"
+    end
+  end
+
+  test "an unrelated word in an expiry question gets the answer, not a project chip" do
+    sign_in_as users(:viewer)
+
+    get ask_path(q: "what has expired so far")
+
+    assert_select "#ask_answer[data-intent=expired][data-status=list]"
+    assert_select "#ask_candidates", count: 0
+    assert_select "#ask_notes li", text: "Ignored “so far”."
+  end
+
   test "ambiguous people are offered as links that re-ask pinned to the choice" do
     juana = CrewMember.create!(first_name: "Juana", last_name: "Ortega")
     sign_in_as users(:viewer)
@@ -201,6 +244,7 @@ class AskControllerTest < ActionDispatch::IntegrationTest
       ask_path(q: "Does Juan Ortiz have OSHA 30?") => 10,
       ask_path(q: "Who has flagger?") => 10,
       ask_path(q: "What's missing on 2417?") => 11,
+      ask_path(q: "What's required on 2417?") => 12,
       ask_path(q: "missing") => 11
     }.each do |path, limit|
       queries = count_queries { get path }

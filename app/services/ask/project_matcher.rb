@@ -10,6 +10,8 @@ module Ask
     SQL_FLOOR = 0.3
     ACCEPT = 0.5
     MARGIN = 0.1
+    SUGGEST_NAME = 0.35 # strict word similarity: "towr" scores 0.38 against "tower 2417 upgrade", "recently" 0.13
+    SUGGEST_CODE = 0.25 # trigram similarity of codes: one edit in a 4-digit code scores 0.25 to 0.43
     STATUS_ORDER = { "active" => 2, "planned" => 1, "closed" => 0 }.freeze
 
     Window = Data.define(:range, :phrase, :compact)
@@ -46,13 +48,21 @@ module Ask
       match && extend_over_name(match)
     end
 
-    # Projects whose name resembles phrase, active ones first; every active project when
-    # none does. For "I couldn't find a project matching ...".
+    # Projects whose name or code resembles phrase, closest first, active ones before
+    # others; none when nothing does. For "I couldn't find a project matching ...". A name
+    # word must be close ("towr" -> Tower 2417 Upgrade); a code one edit off is
+    # ("2471" -> 2417). Nothing is offered for a phrase like "recently" or "9999".
     def self.suggestions(phrase, limit: 3)
-      similar = Project.where("similarity(lower(projects.name), :phrase) >= 0.2 OR lower(projects.code) = :phrase", phrase: phrase.downcase)
-        .order(Arel.sql(ActiveRecord::Base.sanitize_sql_array([ "similarity(lower(projects.name), ?) DESC", phrase.downcase ])))
-        .limit(limit).to_a
-      similar.presence || Project.active.ordered.limit(limit).to_a
+      words = Question.new(phrase).words
+      return [] if words.empty?
+
+      binds = { phrase: words.join(" "), compact: words.join, name_floor: SUGGEST_NAME, code_floor: SUGGEST_CODE }
+      name_score = "strict_word_similarity(:phrase, lower(projects.name))"
+      code_score = "similarity(regexp_replace(lower(coalesce(projects.code, '')), '[^a-z0-9]+', '', 'g'), :compact)"
+      order = "greatest(#{name_score}, #{code_score}) DESC, projects.status = #{Project.statuses.fetch("active")} DESC, projects.name, projects.id"
+
+      Project.where(ActiveRecord::Base.sanitize_sql_array([ "#{name_score} >= :name_floor OR #{code_score} >= :code_floor", binds ]))
+        .order(Arel.sql(ActiveRecord::Base.sanitize_sql_array([ order, binds ]))).limit(limit).to_a
     end
 
     private

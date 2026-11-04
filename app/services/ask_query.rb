@@ -10,12 +10,15 @@
 # type and a person, each by pg_trgm fuzzy matching plus nicknames. The intent follows
 # from what was found and a few keywords:
 #   person + type                      :check              "Does Juan Ortiz have OSHA 30?"
+#   project + "required", "needs"      :requirements       "What's required on 2417?", "requirements for 2417"
+#     (no person, not "who")
 #   "missing", "gaps", "compliant",    :gaps               "What's missing on 2417?", "who needs flagger on 2417"
-#     "needs", "required"
+#     "needs", "required" (otherwise)
 #   "doesn't have", "without" + type   :lacking            "Who doesn't have Flagger?"
 #     (no type: :gaps)                                     "What doesn't Juan have?"
-#   "expired", "lapsed", or expiry     :expired            "Which certificates have expired?", "what expired last month"
-#     words with a past window
+#   "expired", "lapsed", "past due",   :expired            "Which certificates have expired?", "what expired last month"
+#     "out of date", "no longer valid",                    "what's out of date", "any lapses?"
+#     or expiry words with a past window
 #   "expir...", "renewal", "due"       :expiring           "What expires in the next 60 days?"
 #   type                               :list_holders       "Who has Flagger?"
 #   person                             :list_certificates  "What does Juan have?", "Juan's certs"
@@ -26,12 +29,12 @@
 # Pins (crew_member_id:, certificate_type_id:, project_id:) come from "Did you mean" links
 # and override what the text matched, so two people with one name can be told apart.
 class AskQuery
-  INTENTS = %i[check list_holders list_certificates lacking expiring expired gaps unknown].freeze
+  INTENTS = %i[check list_holders list_certificates lacking expiring expired gaps requirements unknown].freeze
   STATUSES = %i[yes no list ambiguous not_found unknown].freeze
   LIST_LIMIT = Ask::Answers::Base::LIST_LIMIT
 
   HELP = "I can tell you whether someone holds a certificate, who holds one, what one person has, " \
-    "what expires soon and what's missing on a project. Try one of the examples.".freeze
+    "what expires soon, what a project requires and what's missing on it. Try one of the examples.".freeze
 
   # question         the question as asked (squished)
   # intent, status   see above
@@ -62,7 +65,8 @@ class AskQuery
 
   ANSWERS = {
     check: Ask::Answers::Check, list_holders: Ask::Answers::Holders, list_certificates: Ask::Answers::Certificates,
-    lacking: Ask::Answers::Lacking, expiring: Ask::Answers::Expiring, expired: Ask::Answers::Expired, gaps: Ask::Answers::Gaps
+    lacking: Ask::Answers::Lacking, expiring: Ask::Answers::Expiring, expired: Ask::Answers::Expired, gaps: Ask::Answers::Gaps,
+    requirements: Ask::Answers::Requirements
   }.freeze
 
   attr_reader :user, :today
@@ -97,6 +101,7 @@ class AskQuery
       leftovers = parse.leftovers.any?
 
       if parse.person && parse.type then :check
+      elsif parse.project && parse.person.nil? && question.requirements? then :requirements
       elsif question.gaps? then :gaps
       elsif question.negated? then negated_intent(parse)
       elsif expired?(parse) then :expired
@@ -169,11 +174,21 @@ class AskQuery
       elsif missing_type
         not_found(parse, "I couldn't find a certificate type matching #{quoted(phrases.last(1))}.",
           parse.type_matcher.suggestions, parse.leftovers.last)
-      elsif intent.in?(%i[expiring expired gaps]) && phrases.any?
-        suggestions = parse.person_matcher.suggestions + Ask::ProjectMatcher.suggestions(phrases.first)
-        not_found(parse, "I couldn't find a project, crew member or certificate type matching #{quoted(phrases)}.",
-          suggestions, parse.leftovers.first)
+      elsif intent.in?(%i[expiring expired gaps requirements]) && phrases.any?
+        unmatched_filter(parse, phrases)
       end
+    end
+
+    # Words an expiry, compliance or requirements question didn't use. When they resemble a
+    # person, type or project, or read like a name or code ("on 9999", "for Bob"), say what
+    # couldn't be found; a stray word ("so far") is only noted, and the question answered.
+    def unmatched_filter(parse, phrases)
+      suggestions = Ask::ProjectMatcher.suggestions(phrases.first) + parse.person_matcher.suggestions +
+        parse.type_matcher.suggestions
+      return unless suggestions.any? || parse.leftovers.any? { |range| parse.question.reference?(range) }
+
+      not_found(parse, "I couldn't find a project, crew member or certificate type matching #{quoted(phrases)}.",
+        suggestions, parse.leftovers.first)
     end
 
     def quoted(phrases)
@@ -227,7 +242,7 @@ class AskQuery
       case record
       when CrewMember then [ record.crew_role&.name, record.employer, ("inactive" unless record.active?) ].compact.join(" · ")
       when CertificateType then [ record.code, ("retired" unless record.active?) ].compact.join(" · ")
-      when Project then [ record.name, (record.status unless record.active?) ].compact.join(" · ")
+      when Project then record.active? ? "" : record.status # the label already names it
       end
     end
 

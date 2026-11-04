@@ -2,7 +2,8 @@
   today = Date.current
   scan_sha = Digest::SHA256.hexdigest("scan_0001.pdf")
 %>
-# accepted_li_flagger    page 1 of scan_0001.pdf, accepted into certificates(:li_flagger)
+# accepted_li_flagger    page 1 of scan_0001.pdf, accepted into certificates(:li_flagger); person and
+#                        type matched exactly, printed expiry
 # review_juan_first_aid  page 2 of the same file, needs review; holder misspelled "Jaun Ortis",
 #                        no person matched, type suggested (first_aid, by name: no code was read)
 # duplicate_li_flagger   second upload of page 1, status duplicate, duplicate_of accepted_li_flagger
@@ -18,9 +19,12 @@ accepted_li_flagger:
   holder_name_raw: LI CHEN
   certificate_name_raw: Flagger Certification
   matched_crew_member: li_chen
+  person_match: matched
   matched_certificate_type: flagger
+  type_match: matched
   proposed_completed_on: <%= today - 730 %>
   proposed_expires_on: <%= today + 500 %>
+  proposed_expires_on_source: printed
   proposed_certificate_number: "FL-55501"
   provider: workers_ai
   ai_units_used: 140

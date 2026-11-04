@@ -223,6 +223,45 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
     assert_nil item.proposed_expires_on_source
     assert_equal 'The expiration date "2027-06" is not a valid YYYY-MM-DD date.', item.error_message
     assert_equal [ crew_members(:juan_ortiz), "matched" ], [ item.matched_crew_member, item.person_match ]
+    assert_equal "2027-06", item.unreadable_expires_on
+
+    error = assert_raises(ActiveRecord::RecordInvalid) { Imports::Accept.new(item, user: users(:manager)).call }
+    assert_equal [ %(The card's expiry ("2027-06") could not be read. Type the expiry date from the card.) ],
+      error.record.errors.full_messages
+  end
+
+  test "auto-accept never takes an unreadable printed expiry, even when the decider would" do
+    raw = ortiz_osha(expires: "06/2027", confidence: 0.99) # OSHA 30 never expires: no other rule fails
+    item = image_item(extraction: normalized(raw))
+
+    with_decider_saying(:accept) { with_auto_accept { process(item) } }
+
+    assert item.needs_review?
+    assert_nil item.certificate
+    assert_equal %(Auto-accept was refused: The card's expiry ("06/2027") could not be read. Type the expiry date from the card.),
+      item.error_message
+    assert_empty Certificate.where(import_item_id: item.id)
+  end
+
+  test "a card that says it never expires is not an unreadable expiry: the type's rule applies" do
+    item = image_item(extraction: normalized(ortiz_osha(expires: "Does not expire")))
+
+    process(item)
+
+    assert item.needs_review?
+    assert item.proposed_expiry_none?, "OSHA 30 never expires"
+    assert_nil item.error_message
+    assert_nil item.unreadable_expires_on
+    certificate = Imports::Accept.new(item, user: users(:manager), attributes: { expires_on: "" }).call # left blank on the form
+    assert certificate.expiry_none?
+    assert_nil certificate.expires_on
+
+    lifetime = image_item(filename: "flagger.jpg", sha256: SecureRandom.hex(32),
+      extraction: normalized(ortiz_osha(code: "FLAGGER", name: "Flagger Certification", expires: "Lifetime")))
+    with_auto_accept { process(lifetime) }
+    assert lifetime.accepted?, lifetime.error_message
+    assert lifetime.certificate.expiry_computed?, "no date on the card: Flagger's 36 months apply"
+    assert_equal Date.parse(COMPLETED) >> 36, lifetime.certificate.expires_on
   end
 
   test "an unreadable completion date is reported for review" do
@@ -348,6 +387,14 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
     def normalized(*certificates)
       Imports::Extraction::Normalizer.new(pages: [ 1 ], codes: CertificateType.active.pluck(:code))
         .call("certificates" => certificates, "non_certificate_pages" => [])
+    end
+
+    # Imports::Decider answers decision for every item inside the block.
+    def with_decider_saying(decision)
+      Imports::Decider.define_singleton_method(:new) { |*| Struct.new(:call).new(decision) }
+      yield
+    ensure
+      Imports::Decider.singleton_class.remove_method(:new)
     end
 
     # klass.new raises SystemStackError inside the block, like a parser recursing on a hostile file.

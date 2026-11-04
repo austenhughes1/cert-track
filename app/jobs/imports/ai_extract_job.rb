@@ -16,6 +16,7 @@ module Imports
   #   - a file estimated to need more than a whole day's budget fails at once with a message
   #     saying to split it (Imports::Extractor::OverBudget), before any call.
   # Usage is recorded per call by Ai::Client, so retries and unparseable replies count too.
+  # item.ai_units_used adds each finished read to the ones before (Imports::Reread keeps it).
   #
   # Settings problems (no EXTRACTION_MODEL, no API token, unreadable pages and nothing else
   # readable without a vision model) fail the item at once with a message saying what to set,
@@ -26,7 +27,7 @@ module Imports
   #
   # Only items still extracting are touched; a deleted item discards the job.
   class AiExtractJob < ApplicationJob
-    queue_as :default
+    queue_as :imports # the import worker (config/queue.yml); see Imports::ExpandJob
 
     ATTEMPTS = 3
     ERROR_MESSAGE_LIMIT = 1_000
@@ -57,7 +58,7 @@ module Imports
       result = extract(item, provider)
       return unless result
 
-      item.update!(extraction: result.data, provider: result.provider, ai_units_used: result.units,
+      item.update!(extraction: result.data, provider: result.provider, ai_units_used: item.ai_units_used.to_i + result.units,
         attempts: item.attempts + 1, next_attempt_at: nil, error_message: nil)
       Rails.logger.info("[ai] import item #{item.id}: #{result.requests} call(s) to #{result.model}, " \
         "#{result.units} #{Ai::Budget.limited?(provider) ? "neurons" : "tokens"}")

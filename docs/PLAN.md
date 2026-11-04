@@ -446,17 +446,44 @@ Status (Nov 2, 2026): every `travel_to` criterion passes in `test/jobs/notificat
 ### Phase 3: Bulk import
 
 - [ ] Spike first: build the accuracy harness, compare 2 or 3 free Workers AI text models and 1 vision model, record scores in this file, set `EXTRACTION_MODEL` and `EXTRACTION_VISION_MODEL`.
-- [ ] Pipeline steps 1 to 11, the daily budget tracking, and rescheduling on quota errors.
-- [ ] Review queue with keyboard shortcuts and front/back merge.
+- [x] Pipeline steps 1 to 11, the daily budget tracking, and rescheduling on quota errors.
+- [x] Review queue with keyboard shortcuts and front/back merge.
 
 Done when: one zip of 20 samples (a nested zip, a multi-certificate PDF, a HEIC photo, a duplicate and a non-certificate page) accounts for every file; the duplicate is flagged; a zip-slip entry is rejected; a simulated quota error reschedules to 00:05 UTC; and field accuracy is 90% or more, or the owner signs off on the review-queue workflow.
 
+Status (Nov 3, 2026): everything except the model spike is met in tests, using the fake AI provider. `test/integration/import_pipeline_acceptance_test.rb` runs a synthetic zip of about 20 files through the whole pipeline, and every file is accounted for:
+- the nested zip is read;
+- the multi-certificate PDF is split;
+- the HEIC photo is read by OCR;
+- the duplicate is flagged;
+- the course outline goes to review;
+- the zip-slip entry is rejected;
+- exactly one summary email is sent.
+
+`test/jobs/imports/ai_extract_job_test.rb` covers the 00:05 UTC reschedule. Since the first pass, these were added:
+- a "Read again" action (`Imports::Reread`);
+- a separate `imports` job queue, so backups and expiry emails never wait behind an import;
+- import summaries now count toward the 90/day email cap.
+
+Still open:
+- The spike. The harness (`bin/rails certtrack:eval_extraction`, `docs/IMPORT_SPIKE.md`) is built. Comparing models and the 90% accuracy check wait on real samples in `test/fixtures/import_samples/` and a Workers AI token.
+- Until `EXTRACTION_MODEL` is set, production imports stop at the AI step with a clear message.
+- Keep `AUTO_ACCEPT_ENABLED` false until about 100 imported items have been reviewed by hand.
+
 ### Phase 4: Ask box and AI chat
 
-- [ ] 4a: `AskQuery`, `/ask`, 30-phrasing test suite.
+- [x] 4a: `AskQuery`, `/ask`, 30-phrasing test suite.
 - [ ] 4b: `ruby_llm` chat persistence, the seven read-only tools, system prompt, rate limit, budget fallback, `certtrack:eval_chat`.
 
 Done when: the Ask box answers all 30 phrasings correctly and chat scores at least 22 of 25 with no invented names, dates or numbers.
+
+Status (Nov 3, 2026): 4a is met. `test/services/ask_query_test.rb` has 128 phrasings, all passing. They cover:
+- typos and nicknames;
+- expiring, expired and lacking lists;
+- project gaps and project requirements;
+- time windows.
+
+The Ask box uses no AI. 4b is not started.
 
 ### Phase 5: Hardening (optional)
 
@@ -481,7 +508,7 @@ The biggest risk of the $0 design is that free tiers can change or be withdrawn.
 **Security and privacy (required, not optional)**
 
 - Certificates carry personal data, and CDL cards can show license numbers and dates of birth. Keep both R2 buckets private. Serve files only through authenticated Rails endpoints with signed URLs that expire within 5 minutes.
-- Encrypt `certificate_number` with Active Record encryption (`encrypts`). Purge `extracted_text` and `extraction` 30 days after an item is accepted or rejected.
+- Encrypt `certificate_number` with Active Record encryption (`encrypts`). Purge `extracted_text` and `extraction` 30 days after an item is accepted, rejected, failed or marked duplicate (items still waiting for review keep theirs).
 - Encrypt database dumps with a key from Rails credentials before uploading them to R2.
 - Data leaves the VM only to Cloudflare (storage and Workers AI), Resend (email) and, if switched on, Anthropic. Nothing else.
 - Invite-only accounts with no public sign-up, `force_ssl`, and the generator's built-in rate limit on sign-in.

@@ -99,6 +99,23 @@ class Ai::BudgetTest < ActiveSupport::TestCase
     end
   end
 
+  test "a refusal between 00:00 and 00:05 UTC fills the day before, so the 00:05 retry goes ahead" do
+    travel_to Time.utc(2026, 11, 4, 0, 2) do
+      AiUsageDay.record!(provider: "workers_ai", units: 8_000, day: Date.new(2026, 11, 3))
+
+      assert_equal 1_000, Ai::Budget.mark_exhausted!("workers_ai")
+      assert_equal 9_000, AiUsageDay.used_on(Date.new(2026, 11, 3), "workers_ai")
+      assert_equal 0, Ai::Budget.used_today("workers_ai")
+      assert_equal Time.utc(2026, 11, 4, 0, 5), Ai::Budget.next_reset_at
+    end
+
+    travel_to Time.utc(2026, 11, 4, 0, 5) do
+      assert_not Ai::Budget.exhausted?("workers_ai")
+      assert_equal 9_000, Ai::Budget.mark_exhausted!("workers_ai"), "from 00:05 a refusal fills the new day"
+      assert Ai::Budget.exhausted?("workers_ai")
+    end
+  end
+
   test "providers without a daily allocation are never exhausted" do
     travel_to Time.utc(2026, 11, 3, 12) do
       AiUsageDay.record!(provider: "anthropic", units: 1_000_000, day: Date.new(2026, 11, 3))

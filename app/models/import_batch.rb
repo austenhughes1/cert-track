@@ -107,7 +107,9 @@ class ImportBatch < ApplicationRecord
   #   else every item failed (or there are none) -> failed
   #   else                        -> completed
   # A receiving batch (not unpacked yet) is left alone. The first time the batch
-  # finishes, the uploader gets ImportMailer#summary, exactly once even when callers race.
+  # finishes, the uploader gets ImportMailer#summary, exactly once even when callers race
+  # or the batch goes back to processing later (Imports::Reread). The send counts against
+  # the 90/day email cap (Imports::SummaryDeliveryJob).
   def check_completion!
     finished = with_lock do
       next false if receiving?

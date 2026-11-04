@@ -1,9 +1,13 @@
 # The email an uploader gets when their import batch finishes (pipeline step 11).
-# Sent once per batch by ImportBatch#check_completion!.
+# Sent once per batch by ImportBatch#check_completion!. deliver_later goes through
+# Imports::SummaryDeliveryJob, which keeps it under the 90/day email cap (held back to the
+# next morning past it).
 #
 #   ImportMailer.with(batch:).summary
 class ImportMailer < ApplicationMailer
   PROBLEM_LIMIT = 10
+
+  self.delivery_job = Imports::SummaryDeliveryJob
 
   # [label, ImportItem status] in the order the summary lists them.
   COUNT_ROWS = [

@@ -14,4 +14,5 @@
         class: "rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" %>
 </div>
 
-<%= render "imports/progress", batch: @batch, progress: @progress, items: @items, items_total: @progress.fetch(:total) %>
+<%= render "imports/progress", batch: @batch, progress: @progress, items: @items, items_total: @progress.fetch(:total),
+      reread_context: @reread_context %>

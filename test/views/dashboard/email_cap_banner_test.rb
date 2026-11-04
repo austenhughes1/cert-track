@@ -19,6 +19,7 @@ class DashboardEmailCapBannerTest < ActionView::TestCase
       assert_select "p", text: /3 emails were held back today/
       assert_select "p", text: /90-a-day sending limit/
       assert_select "p", text: /\(90 sent\)/
+      assert_select "p", text: /Expiry alerts go out on the next daily run; weekly digests are retried the next morning;\s+import summaries go out the next morning at 7:00 Denver time\./
     end
   end
 

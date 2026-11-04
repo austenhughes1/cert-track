@@ -63,6 +63,20 @@ module AskHelper
     safe_join(links, tag.span(" · ", class: "text-gray-400"))
   end
 
+  # Who an Ask::Requirement applies to: "Everyone", "Climber", "Climber, Operator".
+  def ask_requirement_roles(requirement)
+    requirement.everyone? ? "Everyone" : requirement.crew_roles.map(&:name).join(", ")
+  end
+
+  # How the crew stands on an Ask::Requirement: "1 of 4 missing", "All current (4)",
+  # "Nobody needs it".
+  def ask_requirement_coverage(requirement)
+    if requirement.needed.zero? then "Nobody needs it"
+    elsif requirement.missing.zero? then "All current (#{requirement.needed})"
+    else "#{requirement.missing} of #{requirement.needed} missing"
+    end
+  end
+
   # Which columns an evidence table needs: no person column when the answer is about one
   # person, no type column when it is about one type.
   def ask_columns(result)

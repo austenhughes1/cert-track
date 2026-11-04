@@ -193,8 +193,8 @@ An unset variable becomes an **empty** secret without any warning, so don't skip
 | `AUTO_ACCEPT_ENABLED` | `config/deploy.yml` | `false` until you trust the import output |
 | `ANTHROPIC_API_KEY` | your shell (optional) | Paid fallback only; see section 12 |
 | `ANTHROPIC_MODEL` | `config/deploy.yml` (optional) | Model for `AI_PROVIDER=anthropic`, text and images; default `claude-haiku-5-5` |
-| `OLLAMA_URL` | `config/deploy.yml` (optional) | Ollama endpoint for `AI_PROVIDER=ollama`; default `http://localhost:11434/v1` |
-| `WEB_CONCURRENCY`, `JOB_CONCURRENCY` | `config/deploy.yml` | `2` Puma workers, `1` Solid Queue process (sized for 2 OCPU) |
+| `OLLAMA_URL` | `config/deploy.yml` (optional) | Ollama endpoint for `AI_PROVIDER=ollama`; default `http://localhost:11434/v1`. It must be this machine or its private network (localhost, a private IP, or a Kamal accessory name such as `cert_track-ollama`). Any other host is refused before anything is sent, because certificate text would leave the VM |
+| `WEB_CONCURRENCY`, `JOB_CONCURRENCY` | `config/deploy.yml` | `2` Puma workers, `1` process per Solid Queue worker (sized for 2 OCPU; see section 10) |
 
 To change a `config/deploy.yml` value, edit it, commit, and run `bin/kamal deploy`. To change a secret, update `deploy.env`, `source` it, and run `bin/kamal deploy`. Kamal rewrites the container env on every deploy.
 
@@ -286,6 +286,7 @@ Last, add a free uptime monitor (UptimeRobot or Better Stack, for example) on `h
 | Disk and build cache on the VM | `ssh ubuntu@$KAMAL_HOST 'df -h / && docker system df'`, and every so often `ssh ubuntu@$KAMAL_HOST docker builder prune -f --filter until=720h` |
 
 - Builds run on the production VM, so a deploy uses its CPU for a few minutes. Deploy outside busy hours.
+- **Background jobs** (`config/queue.yml`, watched at `/jobs`). Solid Queue runs two workers inside the app container. The `imports` worker reads uploads (OCR, then the AI) with 2 threads, so at most two files are in OCR at once. The `default` worker runs everything else: backups, expiry scans and digests, all email (import summaries included), maintenance and Active Storage. A big import backlog therefore never delays the 3 a.m. backup or the 6 a.m. expiry emails; it only queues behind itself. Within the import queue OCR goes last, so a new batch unpacks at once and files already read move on to the AI.
 - **Changing `POSTGRES_PASSWORD`**: run `bin/kamal accessory exec db -i --reuse "psql -U cert_track -d postgres"`, then `\password cert_track`. Put the new value in `deploy.env`, `source` it, and run `bin/kamal deploy`. The accessory's env var only matters on first initialization, so Postgres needs no reboot.
 - **Rotating R2, Resend, Workers AI or GHCR tokens**: create the new token, update `deploy.env`, run `bin/kamal deploy` (plus `bin/kamal registry login` for GHCR), then revoke the old token.
 
@@ -303,6 +304,8 @@ The fallback stays off unless the free Workers AI models prove inaccurate (see P
 2. Set `AI_PROVIDER: anthropic` under `env.clear` in `config/deploy.yml`, either as a one-time backlog run or permanently.
 3. Add `export ANTHROPIC_API_KEY=sk-ant-...` to `~/.config/certtrack/deploy.env` (never to the repo), commit the config changes from steps 1 and 2, `source` the env file and run `bin/kamal deploy`.
 4. To turn it off, set `AI_PROVIDER` back to `workers_ai` and deploy.
+
+New uploads use the new provider at once. To send items the old model already read (in the review queue, rejected or failed) through it, use each item's **Read again** button. Only whole files can be read again. Accepted items, duplicates and cards cut from a multi-certificate PDF can't.
 
 ## 13. Rebuild from scratch (lost or reclaimed VM)
 
@@ -332,5 +335,5 @@ R2 still holds every file and the last 14 backups. You need this repo, `config/m
 - **`Blocked hosts` error page.** The request's host isn't `APP_HOST`. Only `certs.abaventures.net` is allowed (`config.hosts`), and `/up` is exempt.
 - **Direct uploads fail with a CORS error in the browser console.** Check the R2 CORS policy (section 3, step 6). The origin must be exactly `https://certs.abaventures.net`, with no trailing slash.
 - **R2 `SignatureDoesNotMatch` / `AccessDenied`.** Check the R2 keys, and that the token covers both buckets. The checksum settings (`request_checksum_calculation: when_required`) are in `config/storage.yml`.
-- **Emails not arriving.** Check Resend → Logs, confirm the domain shows Verified, and confirm `MAIL_FROM` is on `notify.abaventures.net`. Failed `deliver_later` jobs show up in `/jobs`.
+- **Emails not arriving.** Check Resend → Logs, confirm the domain shows Verified, and confirm `MAIL_FROM` is on `notify.abaventures.net`. Failed `deliver_later` jobs show up in `/jobs`. Every email counts against the 90-a-day guard under Resend's 100/day cap; past it, the dashboard shows an amber banner and the rest wait: expiry alerts for the next daily run, weekly digests and import summaries for the next morning (summaries at 7:00 a.m. Denver).
 - **`permission denied ... docker.sock` on the VM.** `ubuntu` isn't in the docker group yet. Log out and back in, or run `bin/kamal server bootstrap` again.

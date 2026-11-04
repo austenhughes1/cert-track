@@ -46,6 +46,7 @@ Rails.application.routes.draw do
         post :skip
         post :create_crew_member
         post :merge
+        post :reread
       end
     end
   end

@@ -217,6 +217,111 @@ class Imports::ArchiveTest < ActiveSupport::TestCase
     assert_equal 0, archive.zip_records
   end
 
+  # --- the central directory's size (zip-bomb guard) ---
+
+  test "a zip whose list of files is far bigger than its entries need is rejected unopened; the batch goes on" do
+    bloated = hand_zip([ [ "a.pdf", @pdf, { comment: "c" * 30_000 } ], [ "b.pdf", @pdf, { comment: "c" * 30_000 } ] ])
+    entries, archive = expand(bloated, "crew.zip")
+
+    assert_equal [ "crew.zip" ], entries.map(&:name)
+    assert_equal "This zip's list of files is larger than 4 KB for its 2 entries (zip-bomb guard): not opened",
+      entries.sole.rejection_reason
+    assert_not archive.limit_reached?, "only this zip is refused"
+    assert_equal [ 1, 0 ], [ archive.entries_seen, archive.zip_records ]
+
+    later = []
+    archive.expand(write(ImportSamples.zip("card.pdf" => @pdf), "next.zip"), name: "next.zip") { |entry| later << entry }
+    assert later.sole.accepted?
+  end
+
+  test "records bigger than the declared directory size are measured, not trusted" do
+    files = Array.new(3) { |n| [ "#{n}.pdf", @pdf, { extra: unknown_extra(20_000) } ] }
+    lying = hand_zip(files, declared_size: 3 * 46) # rubyzip reads the records whatever size is declared
+    assert_equal 3, Zip::File.open_buffer(StringIO.new(lying)).entries.size
+
+    entries, = expand(lying, "crew.zip")
+
+    assert_match "list of files is larger than 6 KB for its 3 entries", entries.sole.rejection_reason
+  end
+
+  test "many records sharing one local header with a big extra field are counted too" do
+    files = Array.new(40) { |n| [ "card#{n}.pdf", @pdf, { local_offset: 0 } ] }
+    shared = hand_zip(files, first_local_extra: unknown_extra(60_000)) # rubyzip would load that field 40 times
+
+    entries, = expand(shared, "crew.zip")
+
+    assert_match "list of files is larger than 80 KB for its 40 entries", entries.sole.rejection_reason
+  end
+
+  test "a Zip64 end record declaring an oversized directory is rejected" do
+    zip = hand_zip([ [ "card.pdf", "%PDF-1.4\n" + ("x" * 10_000) ] ])
+    entries, = expand(zip64_end(zip, records: 1, size: 9_000, offset: 0), "crew.zip")
+
+    assert_match "list of files is larger than 2 KB for its 1 entry (zip-bomb guard)", entries.sole.rejection_reason
+  end
+
+  test "an honest Zip64 end record found through its locator, past a long comment, opens normally" do
+    zip = ImportSamples.zip("cards/ortiz.pdf" => @pdf)
+    at = zip.b.rindex("PK\x05\x06".b)
+    records, size, offset = zip.b.byteslice(at, 22).unpack("VvvvvVVv").values_at(4, 5, 6)
+    zip64 = zip64_end(zip, records:, size:, offset:, comment: "z" * 0xFFFF) # the Zip64 record is outside the tail read
+
+    entries, = expand(zip64, "crew.zip")
+
+    assert_equal [ "crew.zip/cards/ortiz.pdf" ], entries.map(&:name)
+    assert entries.sole.accepted?
+  end
+
+  test "a Zip64 end record far before its locator is refused before rubyzip reads up to it" do
+    zip = ImportSamples.zip("card.pdf" => @pdf)
+    records, size, offset = end_record(zip)
+    far = zip64_end(zip, records:, size:, offset:, gap: "\0" * 70_000) # rubyzip would read all of it into one String, twice
+
+    entries, archive = expand(far, "crew.zip") # Directory refuses it before rubyzip's count_entries runs
+
+    assert_equal "Couldn't open this zip (Error: the Zip64 end of central directory record is not next to its locator)",
+      entries.sole.rejection_reason
+    assert_not archive.limit_reached?, "only this zip is refused"
+  end
+
+  test "a Zip64 end record with extensible data, found through its locator, opens normally" do
+    zip = ImportSamples.zip("cards/ortiz.pdf" => @pdf)
+    records, size, offset = end_record(zip)
+    zip64 = zip64_end(zip, records:, size:, offset:, extensible: "x" * 60_000, comment: "z" * 0xFFFF)
+
+    entries, = expand(zip64, "crew.zip")
+
+    assert_equal [ "crew.zip/cards/ortiz.pdf" ], entries.map(&:name)
+    assert entries.sole.accepted?
+  end
+
+  test "long UTF-8 names and the usual extra fields are well within the allowance" do
+    files = (1..30).to_h { |n| [ "Zertifikate 2026/Mitarbeiterinnen und Mitarbeiter/#{"証明書" * 40} #{n}.pdf", @pdf ] }
+    entries, = expand(ImportSamples.zip(files), "crew.zip")
+
+    assert_equal 30, entries.count(&:accepted?)
+  end
+
+  test "a directory said to run past the end of the file, or a cut-short end record, is an unreadable zip" do
+    past_end = hand_zip([ [ "a.pdf", @pdf ] ], declared_size: 0xFFFF_FFF0)
+    cut_short = "PK\x03\x04 not much of a zip".b + [ 0x06054b50 ].pack("V") + "\0\0" # rubyzip's own reader crashes here
+
+    [ past_end, cut_short ].each do |bytes|
+      entries, archive = expand(bytes, "crew.zip")
+      assert_match "Couldn't open this zip", entries.sole.rejection_reason
+      assert_equal 1, archive.entries_seen
+    end
+  end
+
+  test "a nested zip gets the same directory check" do
+    bloated = hand_zip([ [ "a.pdf", @pdf, { comment: "c" * 30_000 } ] ])
+    entries, = expand(ImportSamples.zip("card.pdf" => @pdf, "inner/bloated.zip" => bloated), "crew.zip")
+
+    assert_equal [ "crew.zip/card.pdf", "crew.zip/inner/bloated.zip" ], entries.map(&:name)
+    assert entries.first.accepted?
+    assert_match "list of files is larger than 2 KB for its 1 entry", entries.last.rejection_reason
+  end
+
   test "stops past max_uncompressed_bytes, counted across entries" do
     zip = ImportSamples.zip("a.pdf" => "%PDF-1.4\n" + "a" * 600, "b.pdf" => "%PDF-1.4\n" + "b" * 600, "c.pdf" => @pdf)
     archive = Imports::Archive.new(@dir, max_uncompressed_bytes: 1_000)
@@ -257,11 +362,54 @@ class Imports::ArchiveTest < ActiveSupport::TestCase
   end
 
   test "a corrupt zip is one rejected entry" do
-    entries, archive = expand("PK\x03\x04 this is not really a zip", "crew.zip")
+    entries, archive = nil
+    assert_no_error_reported { entries, archive = expand("PK\x03\x04 this is not really a zip", "crew.zip") }
 
     assert_equal [ "crew.zip" ], entries.map(&:name)
     assert_match "Couldn't open this zip", entries.first.rejection_reason
     assert_equal 1, archive.entries_seen
+  end
+
+  test "a zip rubyzip trips over with a plain Ruby error is one rejected entry, reported, and the batch goes on" do
+    cut_short = hand_zip([ [ "a.pdf", @pdf, { extra: "UT" } ] ]) # a known ID (universal time) with no length after it
+    archive = Imports::Archive.new(@dir)
+    entries = []
+
+    assert_error_reported(NoMethodError) do
+      archive.expand(write(cut_short, "crew.zip"), name: "crew.zip") { |entry| entries << entry }
+    end
+    archive.expand(write(ImportSamples.zip("card.pdf" => @pdf), "more.zip"), name: "more.zip") { |entry| entries << entry }
+
+    assert_equal [ "crew.zip", "more.zip/card.pdf" ], entries.map(&:name)
+    assert_match "Couldn't open this zip (NoMethodError: ", entries.first.rejection_reason
+    assert entries.last.accepted?
+    assert_equal 2, archive.entries_seen
+  end
+
+  test "an entry rubyzip trips over while reading it is rejected on its own, reported, and the zip's other files are read" do
+    # An empty Zip64 field in the record makes rubyzip skip the local header when it opens the zip;
+    # reading the entry then meets the local header's universal-time field, cut short after its ID.
+    zip = hand_zip([ [ "a.pdf", @pdf, { extra: [ 0x0001, 0 ].pack("vv") } ], [ "b.pdf", @pdf ] ], first_local_extra: "UT")
+    entries = nil
+    assert_error_reported(NoMethodError) { entries, = expand(zip, "crew.zip") }
+
+    assert_equal [ "crew.zip/a.pdf", "crew.zip/b.pdf" ], entries.map(&:name)
+    assert_match "Couldn't read this file from the zip (NoMethodError: ", entries.first.rejection_reason
+    assert entries.last.accepted?
+    assert_empty @dir.children
+  end
+
+  test "errors raised by the block propagate, from a zip too" do
+    zip = ImportSamples.zip("a.pdf" => @pdf, "inner.zip" => ImportSamples.zip("b.pdf" => @pdf))
+    [ [ "card.pdf", @pdf, 1 ], [ "crew.zip", zip, 1 ], [ "crew.zip", zip, 2 ] ].each do |name, bytes, fail_at|
+      archive = Imports::Archive.new(@dir)
+      seen = 0
+      error = assert_raises(NoMethodError, name) do
+        archive.expand(write(bytes, name), name: name) { (seen += 1) == fail_at ? nil.upcase : nil }
+      end
+      assert_match "upcase", error.message
+      assert_equal fail_at, seen
+    end
   end
 
   test "a password-protected entry is rejected" do
@@ -297,6 +445,55 @@ class Imports::ArchiveTest < ActiveSupport::TestCase
 
     def write(bytes, name)
       ImportSamples.write(@root.join("upload"), SecureRandom.hex(4) + File.extname(name.to_s), bytes).to_s
+    end
+
+    # A zip built by hand, entries stored: files are [name, data, options] with options
+    #   comment:      the entry's file comment (central directory)
+    #   extra:        its central-directory extra field
+    #   local_offset: the local header offset its record points to (default: its own)
+    # first_local_extra: an extra field in the first entry's local header. declared_size: the
+    # central-directory size the end record states (default: the real one).
+    def hand_zip(files, first_local_extra: "", declared_size: nil)
+      body = "".b
+      directory = "".b
+      date = ((2026 - 1980) << 9) | (11 << 5) | 3 # Nov 3, 2026 in MS-DOS format; time 00:00
+      files.each_with_index do |(name, data, options), index|
+        options ||= {}
+        offset = body.bytesize
+        crc = Zlib.crc32(data)
+        local_extra = index.zero? ? first_local_extra.b : "".b
+        body << [ 0x04034b50, 20, 0, 0, 0, date, crc, data.bytesize, data.bytesize, name.bytesize, local_extra.bytesize ].pack("VvvvvvVVVvv")
+        body << name.b << local_extra << data.b
+        extra = options.fetch(:extra, "").b
+        comment = options.fetch(:comment, "").b
+        directory << [ 0x02014b50, 20, 20, 0, 0, 0, date, crc, data.bytesize, data.bytesize, name.bytesize, extra.bytesize,
+          comment.bytesize, 0, 0, 0, options.fetch(:local_offset, offset) ].pack("VvvvvvvVVVvvvvvVV")
+        directory << name.b << extra << comment
+      end
+      body + directory + [ 0x06054b50, 0, 0, files.size, files.size, declared_size || directory.bytesize, body.bytesize, 0 ].pack("VvvvvVVv")
+    end
+
+    # An extra field of an ID nothing knows, so rubyzip keeps it as is, length bytes long in all.
+    def unknown_extra(length)
+      [ 0xCAFE, length - 4 ].pack("vv") + ("e" * (length - 4))
+    end
+
+    # zip_bytes with its end record replaced by a Zip64 end record stating records, size and
+    # offset (followed by extensible data, counted in its size), then gap, its locator, and a
+    # plain end record whose fields are maxed out (plus comment).
+    def zip64_end(zip_bytes, records:, size:, offset:, comment: "", extensible: "", gap: "")
+      bytes = zip_bytes.b
+      body = bytes.byteslice(0, bytes.rindex("PK\x05\x06".b))
+      zip64 = [ 0x06064b50, 44 + extensible.bytesize, 45, 45, 0, 0, records, records, size, offset ].pack("VQ<vvVVQ<Q<Q<Q<") + extensible.b
+      locator = [ 0x07064b50, 0, body.bytesize, 1 ].pack("VVQ<V")
+      body + zip64 + gap.b + locator +
+        [ 0x06054b50, 0, 0, 0xFFFF, 0xFFFF, 0xFFFFFFFF, 0xFFFFFFFF, comment.bytesize ].pack("VvvvvVVv") + comment.b
+    end
+
+    # zip_bytes's end-record fields: [records, directory size, directory offset].
+    def end_record(zip_bytes)
+      bytes = zip_bytes.b
+      bytes.byteslice(bytes.rindex("PK\x05\x06".b), 22).unpack("VvvvvVVv").values_at(4, 5, 6)
     end
 
     # zip_bytes with its end record replaced by a Zip64 one declaring count entries (and a
