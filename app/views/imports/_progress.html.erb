@@ -123,12 +123,22 @@
                 <td class="whitespace-nowrap px-4 py-2 text-right"><%= import_confidence(item.confidence) %></td>
                 <td class="px-4 py-2 text-gray-600">
                   <% if item.duplicate? %>
-                    Same file as <%= item.duplicate_of&.original_filename || "an earlier upload" %><%= " (#{import_page_label(item.duplicate_of)})" if item.duplicate_of && import_page_label(item.duplicate_of) %>
-                    <% if item.duplicate_of %>in <%= link_to "batch ##{item.duplicate_of.import_batch_id}", import_path(item.duplicate_of.import_batch_id), class: "text-blue-700 hover:underline" %><% end %>
+                    <% original = item.duplicate_of %>
+                    Same file as <%= original&.original_filename || "an earlier upload" %><%= " (#{import_page_label(original)})" if original && import_page_label(original) %>
+                    <% if original %>in <%= link_to "batch ##{original.import_batch_id}", import_path(original.import_batch_id), class: "text-blue-700 hover:underline" %><% end %>
+                    <% if original&.accepted? && original.certificate %>
+                      · <%= link_to "View certificate", crew_member_certificate_path(original.certificate.crew_member_id, original.certificate),
+                              class: "text-blue-700 hover:underline", id: "duplicate_certificate_#{item.id}" %>
+                    <% end %>
                   <% elsif item.rejected? %>
                     <%= item.rejection_reason.presence || "Rejected" %>
                   <% elsif item.failed? %>
                     <span class="text-red-700"><%= item.error_message.presence || "Failed" %></span>
+                    <% unless item.file.attached? %>
+                      <span class="block text-xs text-gray-500" id="file_deleted_<%= item.id %>">
+                        Its file is no longer kept (a failed item's file is deleted after 30 days). Upload it again to read it.
+                      </span>
+                    <% end %>
                   <% elsif import_item_waiting?(item) %>
                     Continues <%= import_time(item.next_attempt_at) %>
                   <% elsif item.needs_review? && item.error_message.present? %>
@@ -136,6 +146,8 @@
                   <% elsif item.accepted? && item.certificate %>
                     <%= link_to "View certificate", crew_member_certificate_path(item.certificate.crew_member_id, item.certificate),
                           class: "text-blue-700 hover:underline" %>
+                  <% elsif item.accepted? %>
+                    <span class="text-gray-500">Its certificate was deleted.</span>
                   <% end %>
                 </td>
                 <td class="whitespace-nowrap px-4 py-2 text-right">

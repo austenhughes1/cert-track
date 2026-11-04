@@ -2,6 +2,7 @@ require "test_helper"
 
 class ImportBatchTest < ActiveSupport::TestCase
   include ActionMailer::TestHelper
+  include ActiveJob::TestHelper
   test "defaults to receiving with zero counts" do
     batch = ImportBatch.create!(uploaded_by: users(:manager))
     assert batch.receiving?
@@ -39,6 +40,35 @@ class ImportBatchTest < ActiveSupport::TestCase
     batch = ImportBatch.create!(uploaded_by: users(:manager))
     batch.uploads.attach(io: StringIO.new("PK"), filename: "certs.zip", content_type: "application/zip")
     assert_equal 1, batch.uploads.count
+  end
+
+  test "discard_uploads! deletes the uploads, keeping a file an item still uses" do
+    batch = ImportBatch.create!(uploaded_by: users(:manager))
+    batch.uploads.attach([ upload("crew.zip", "PK zip"), upload("ortiz.pdf", "%PDF-1.4 ortiz") ])
+    zip, pdf = batch.uploads.blobs.order(:id).to_a
+    item = batch.import_items.create!(status: :pending, sha256: "c" * 64, original_filename: "ortiz.pdf", file: pdf)
+
+    assert_equal 2, perform_enqueued_jobs { batch.discard_uploads! }
+
+    assert_not batch.uploads.attached?
+    assert_not batch.reload.uploads.attached?
+    assert_not ActiveStorage::Blob.exists?(zip.id)
+    assert_not zip.service.exist?(zip.key)
+    assert_equal "%PDF-1.4 ortiz", item.reload.file.download
+    assert_equal 0, batch.discard_uploads!
+  end
+
+  test "purge_stale_uploads! deletes uploads still kept 30 days after the drop" do
+    old = ImportBatch.create!(uploaded_by: users(:manager), status: :processing, created_at: 31.days.ago)
+    old.uploads.attach(upload("crew.zip", "PK old"))
+    recent = ImportBatch.create!(uploaded_by: users(:manager), created_at: 29.days.ago)
+    recent.uploads.attach(upload("new.zip", "PK new"))
+
+    assert_equal 1, perform_enqueued_jobs { ImportBatch.purge_stale_uploads! }
+
+    assert_not old.reload.uploads.attached?
+    assert_equal [ "new.zip" ], recent.reload.uploads.map { |file| file.filename.to_s }
+    assert_equal 1, ActiveStorage::Blob.count
   end
 
   test "destroying a batch removes its items and keeps certificates" do
@@ -204,5 +234,9 @@ class ImportBatchTest < ActiveSupport::TestCase
 
     def add_item(batch, status, **attributes)
       batch.import_items.create!({ status: status, sha256: SecureRandom.hex(32) }.merge(attributes))
+    end
+
+    def upload(filename, bytes)
+      { io: StringIO.new(bytes), filename: filename, content_type: filename.end_with?(".zip") ? "application/zip" : "application/pdf" }
     end
 end

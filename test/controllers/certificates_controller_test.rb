@@ -120,13 +120,14 @@ class CertificatesControllerTest < ActionDispatch::IntegrationTest
     assert_empty Certificate.order(:id).last.files
   end
 
-  test "a HEIC upload queues the JPEG conversion" do
+  test "a HEIC upload is kept until the shrink job converts it" do
     sign_in_as users(:manager)
 
-    assert_enqueued_with(job: Certificates::ConvertHeicJob) do
-      post crew_member_certificates_path(@juan), params: { certificate: valid_attributes.merge(files: [ direct_upload("certificate.heic") ]) }
-    end
-    assert_equal "image/heic", Certificate.order(:id).last.files.first.content_type
+    post crew_member_certificates_path(@juan), params: { certificate: valid_attributes.merge(files: [ direct_upload("certificate.heic") ]) }
+
+    certificate = Certificate.order(:id).last
+    assert_equal "image/heic", certificate.files.first.content_type
+    assert_enqueued_with(job: Certificates::ShrinkFilesJob, args: [ certificate, certificate.files_attachments.ids ])
   end
 
   test "a blank expiry is computed from the type's validity" do
@@ -250,6 +251,7 @@ class CertificatesControllerTest < ActionDispatch::IntegrationTest
   test "update appends files instead of replacing them" do
     certificate = certificates(:juan_osha30)
     certificate.files.attach(fixture_blob("certificate.pdf"))
+    pdf = certificate.files_attachments.sole
     sign_in_as users(:manager)
 
     patch crew_member_certificate_path(@juan, certificate), params: { certificate: {
@@ -259,6 +261,8 @@ class CertificatesControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to crew_member_certificate_path(@juan, certificate)
     certificate.reload
     assert_equal %w[certificate.jpg certificate.pdf certificate.png], certificate.files.map { |file| file.filename.to_s }.sort
+    added = certificate.files_attachments.where.not(id: pdf.id).order(:id).ids
+    assert_enqueued_with(job: Certificates::ShrinkFilesJob, args: [ certificate, added ]) # not the PDF again
     assert_equal "OSHA Training Institute", certificate.issued_by
     assert_equal users(:manager), certificate.verified_by
   end
@@ -338,6 +342,25 @@ class CertificatesControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :not_found
     assert_equal 1, other.reload.files.count
+  end
+
+  test "removing a file that was swapped for a smaller copy since the page loaded says so" do
+    certificate = certificates(:juan_osha30)
+    certificate.files.attach(fixture_blob("certificate.jpg"))
+    stale = certificate.files_attachments.sole
+    # What Certificates::ShrinkFilesJob does: a new attachment for the copy, the old one deleted.
+    ActiveStorage::Attachment.create!(record: certificate, name: "files", blob: fixture_blob("certificate.png"))
+    stale.delete
+    sign_in_as users(:manager)
+
+    assert_no_enqueued_jobs(only: ActiveStorage::PurgeJob) do
+      delete remove_file_crew_member_certificate_path(@juan, certificate), params: { attachment_id: stale.id }
+    end
+
+    assert_redirected_to edit_crew_member_certificate_path(@juan, certificate)
+    assert_equal 303, response.status
+    assert_match "replaced by a smaller copy", flash[:alert]
+    assert_equal [ "certificate.png" ], certificate.reload.files.map { |file| file.filename.to_s }
   end
 
   # --- destroy ---

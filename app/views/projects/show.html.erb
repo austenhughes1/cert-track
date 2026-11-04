@@ -1,6 +1,6 @@
 <% content_for :title, @project.display_name %>
 <% secondary_button = "rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" %>
-<% deletable = @assignments.empty? && @requirements_by_type.empty? %>
+<% deletable = @assignments.empty? && @requirements_by_type.empty? && !@project.packet_builds.exists? %>
 
 <%= link_to "← Projects", projects_path, class: "text-sm text-blue-700 hover:underline" %>
 
@@ -85,7 +85,13 @@
       <dt class="text-gray-500">Starts</dt><dd class="col-span-2"><%= @project.starts_on ? format_date(@project.starts_on) : "—" %></dd>
       <dt class="text-gray-500">Ends</dt><dd class="col-span-2"><%= @project.ends_on ? format_date(@project.ends_on) : "—" %></dd>
       <dt class="text-gray-500">Packet</dt>
-      <dd class="col-span-2"><%= @project.packet_built_at ? "Built #{format_date(@project.packet_built_at.to_date)}" : "Not built yet" %></dd>
+      <dd class="col-span-2" id="packet_status">
+        <% if @project.packet_built_at %>
+          Built <%= format_date(@project.packet_built_at.to_date) %><%= " (zip expired)" if @project.packet_expired? %>
+        <% else %>
+          Not built yet
+        <% end %>
+      </dd>
     </dl>
   </section>
 </div>

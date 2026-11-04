@@ -128,13 +128,19 @@ class Imports::RereadTest < ActiveSupport::TestCase
   test "accepted, duplicate, in-pipeline and file-less items are refused, untouched" do
     accepted = import_items(:accepted_li_flagger)
     duplicate = import_items(:duplicate_li_flagger)
+    queued = review_item(original_filename: "crew.zip/queued.jpg")
+    failed = review_item(status: :failed, error_message: "OCR failed")
+    failed.file.purge # as ImportItem.purge_stale_files! leaves it 30 days later
     refusals = {
       accepted => "Accepted items can't be read again.",
-      duplicate => "This is a duplicate of an earlier upload: read the original (scan_0001.pdf, batch ##{accepted.import_batch_id}) again instead.",
+      duplicate => "This is a duplicate of an earlier upload (scan_0001.pdf, batch ##{accepted.import_batch_id}), which is already a certificate.",
+      import_batch.import_items.create!(status: :duplicate, sha256: queued.sha256, duplicate_of: queued) =>
+        "This is a duplicate of an earlier upload: read the original (queued.jpg, batch ##{import_batch.id}) again instead.",
       review_item(status: :pending) => "This item is already being read.",
       review_item(status: :extracting) => "This item is already being read.",
       import_batch.import_items.create!(status: :rejected, original_filename: "crew.zip/../evil.pdf",
-        rejection_reason: "Unsafe path in zip (zip-slip guard): refused") => "This item has no file to read again."
+        rejection_reason: "Unsafe path in zip (zip-slip guard): refused") => "This item has no file to read again.",
+      failed => "This item has no file to read again (a failed item's file is deleted after 30 days). Upload the file again instead."
     }
 
     refusals.each do |item, message|

@@ -28,3 +28,9 @@ production:
   purge_import_extractions:
     class: Maintenance::PurgeImportExtractionsJob
     schedule: "45 3 * * * America/Denver"
+  purge_old_packets:
+    class: Maintenance::PurgeOldPacketsJob
+    schedule: "50 3 * * * America/Denver"
+  nightly_file_copy:
+    class: Backups::FileCopyJob
+    schedule: "15 4 * * * America/Denver"

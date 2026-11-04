@@ -88,7 +88,9 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
       assert_nil item.reviewed_by
       assert_not_nil item.reviewed_at
       assert certificate.current?, "#{expected.file}: the newest certificate of its type is current"
-      assert_equal [ item.file.blob ], certificate.files.blobs.to_a, "#{expected.file}: the certificate keeps the file"
+      assert_not item.file.attached?, "#{expected.file}: the certificate holds the file, not the item"
+      assert_equal [ certificate ], ActiveStorage::Attachment.where(blob_id: certificate.files.sole.blob_id).map(&:record),
+        "#{expected.file}: one link to the file"
     end
 
     # Page 1 of the packet becomes a certificate holding only that page.
@@ -183,7 +185,23 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
       batch = upload(zip.bytes)
       run_jobs
       assert_empty certtrack_temp_dirs - temp_dirs, "the pipeline's temp folders should be cleaned up"
-      batch.reload
+      assert_stored_once(batch.reload)
+      batch
+    end
+
+    # The zip is deleted once unpacked, and every file left is stored once: held by the item
+    # still waiting for review, or by the certificate it became, never both, and nothing
+    # unattached (such as the whole packet PDF once its pages were cut out).
+    def assert_stored_once(batch)
+      assert_not batch.uploads.attached?, "the zip is deleted once unpacked"
+      assert_empty ActiveStorage::Blob.unattached.pluck(:filename), "files nothing holds should be purged"
+      shared = ActiveStorage::Attachment.group(:blob_id).having("count(DISTINCT record_type) > 1").count
+      assert_empty shared, "a file held by both an import item and a certificate"
+    end
+
+    # The item's file as stored (a blob): an accepted item's is its certificate's.
+    def stored_file(item)
+      item.accepted? ? item.certificate.files.sole.blob : item.file.blob
     end
 
     def upload(bytes, filename: ImportAcceptanceZip::UPLOAD)
@@ -275,12 +293,13 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
       family = [ source, *source.split_items.order(:id) ]
       assert_equal %w[1 3 4], family.map(&:page_range), "the course outline on page 2 belongs to no certificate"
       assert_equal [ 2 ], source.extraction["non_certificate_pages"]
-      assert_equal [ "crew_packet p1.pdf", "crew_packet p3.pdf", "crew_packet p4.pdf" ], family.map { |item| item.file.filename.to_s }
+      assert_equal [ "crew_packet p1.pdf", "crew_packet p3.pdf", "crew_packet p4.pdf" ], family.map { |item| stored_file(item).filename.to_s }
       assert family.all? { |item| item.sha256 == source.sha256 && item.original_filename == zip.packet }
       family.zip([ "Li Chen", "David Millar", "Sam Price" ]).each do |item, holder|
-        assert_equal 1, CombinePDF.parse(item.file.download).pages.size, "#{item.file.filename} holds one page"
-        item.file.open do |file|
-          assert_includes Imports::TextExtractor.new(file.path, content_type: "application/pdf").call.text, "Awarded to: #{holder}"
+        file = stored_file(item)
+        assert_equal 1, CombinePDF.parse(file.download).pages.size, "#{file.filename} holds one page"
+        file.open do |local|
+          assert_includes Imports::TextExtractor.new(local.path, content_type: "application/pdf").call.text, "Awarded to: #{holder}"
         end
         assert_includes item.extracted_text, holder
         (family.map(&:holder_name_raw) - [ holder ]).each { |other| assert_not_includes item.extracted_text, other }
@@ -312,8 +331,8 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
         assert_same_record expected.type && certificate_types(expected.type), item.matched_certificate_type, "#{label}: type"
         assert_equal BigDecimal("0.95"), item.confidence, label
         assert_equal "fake", item.provider
-        assert item.file.attached?, label
-        assert_equal expected.page_range.nil?, item.file.content_type.start_with?("image/"), label
+        assert stored_file(item), label
+        assert_equal expected.page_range.nil?, stored_file(item).content_type.start_with?("image/"), label
         if expected.ocr
           assert_match(/Awarded to: #{Regexp.escape(expected.holder)}/, item.extracted_text, "#{label}: OCR text")
         end

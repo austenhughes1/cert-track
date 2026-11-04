@@ -11,14 +11,15 @@ module Imports
   #   Imports::Reread.allowed?(item, context:)
   #
   # Allowed for needs_review, rejected and failed items that are a whole uploaded file whose
-  # file is still attached. Refused: accepted items (their certificate stays as it is),
-  # duplicates (the original is the one to read again), items still being read, items with no
-  # file (refused when the batch was unpacked), a failed item whose file was uploaded again
-  # later (that copy is the one kept), items from a PDF that held several certificates (a
-  # split-off part, or the file's own item once others were split from it), and an item whose
-  # file was cut down to its own pages. Those no longer have the whole upload to read
-  # (Imports::Splitter replaced it with their pages), and reading a part on its own would
-  # renumber its pages.
+  # file is still attached. Refused: accepted items (their certificate stays as it is, and
+  # holds the file now), duplicates (the original is the one to read again, unless it was
+  # accepted), items still being read, items with no file (refused when the batch was
+  # unpacked, or failed more than 30 days ago: ImportItem.purge_stale_files!), a failed item
+  # whose file was uploaded again later (that copy is the one kept), items from a PDF that
+  # held several certificates (a split-off part, or the file's own item once others were split
+  # from it), and an item whose file was cut down to its own pages. Those no longer have the
+  # whole upload to read (Imports::Splitter replaced it with their pages), and reading a part
+  # on its own would renumber its pages.
   #
   # The item's AI results and review are cleared (extraction, proposals, matches,
   # suggestions, confidence, error and rejection reason, skip, parking, attempts, reviewer,
@@ -84,7 +85,7 @@ module Imports
       def refusal(item, context: nil)
         return "This item no longer exists." unless item&.persisted?
         return status_refusal(item) unless REREADABLE_STATUSES.include?(item.status)
-        return "This item has no file to read again." unless item.file.attached?
+        return no_file_refusal(item) unless item.file.attached?
 
         context ||= Context.new([])
         return several_certificates_refusal(item) if item.source_item_id.present? || context.split_items?(item)
@@ -100,9 +101,21 @@ module Imports
           when "duplicate"
             original = item.duplicate_of
             where = original ? " (#{original.filename || "the earlier upload"}, batch ##{original.import_batch_id})" : ""
-            "This is a duplicate of an earlier upload: read the original#{where} again instead."
+            if original&.accepted?
+              "This is a duplicate of an earlier upload#{where}, which is already a certificate."
+            else
+              "This is a duplicate of an earlier upload: read the original#{where} again instead."
+            end
           else "This item is already being read."
           end
+        end
+
+        # A failed item's file is deleted 30 days after it failed (ImportItem.purge_stale_files!).
+        # Uploading it again makes a new item, since a failed item is never the original.
+        def no_file_refusal(item)
+          return "This item has no file to read again." unless item.failed?
+
+          "This item has no file to read again (a failed item's file is deleted after 30 days). Upload the file again instead."
         end
 
         # The item's file was cut down to its own pages ("<name> p2-3.pdf"): a PDF with one

@@ -1,11 +1,17 @@
 class Project < ApplicationRecord
+  # How long the latest packet zip is kept: through the 7th day after the day it was built,
+  # whatever time it was built. The nightly Maintenance::PurgeOldPacketsJob deletes it the
+  # morning after; packet_builds keep each build's index.pdf.
+  PACKET_KEPT_FOR = 7.days
+
   enum :status, { planned: 0, active: 1, closed: 2 }, default: :active, validate: true
 
   has_many :project_requirements, dependent: :delete_all
   has_many :required_certificate_types, -> { distinct }, through: :project_requirements, source: :certificate_type
   has_many :project_assignments, dependent: :delete_all
   has_many :crew_members, through: :project_assignments
-  has_one_attached :packet # zip built by a background job; see packet_built_at
+  has_many :packet_builds, dependent: :destroy
+  has_one_attached :packet # latest zip, built by a background job; see packet_built_at and PACKET_KEPT_FOR
 
   normalizes :name, :client, :location, with: ->(value) { value.squish.presence }
   normalizes :code, with: ->(code) { code.strip.upcase.presence }
@@ -34,6 +40,24 @@ class Project < ApplicationRecord
   # number added. See Projects::CopyRequirements, which the requirements editor uses.
   def copy_requirements_from!(other)
     Projects::CopyRequirements.new(self, other).call.added
+  end
+
+  # Zips attached before this time are past their last day (packet_kept_until), so the purge
+  # running at now deletes them. Goes by Denver dates, so the time of day the purge runs at
+  # doesn't matter.
+  def self.packet_purge_cutoff(now = Time.current)
+    (now.to_date - PACKET_KEPT_FOR).beginning_of_day
+  end
+
+  # The last day the current zip is kept (the nightly purge the next morning deletes it), or
+  # nil when there is no zip. The zip is attached just after packet_built_at, never before.
+  def packet_kept_until
+    packet_built_at.to_date + PACKET_KEPT_FOR if packet_built_at && packet.attached?
+  end
+
+  # True when a packet was built but its zip has since been deleted.
+  def packet_expired?
+    packet_built_at.present? && !packet.attached?
   end
 
   private

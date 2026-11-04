@@ -332,6 +332,9 @@ class ImportsControllerTest < ActionDispatch::IntegrationTest
     assert_select "tr#import_item_#{items[:failed].id}", /pdftotext timed out/
     assert_select "tr#import_item_#{items[:duplicate].id}", /Same file as scan_0001.pdf \(p\. 1\)/
     assert_select "tr#import_item_#{items[:duplicate].id} a[href=?]", import_path(@batch)
+    li_flagger = certificates(:li_flagger)
+    assert_select "tr#import_item_#{items[:duplicate].id} a[href=?]", crew_member_certificate_path(li_flagger.crew_member_id, li_flagger),
+      text: "View certificate"
     assert_select "tr#import_item_#{items[:waiting].id}", /Continues/
     assert_select "tr#import_item_#{items[:pending].id} a", text: "Review", count: 0
   end
@@ -459,6 +462,70 @@ class ImportsControllerTest < ActionDispatch::IntegrationTest
     assert_equal queries.first, queries.last, "queries for 2 and 12 rows that can be read again"
   end
 
+  test "show counts the files found once unpacked, and the uploads only while they wait" do
+    receiving = ImportBatch.create!(uploaded_by: users(:manager), status: :receiving)
+    receiving.uploads.attach([ { io: StringIO.new("PK"), filename: "a.zip" }, { io: StringIO.new("PK"), filename: "b.zip" } ])
+    unpacked = ImportBatch.create!(uploaded_by: users(:manager), status: :completed, files_count: 12)
+    sign_in_as users(:manager)
+
+    get import_path(receiving)
+    assert_select "#batch_size", "2 uploads dropped"
+    get import_path(unpacked)
+    assert_select "#batch_size", "12 files found"
+    get import_path(ImportBatch.create!(uploaded_by: users(:manager), status: :failed))
+    assert_select "#batch_size", count: 0
+  end
+
+  test "a failed item whose file was deleted says so, with no Read again" do
+    batch = ImportBatch.create!(uploaded_by: users(:manager), status: :completed, files_count: 1)
+    failed = new_item(batch:, status: :failed, original_filename: "broken.pdf", error_message: "pdftotext timed out")
+    sign_in_as users(:manager)
+
+    get import_path(batch)
+
+    assert_select "tr#import_item_#{failed.id}", /pdftotext timed out/
+    assert_select "#file_deleted_#{failed.id}", /deleted after 30 days\)\. Upload it again to read it\./
+    assert_select "button", text: "Read again", count: 0
+  end
+
+  test "deleting an imported certificate deletes its stored file, and the batch page shows it is gone" do
+    batch, item, blob = accepted_import
+    certificate = item.certificate
+    sign_in_as users(:admin)
+
+    get import_path(batch)
+    assert_select "tr#import_item_#{item.id} a[href=?]", crew_member_certificate_path(certificate.crew_member_id, certificate),
+      text: "View certificate"
+    assert_select "a[href*='/rails/active_storage/'], img, iframe", count: 0
+
+    perform_enqueued_jobs { delete crew_member_certificate_path(certificate.crew_member_id, certificate) }
+
+    assert_response :see_other
+    assert_not ActiveStorage::Blob.exists?(blob.id), "blob row kept"
+    assert_not blob.service.exist?(blob.key), "stored file kept"
+    get import_path(batch)
+    assert_select "tr#import_item_#{item.id}", /Its certificate was deleted/
+    assert_select "a[href*='/rails/active_storage/'], img, iframe", count: 0
+  end
+
+  test "removing a file from an imported certificate deletes the stored file" do
+    batch, item, blob = accepted_import
+    certificate = item.certificate
+    sign_in_as users(:manager)
+
+    perform_enqueued_jobs do
+      delete remove_file_crew_member_certificate_path(certificate.crew_member_id, certificate,
+        attachment_id: certificate.files_attachments.sole.id)
+    end
+
+    assert_not ActiveStorage::Blob.exists?(blob.id), "blob row kept"
+    assert_not blob.service.exist?(blob.key), "stored file kept"
+    assert_not certificate.reload.files.attached?
+    get import_path(batch)
+    assert_select "tr#import_item_#{item.id} a", text: "View certificate"
+    assert_select "a[href*='/rails/active_storage/'], img, iframe", count: 0
+  end
+
   test "show of a completed batch" do
     batch = ImportBatch.create!(uploaded_by: users(:manager), status: :completed, files_count: 1)
     new_item(batch:, status: :rejected, rejection_reason: "Not a certificate")
@@ -490,6 +557,21 @@ class ImportsControllerTest < ActionDispatch::IntegrationTest
 
     def new_item(batch: @batch, status:, sha256: SecureRandom.hex(32), **attributes)
       ImportItem.create!(import_batch: batch, status: status, sha256: sha256, original_filename: "card.pdf", **attributes)
+    end
+
+    # A card accepted from the review screen: [batch, item, the file's blob].
+    def accepted_import
+      batch = ImportBatch.create!(uploaded_by: users(:manager), status: :needs_review, files_count: 1, summary_sent_at: 1.hour.ago)
+      item = new_item(batch:, status: :needs_review, original_filename: "ortiz.pdf",
+        file: { io: file_fixture("certificate.pdf").open, filename: "ortiz.pdf", content_type: "application/pdf" })
+      blob = item.file.blob
+      sign_in_as users(:manager)
+      post accept_import_review_path(item), params: { review: {
+        crew_member_id: crew_members(:juan_ortiz).id, certificate_type_id: certificate_types(:osha30).id,
+        completed_on: (Date.current - 10).iso8601, expires_on: "", certificate_number: "30-5550001", issued_by: "" } }
+      assert item.reload.accepted?, flash[:alert]
+      assert_not item.file.attached?
+      [ batch, item, blob ]
     end
 
     # What the browser does: create the blob first, PUT the bytes, then submit the signed id.

@@ -8,16 +8,18 @@ class Imports::MergeTest < ActiveSupport::TestCase
     front = review_item(holder_name_raw: "Juan Ortiz")
     back = review_item(original_filename: "back.jpg", holder_name_raw: "Jaun Ortis", person_match: :suggested)
     back.file.attach(io: StringIO.new(file_fixture("certificate.png").binread), filename: "back.png", content_type: "image/png")
+    blobs = [ front.file.blob, back.file.blob ]
 
     certificate = Imports::Merge.new(front, others: Imports::MergeCandidates.for(front), user: users(:manager)).call
 
-    assert_equal [ front.file.blob, back.file.blob ], certificate.files.blobs.to_a
+    assert_equal blobs, certificate.files.blobs.to_a
     assert_equal front, certificate.import_item
     [ front, back ].each do |item|
       item.reload
       assert item.accepted?
       assert_equal certificate, item.certificate
       assert_equal users(:manager), item.reviewed_by
+      assert_not item.file.attached?, "the certificate holds the file now"
     end
     assert_equal [ front, back ].sort_by(&:id), certificate.import_items.order(:id).to_a
     assert_includes crew_members(:juan_ortiz).reload.name_aliases, "Jaun Ortis"
@@ -63,9 +65,11 @@ class Imports::MergeTest < ActiveSupport::TestCase
     front = review_item
     back = review_item
     back.file.attach(front.file.blob)
+    blob = front.file.blob
 
     certificate = Imports::Merge.new(front, others: [ back ], user: users(:manager)).call
 
     assert_equal 1, certificate.files.count
+    assert_equal [ certificate ], ActiveStorage::Attachment.where(blob_id: blob.id).map(&:record), "both items let go of it"
   end
 end

@@ -67,13 +67,25 @@ class CertificatesController < ApplicationController
   end
 
   def remove_file
-    attachment = @certificate.files_attachments.includes(:blob).find(params.expect(:attachment_id))
+    attachment_id = params.expect(:attachment_id)
+    attachment = @certificate.files_attachments.includes(:blob).find_by(id: attachment_id)
+    return file_already_gone(attachment_id) unless attachment
+
     attachment.purge_later
     redirect_back_or_to edit_crew_member_certificate_path(@crew_member, @certificate),
       notice: "Removed #{attachment.blob.filename}.", status: :see_other
   end
 
   private
+    # The page was loaded before the file was removed, or before Certificates::ShrinkFilesJob
+    # swapped it for a smaller copy (which has a new attachment id). Another record's file is a 404.
+    def file_already_gone(attachment_id)
+      raise ActiveRecord::RecordNotFound if ActiveStorage::Attachment.exists?(attachment_id)
+
+      redirect_to edit_crew_member_certificate_path(@crew_member, @certificate), status: :see_other,
+        alert: "That file is no longer on this certificate: it was removed, or replaced by a smaller copy. Check the files below."
+    end
+
     def set_crew_member
       @crew_member = CrewMember.includes(:crew_role).find(params.expect(:crew_member_id))
     end

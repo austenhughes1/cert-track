@@ -55,7 +55,7 @@ class UsersController < ApplicationController
   end
 
   # Emails the signed-in admin today's daily digest from current data (sample data when
-  # nothing is near expiry). Writes no ExpiryNotification rows; counts toward the 90/day cap.
+  # nothing is near expiry). Writes no ExpiryNotification rows; counts toward the daily email cap.
   def send_test_digest
     return redirect_to(users_path, alert: "Today's email limit is used up. Try the test digest again tomorrow.") unless Notifications::SendBudget.reserve!
 

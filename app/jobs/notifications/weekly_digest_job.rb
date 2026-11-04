@@ -3,9 +3,9 @@ module Notifications
   # recipient, sent even when empty, listing everything expiring within 30 days (expired
   # included) plus missing/expired requirements on active projects.
   #
-  # Each email counts against the 90/day cap. Recipients the cap holds back get a retry the
-  # next day at 6:30 (after the daily scan), unless that day is Monday and the regular run
-  # covers them.
+  # Each email counts against the daily email cap (Notifications::SendBudget). Recipients the
+  # cap holds back get a retry the next day at 6:30 (after the daily scan), unless that day is
+  # Monday and the regular run covers them.
   class WeeklyDigestJob < ApplicationJob
     RETRY_AT_HOUR = 6
     RETRY_AT_MINUTE = 30

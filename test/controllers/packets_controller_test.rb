@@ -31,12 +31,13 @@ class PacketsControllerTest < ActionDispatch::IntegrationTest
     assert_select "button", text: "Build packet"
     assert_select "[data-controller=auto-refresh]", count: 0
     assert_select "#packet_gap_count", text: Compliance::ProjectReport.new(@project).gaps.size.to_s
+    assert_select "#packet_builds", text: /No builds yet/
   end
 
   test "viewer can build a packet; the page polls while building" do
     sign_in_as users(:viewer)
 
-    assert_enqueued_with(job: Compliance::PacketJob, args: [ @project ]) do
+    assert_enqueued_with(job: Compliance::PacketJob, args: [ @project, { built_by_id: users(:viewer).id } ]) do
       post project_packet_path(@project)
     end
     assert_redirected_to project_packet_path(@project)
@@ -75,6 +76,74 @@ class PacketsControllerTest < ActionDispatch::IntegrationTest
 
     get rails_blob_path(@project.packet, disposition: "attachment")
     assert_response :redirect
+  end
+
+  test "a ready packet says how long the zip is kept" do
+    travel_to Time.zone.local(2026, 11, 4, 15, 30) do
+      Compliance::PacketBuilder.new(@project).attach!
+      sign_in_as users(:viewer)
+
+      get project_packet_path(@project)
+
+      assert_select "#packet_status[data-state=ready]"
+      assert_select "#packet_kept_until", text: /Nov 11, 2026, then deleted/
+    end
+  end
+
+  test "once the zip has expired the page says so and offers Rebuild" do
+    travel_to 10.days.ago do
+      Compliance::PacketBuilder.new(@project).attach!
+    end
+    Maintenance::PurgeOldPacketsJob.perform_now
+    sign_in_as users(:viewer)
+
+    get project_packet_path(@project)
+
+    assert_response :success
+    assert_select "#packet_status[data-state=expired]"
+    assert_select "#packet_status", text: /The last zip has expired/
+    assert_select "#packet_status", text: /was deleted after 7 days/
+    assert_select "a", text: "Download zip", count: 0
+    assert_select "button", text: "Rebuild packet"
+
+    assert_enqueued_with(job: Compliance::PacketJob) { post project_packet_path(@project) }
+  end
+
+  test "lists past builds newest first with who built each and a download of its index PDF" do
+    freeze_time
+    travel_to 9.days.ago do
+      Compliance::PacketBuilder.new(@project).attach!(built_by: users(:manager))
+    end
+    Maintenance::PurgeOldPacketsJob.perform_now
+    certificates(:juan_osha30).files.attach(io: StringIO.new("%PDF-1.4\n"), filename: "osha.pdf", content_type: "application/pdf")
+    Compliance::PacketBuilder.new(@project).attach!
+    older, newer = @project.packet_builds.order(:built_at).to_a
+    sign_in_as users(:viewer)
+
+    get project_packet_path(@project)
+
+    assert_select "#packet_builds tbody tr", count: 2
+    assert_select "#packet_builds tbody tr:first-child[id=?]", "packet_build_#{newer.id}"
+    assert_select "##{ActionView::RecordIdentifier.dom_id(older)}" do
+      assert_select "time[datetime=?]", older.built_at.iso8601
+      assert_select "td", text: "Manny Manager"
+      assert_select "a[href=?]", rails_blob_path(older.index_pdf, disposition: "attachment"), text: "Index PDF"
+    end
+    assert_select "##{ActionView::RecordIdentifier.dom_id(newer)}" do
+      assert_select "td", text: "—"
+      assert_select "td", text: "1" # one file
+    end
+
+    get rails_blob_path(older.index_pdf, disposition: "attachment")
+    assert_response :redirect
+  end
+
+  test "building through the page records who asked" do
+    sign_in_as users(:viewer)
+
+    perform_enqueued_jobs(only: Compliance::PacketJob) { post project_packet_path(@project) }
+
+    assert_equal users(:viewer), @project.packet_builds.sole.built_by
   end
 
   test "shows a failure notice after a failed build" do

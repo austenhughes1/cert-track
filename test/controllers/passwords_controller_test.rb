@@ -29,6 +29,57 @@ class PasswordsControllerTest < ActionDispatch::IntegrationTest
     assert_notice "reset instructions sent"
   end
 
+  test "create sends one reset email per user per link lifetime, and answers every request the same" do
+    with_real_cache do
+      3.times { post passwords_path, params: { email_address: @user.email_address } }
+      assert_enqueued_emails 1
+      assert_redirected_to new_session_path
+      follow_redirect!
+      assert_notice "reset instructions sent"
+
+      post passwords_path, params: { email_address: users(:admin).email_address }
+      assert_enqueued_emails 2 # another user's reset still goes
+
+      travel PasswordsController::RESET_EMAIL_INTERVAL + 1.second do
+        post passwords_path, params: { email_address: @user.email_address }
+        assert_enqueued_emails 3
+      end
+    end
+  end
+
+  test "create sends one user at most RESET_EMAILS_PER_USER_PER_DAY reset emails a day, so one known address can't use up everyone's" do
+    travel_to Time.zone.local(2026, 11, 4, 8, 0)
+    with_real_cache do
+      (PasswordsController::RESET_EMAILS_PER_USER_PER_DAY + 2).times do |i|
+        travel_to Time.current + i * (PasswordsController::RESET_EMAIL_INTERVAL + 1.second) do
+          post passwords_path, params: { email_address: @user.email_address }
+        end
+      end
+      assert_enqueued_emails PasswordsController::RESET_EMAILS_PER_USER_PER_DAY
+      assert_redirected_to new_session_path
+
+      post passwords_path, params: { email_address: users(:admin).email_address }
+      assert_enqueued_emails PasswordsController::RESET_EMAILS_PER_USER_PER_DAY + 1
+    end
+  end
+
+  test "create sends at most RESET_EMAILS_PER_DAY reset emails a Denver day in all" do
+    travel_to Time.zone.local(2026, 11, 4, 12, 0)
+    with_real_cache do
+      Rails.cache.write("password_resets/sent/#{Date.current.iso8601}", PasswordsController::RESET_EMAILS_PER_DAY - 1)
+
+      post passwords_path, params: { email_address: @user.email_address }
+      post passwords_path, params: { email_address: users(:admin).email_address }
+      assert_enqueued_emails 1
+      assert_redirected_to new_session_path
+
+      travel_to Date.current.tomorrow.in_time_zone.change(hour: 0, minute: 1) do
+        post passwords_path, params: { email_address: users(:admin).email_address }
+        assert_enqueued_emails 2
+      end
+    end
+  end
+
   test "edit with a reset token" do
     get edit_password_path(@user.password_reset_token)
 
@@ -125,6 +176,15 @@ class PasswordsControllerTest < ActionDispatch::IntegrationTest
   end
 
   private
+    # The test environment uses :null_store; the reset throttle needs a real cache.
+    def with_real_cache
+      original = Rails.cache
+      Rails.cache = ActiveSupport::Cache::MemoryStore.new
+      yield
+    ensure
+      Rails.cache = original
+    end
+
     def assert_notice(text)
       assert_select "[role=status]", /#{text}/
     end

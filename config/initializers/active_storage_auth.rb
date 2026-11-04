@@ -18,10 +18,10 @@
 
 # The blob redirect and proxy controllers (and the representation ones, before any variant
 # or preview is made) answer 403 to a non-editor for a blob that only imports use:
-# ImportItem#file or ImportBatch#uploads. An accepted item's certificate shares its blob, so
-# accepted files open for anyone signed in, like every certificate file. A blob attached to
-# nothing (a direct upload not saved yet) is editors-only too. A variant or preview image is
-# judged by the blob it was made from.
+# ImportItem#file or ImportBatch#uploads. An accepted file is its certificate's
+# (Imports::Accept hands the blob over), so it opens for anyone signed in, like every
+# certificate file. A blob attached to nothing (a direct upload not saved yet) is
+# editors-only too. A variant or preview image is judged by the blob it was made from.
 module ImportFileAccess
   IMPORT_RECORD_TYPES = %w[ImportItem ImportBatch].freeze
   MAX_DEPTH = 2 # a variant's or preview's blob -> the blob it was made from

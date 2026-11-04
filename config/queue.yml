@@ -1,8 +1,9 @@
 # Two kinds of worker, so an import backlog can never hold up the rest (docs/DEPLOY.md, section 10):
 #   - default (plus Solid Queue's own recurring commands): backups, expiry scans and digests, all
 #     mail, maintenance, Active Storage analysis and purges, packets. It never runs an import job.
-#   - imports: the Imports::* pipeline. OCR (tesseract, pdftoppm) is CPU-bound, so two threads
-#     keep at most two files in OCR on the 2-core VM (one is often just waiting for the AI).
+#   - imports: the Imports::* pipeline, and Certificates::ShrinkFilesJob (also CPU work: it shrinks
+#     new photos and scans). OCR (tesseract, pdftoppm) is CPU-bound, so two threads keep at most
+#     two files in OCR on the 2-core VM (one is often just waiting for the AI).
 # JOB_CONCURRENCY is processes per worker (config/deploy.yml). A job on a queue no worker lists
 # would never run: test/config/queue_config_test.rb checks every job class against this file.
 default: &default

@@ -43,12 +43,21 @@ env:
     APP_HOST: certs.abaventures.net
     # The db accessory's container name on Kamal's docker network.
     DB_HOST: cert_track-db
-    MAIL_FROM: "CertTrack <certtrack@notify.abaventures.net>"
+    # Email goes out through the office's Google Workspace account (smtp.gmail.com, app password
+    # in SMTP_PASSWORD). MAIL_FROM must be SMTP_USERNAME or one of its Gmail "Send mail as"
+    # aliases; Gmail rewrites any other From address.
+    SMTP_USERNAME: austen@abaventures.net
+    MAIL_FROM: "CertTrack <austen@abaventures.net>"
+    # App emails allowed per day (Notifications::SendBudget). Workspace allows about 2,000
+    # recipients a day per account, and the owner's own mail from this account counts too.
+    MAIL_DAILY_LIMIT: 1000
     # Reply-To on crew expiry notices, which ask crew to reply with their renewed certificate.
-    # Must be a real, monitored inbox: notify.abaventures.net only sends and has no MX.
+    # Must be a real, monitored inbox.
     OFFICE_EMAIL: austen@abaventures.net
     R2_BUCKET: certtrack-files
     R2_BACKUP_BUCKET: certtrack-backups
+    # Nightly copy of every certificate file from R2 (Backups::FileCopyJob); the volume below.
+    FILE_COPY_DIR: /rails/file_copies
     AI_PROVIDER: workers_ai
     AI_DAILY_NEURON_BUDGET: 9000
     AUTO_ACCEPT_ENABLED: "false"
@@ -73,7 +82,7 @@ env:
     - R2_ACCOUNT_ID
     - R2_ACCESS_KEY_ID
     - R2_SECRET_ACCESS_KEY
-    - RESEND_API_KEY
+    - SMTP_PASSWORD
     - CLOUDFLARE_ACCOUNT_ID
     - CLOUDFLARE_AI_API_TOKEN
     # Optional paid fallback (AI_PROVIDER=anthropic). Uncomment here AND in .kamal/secrets.
@@ -87,7 +96,11 @@ aliases:
   logs: app logs -f
   dbc: app exec --interactive --reuse "bin/rails dbconsole --include-password"
 
-# No app volume: uploads live in R2 and the database in the accessory's directory below.
+# Uploads live in R2 and the database in the accessory's directory below. This volume holds the
+# nightly copy of the certificate files on the VM's own disk (docs/DEPLOY.md, "File copies").
+# The host directory must exist and be owned by uid 1000 (the image's rails user) before deploy.
+volumes:
+  - "/var/lib/certtrack/file-copies:/rails/file_copies"
 
 # Bridge fingerprinted assets, like JS and CSS, between versions to avoid
 # hitting 404 on in-flight requests. Combines all files from new and old

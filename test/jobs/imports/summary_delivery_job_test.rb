@@ -26,8 +26,8 @@ class Imports::SummaryDeliveryJobTest < ActiveJob::TestCase
     assert_equal [ "manager@example.com" ], ActionMailer::Base.deliveries.last.to
   end
 
-  test "past the 90/day cap the summary waits for tomorrow morning, then goes out once" do
-    Notifications::SendBudget.record!(Notifications::SendBudget::DAILY_LIMIT)
+  test "past the daily email cap the summary waits for tomorrow morning, then goes out once" do
+    Notifications::SendBudget.record!(Notifications::SendBudget.daily_limit)
 
     tomorrow_morning = Time.zone.local(2026, 11, 4, 7, 0)
     @batch.check_completion!
@@ -36,7 +36,7 @@ class Imports::SummaryDeliveryJobTest < ActiveJob::TestCase
     end
     assert_empty ActionMailer::Base.deliveries
     assert_equal 1, EmailSendDay.deferred_on(Date.current), "the dashboard banner counts it"
-    assert_equal Notifications::SendBudget::DAILY_LIMIT, Notifications::SendBudget.sent_today
+    assert_equal Notifications::SendBudget.daily_limit, Notifications::SendBudget.sent_today
 
     travel_to tomorrow_morning do
       perform_enqueued_jobs(only: Imports::SummaryDeliveryJob, at: Time.current)

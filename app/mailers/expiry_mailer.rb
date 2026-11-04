@@ -108,9 +108,9 @@ class ExpiryMailer < ApplicationMailer
   end
 
   # No-op (nothing is delivered) when the crew member has no email address. Replies go to
-  # OFFICE_EMAIL, a monitored inbox (config/deploy.yml). Never to the From address: the
-  # notify subdomain only sends. Without OFFICE_EMAIL there is no Reply-To and the notice
-  # doesn't ask the crew member to reply.
+  # OFFICE_EMAIL, a monitored inbox (config/deploy.yml), which may differ from the sending
+  # account. Without OFFICE_EMAIL there is no Reply-To and the notice doesn't ask the crew
+  # member to reply.
   def crew_notice
     @crew_member = params.fetch(:crew_member)
     @certificate = params.fetch(:certificate)

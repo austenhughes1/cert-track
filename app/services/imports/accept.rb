@@ -26,14 +26,21 @@ module Imports
   # The certificate gets source import, import_item: item, the item's file (the same blob),
   # and verified_by/verified_at when a user accepts. Older certificates of the same type are
   # superseded by the model's rules. The item becomes accepted with certificate,
-  # reviewed_by and reviewed_at. When the chosen person is the matcher's proposal
-  # (matched_crew_member with person_match matched or suggested: an exact match, a
-  # suggestion that cleared the bar, or a member created from this item) and the printed
-  # holder name is a new spelling for them, that spelling is added to their name_aliases
-  # (CrewMember#add_alias!). A person picked by hand learns nothing, since the AI may have
-  # misread the name: one chosen here, any other listed candidate, or one saved with
-  # "Save edits" (person_match picked). Nor is a spelling learned that is already an exact
-  # name of another member: that member's own cards would stop matching exactly.
+  # reviewed_by and reviewed_at, and lets go of its file: only its attachment goes, the blob
+  # is the certificate's from then on. So deleting the certificate, or removing that file
+  # from it, deletes the stored file too (Active Storage won't purge a blob still attached
+  # anywhere), and import pages link to the certificate instead. Other items sharing the
+  # blob (one photo holding several certificates) keep theirs until they are accepted
+  # themselves; a rejected one keeps it for good.
+  #
+  # When the chosen person is the matcher's proposal (matched_crew_member with person_match
+  # matched or suggested: an exact match, a suggestion that cleared the bar, or a member
+  # created from this item) and the printed holder name is a new spelling for them, that
+  # spelling is added to their name_aliases (CrewMember#add_alias!). A person picked by hand
+  # learns nothing, since the AI may have misread the name: one chosen here, any other
+  # listed candidate, or one saved with "Save edits" (person_match picked). Nor is a
+  # spelling learned that is already an exact name of another member: that member's own
+  # cards would stop matching exactly.
   #
   # All or nothing (a savepoint, so it nests in the pipeline's transaction). Raises
   # ActiveRecord::RecordInvalid with the certificate's errors (e.g. "Crew member must exist",
@@ -168,7 +175,22 @@ module Imports
 
       def finish(accepted, certificate)
         accepted.update!(status: :accepted, certificate:, reviewed_by: user, reviewed_at: Time.current)
+        release_file(accepted)
         learn_alias(accepted, certificate.crew_member)
+      end
+
+      # The certificate holds the blob now; only the item's attachment row is deleted. A file
+      # attached in this same transaction (Imports::Splitter's cut-out pages, in the pipeline)
+      # uploads when it commits, and detach would cancel that upload: its row is deleted
+      # without touching the pending upload, so this item object still shows it until reloaded.
+      def release_file(accepted)
+        return unless accepted.file.attached?
+
+        if accepted.attachment_changes.key?("file")
+          ActiveStorage::Attachment.where(id: accepted.file.attachment.id).delete_all
+        else
+          accepted.file.detach
+        end
       end
 
       # Only from the matcher's own proposal (matched or suggested), never a hand pick.

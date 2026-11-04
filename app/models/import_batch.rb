@@ -11,7 +11,7 @@ class ImportBatch < ApplicationRecord
 
   belongs_to :uploaded_by, class_name: "User"
   has_many :import_items, dependent: :destroy
-  has_many_attached :uploads # raw files and zips as dropped
+  has_many_attached :uploads # raw files and zips as dropped; deleted once unpacked (discard_uploads!)
 
   validates :files_count, :items_count, :accepted_count, :review_count, :error_count,
     numericality: { only_integer: true, greater_than_or_equal_to: 0 }
@@ -33,6 +33,17 @@ class ImportBatch < ApplicationRecord
         batch.status_counts = ImportItem.statuses.keys.index_with { |status| counts.fetch([ batch.id, status ], 0) }
         batch.waiting_for_budget_count = waiting.fetch(batch.id, 0)
       end
+    end
+
+    # Deletes the uploads still held by batches created more than ImportItem::PURGE_AFTER (30
+    # days) ago: Imports::ExpandJob keeps them when unpacking stopped part way (an unexpected
+    # error), and a worker can die between unpacking and deleting them. Nightly, from
+    # Maintenance::PurgeImportExtractionsJob. Returns the number of uploads deleted.
+    def purge_stale_uploads!(now: Time.current)
+      stale = where(created_at: ...(now - ImportItem::PURGE_AFTER))
+      Imports::FileCleanup.delete(
+        ActiveStorage::Attachment.where(record_type: polymorphic_name, name: "uploads", record_id: stale.select(:id))
+      )
     end
   end
 
@@ -95,6 +106,13 @@ class ImportBatch < ApplicationRecord
     FINISHED_STATUSES.include?(status)
   end
 
+  # Deletes the raw uploads once Imports::ExpandJob has turned every entry into an item: the
+  # items keep what was found in them. A single-file upload's blob is reused as its item's
+  # file, so only the upload's attachment goes and the file stays. Returns the number deleted.
+  def discard_uploads!
+    Imports::FileCleanup.delete(uploads_attachments).tap { uploads_attachments.reset }
+  end
+
   # True once there is at least one item and every item is accepted, rejected, duplicate or failed.
   def all_items_terminal?
     import_items.exists? && !import_items.unfinished.exists?
@@ -109,7 +127,7 @@ class ImportBatch < ApplicationRecord
   # A receiving batch (not unpacked yet) is left alone. The first time the batch
   # finishes, the uploader gets ImportMailer#summary, exactly once even when callers race
   # or the batch goes back to processing later (Imports::Reread). The send counts against
-  # the 90/day email cap (Imports::SummaryDeliveryJob).
+  # the daily email cap (Imports::SummaryDeliveryJob).
   def check_completion!
     finished = with_lock do
       next false if receiving?

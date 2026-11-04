@@ -5,6 +5,13 @@ namespace :certtrack do
     puts "Uploaded #{key}"
   end
 
+  desc "List the database backups in R2, oldest first, with when each was taken (pass one to restore_latest as KEY=)"
+  task list_backups: :environment do
+    keys = Backups::Storage.new.backup_keys
+    puts "No backups yet." if keys.empty?
+    keys.each { |key| puts "#{key}  #{Backups::Storage.taken_at(key).strftime("%b %-d, %Y %-l:%M %p %Z")}" }
+  end
+
   desc "Restore the newest R2 backup into TARGET_DATABASE (default cert_track_restore_check). " \
        "KEY=db/… picks another backup; FORCE=1 allows overwriting this app's own database"
   task restore_latest: :environment do

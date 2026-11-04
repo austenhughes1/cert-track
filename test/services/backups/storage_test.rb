@@ -13,6 +13,14 @@ class Backups::StorageTest < ActiveSupport::TestCase
     assert_match Backups::Storage::KEY_PATTERN, key
   end
 
+  test "taken_at reads the time back from a key, in Denver time" do
+    taken = Backups::Storage.taken_at("db/cert_track-20261103T030509Z.sql.gz.enc")
+
+    assert_equal Time.find_zone!("America/Denver").local(2026, 11, 2, 20, 5, 9), taken
+    assert_equal "America/Denver", taken.time_zone.name
+    assert_nil Backups::Storage.taken_at("db/notes.txt")
+  end
+
   test "prune keeps exactly the 14 newest backups and leaves foreign objects alone" do
     keys = backup_keys(20)
     client = stub_s3_client(list_objects_v2: list_response(keys.shuffle + [ "db/README.txt", "db/manual.sql" ]))

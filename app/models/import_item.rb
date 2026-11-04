@@ -60,6 +60,13 @@ class ImportItem < ApplicationRecord
       .where("coalesce(import_items.reviewed_at, import_items.updated_at) < ?", now - PURGE_AFTER)
       .where("import_items.extracted_text IS NOT NULL OR import_items.extraction IS NOT NULL")
   }
+  # Failed items past the same 30 days, whose files are deleted (purge_stale_files!). Rejected
+  # items keep theirs: a rejected file stays the original that a later upload of it
+  # duplicates, so a wrong rejection can only be undone with Read again. An accepted item's
+  # file is its certificate's (Imports::Accept), and a duplicate has none.
+  scope :file_purgeable, ->(now: Time.current) {
+    failed.where("coalesce(import_items.reviewed_at, import_items.updated_at) < ?", now - PURGE_AFTER)
+  }
 
   class << self
     # The earlier item for the same file and page range that a new item would duplicate,
@@ -96,6 +103,17 @@ class ImportItem < ApplicationRecord
     # Clears extracted_text and extraction on purgeable items. Returns the number cleared.
     def purge_stale_extractions!(now: Time.current)
       purgeable(now: now).update_all(extracted_text: nil, extraction: nil, updated_at: now)
+    end
+
+    # Deletes the files of file_purgeable items (Imports::FileCleanup: a blob a certificate
+    # still holds stays). The items aren't touched; run it before purge_stale_extractions!,
+    # which does count as a change. The file can't come back: upload it again to read it
+    # (a failed item is never the original, so that makes a new item). Returns the number of
+    # files deleted.
+    def purge_stale_files!(now: Time.current)
+      Imports::FileCleanup.delete(
+        ActiveStorage::Attachment.where(record_type: polymorphic_name, name: "file", record_id: file_purgeable(now:).select(:id))
+      )
     end
   end
 

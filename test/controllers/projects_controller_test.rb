@@ -286,4 +286,33 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     end
     assert_equal 5, @tower.project_requirements.count
   end
+
+  test "refuses to delete a project with past packets: they are the record of what was sent" do
+    project = Project.create!(name: "Packet sent")
+    build = project.packet_builds.create!(built_at: 2.days.ago, packet_filename: "packet-sent.zip")
+    sign_in_as users(:admin)
+
+    get project_path(project)
+    assert_select "button", text: "Delete", count: 0
+
+    assert_no_difference -> { Project.count } do
+      delete project_path(project)
+    end
+    assert_redirected_to project_path(project)
+    assert_match "past packets", flash[:alert]
+    assert_match "Close it instead", flash[:alert]
+    assert PacketBuild.exists?(build.id)
+  end
+
+  test "the details say when a built packet's zip has expired" do
+    @tower.update!(packet_built_at: Time.zone.local(2026, 10, 20, 9))
+    sign_in_as users(:viewer)
+
+    get project_path(@tower)
+    assert_select "#packet_status", text: "Built Oct 20, 2026 (zip expired)"
+
+    @tower.packet.attach(io: StringIO.new("zip"), filename: "2417-packet.zip", content_type: "application/zip")
+    get project_path(@tower)
+    assert_select "#packet_status", text: "Built Oct 20, 2026"
+  end
 end

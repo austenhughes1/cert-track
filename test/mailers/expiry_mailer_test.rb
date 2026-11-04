@@ -178,12 +178,11 @@ class ExpiryMailerTest < ActionMailer::TestCase
     end
   end
 
-  test "without OFFICE_EMAIL the crew notice neither replies to the send-only address nor asks for a reply" do
+  test "without OFFICE_EMAIL the crew notice has no Reply-To and doesn't ask for a reply" do
     mail = with_env("OFFICE_EMAIL" => nil) do
       ExpiryMailer.with(crew_member: crew_members(:juan_ortiz), certificate: certificates(:juan_flagger), threshold: "d7").crew_notice.message
     end
 
-    assert_equal [ "certtrack@notify.abaventures.net" ], mail.from
     assert_nil mail.reply_to
     [ mail.text_part.body.to_s, mail.html_part.body.to_s ].each do |body|
       assert_includes body, "to the office."

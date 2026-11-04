@@ -170,20 +170,21 @@ class Notifications::ExpiryScanTest < ActiveSupport::TestCase
       crew_mails.map { |mail| mail.subject[/\AYour .+? certificate/] }.sort
   end
 
-  # --- 90/day cap --------------------------------------------------------------------
+  # --- daily email cap --------------------------------------------------------------
 
-  test "past 90 sends a day the rest are deferred without log rows and go out the next day" do
+  test "past the daily cap the rest are deferred without log rows and go out the next day" do
     deactivate_fixture_crew!
     travel_to Time.zone.local(2027, 2, 1, 6, 0)
     member = create_crew_member(email: CREW_EMAIL, expiry_emails_opt_in: true)
     certificate = create_certificate(member, expires_on: Date.current + 20)
-    Notifications::SendBudget.record!(89)
+    limit = Notifications::SendBudget.daily_limit
+    Notifications::SendBudget.record!(limit - 1)
 
     result = nil
     assert_emails(1) { result = Notifications::ExpiryScan.call }
 
     assert_equal 2, result.deferred
-    assert_equal 90, Notifications::SendBudget.sent_today
+    assert_equal limit, Notifications::SendBudget.sent_today
     assert Notifications::SendBudget.deferred_on?(Date.current)
     assert_equal 2, EmailSendDay.deferred_on(Date.current)
     first_email = ActionMailer::Base.deliveries.last.to.first

@@ -11,6 +11,12 @@ module Imports
   # Text extraction is enqueued only once every item exists, so no item can finish (and
   # trigger check_completion!) while the batch is still being unpacked. A run that died
   # half way (deploy, crash) is redone from scratch when Solid Queue runs the job again.
+  #
+  # Once every upload is unpacked, the uploads are deleted (ImportBatch#discard_uploads!): a
+  # zip, a rejected or duplicate file, and the whole PDF a split single upload leaves behind
+  # are no longer stored twice. A single-file upload's blob stays as its item's file. When
+  # unpacking stopped on an unexpected error they are kept, and the nightly
+  # ImportBatch.purge_stale_uploads! deletes them after 30 days.
   class ExpandJob < ApplicationJob
     # Every pipeline job runs on the imports queue, which has its own worker (config/queue.yml):
     # a big batch's OCR backlog never holds up backups, expiry emails or mail on default.
@@ -22,7 +28,7 @@ module Imports
       with_batch_lock(batch) do
         next unless claim(batch)
 
-        expand(batch)
+        batch.discard_uploads! if expand(batch)
       end
     end
 
@@ -42,6 +48,7 @@ module Imports
         true
       end
 
+      # True once every upload has been turned into items; false when it stopped part way.
       def expand(batch)
         pending = []
         archive = nil
@@ -63,11 +70,13 @@ module Imports
           errors << nothing_found_message(archive) if archive.entries_seen.zero?
           batch.update!(files_count: archive.entries_seen, error_message: errors.compact.join(" ").presence)
         end
+        true
       rescue StandardError => error
         Rails.error.report(error, handled: true, context: { import_batch_id: batch.id })
         message = "Unpacking stopped unexpectedly (#{error.class.name}). Files not listed here were not imported."
         batch.update_columns(files_count: archive&.entries_seen.to_i, updated_at: Time.current,
           error_message: [ batch.error_message, message ].compact.join(" "))
+        false
       ensure
         # Even after an error: the items already made must still be read.
         ActiveJob.perform_all_later(pending.map { |item| Imports::ExtractTextJob.new(item) }) if pending&.any?
@@ -109,7 +118,7 @@ module Imports
 
         if item.pending?
           pending << item
-        elsif blob != upload_blob
+        elsif blob != upload_blob # the upload's own blob goes with the uploads (discard_uploads!)
           blob.purge_later
         end
       end

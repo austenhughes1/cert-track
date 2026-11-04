@@ -48,6 +48,17 @@ module ImportsHelper
     tag.span(label, class: "#{BADGE_BASE} #{classes}", data: { status: batch.status })
   end
 
+  # The batch page's "12 files found" (files_count: what unpacking found, zip contents
+  # included), or "3 uploads dropped" while they wait to be unpacked; nil when there is
+  # neither. The uploads themselves are deleted once unpacked (ImportBatch#discard_uploads!).
+  def import_batch_size_label(batch)
+    if batch.files_count.positive?
+      "#{pluralize(batch.files_count, "file")} found"
+    elsif (uploads = batch.uploads.count).positive?
+      "#{pluralize(uploads, "upload")} dropped"
+    end
+  end
+
   # True while an item is parked until the AI allocation resets.
   def import_item_waiting?(item, now: Time.current)
     item.waiting_for_budget?(now)

@@ -13,8 +13,8 @@ expiry warnings, bulk-imports scanned cards with AI extraction plus a human revi
 | --- | --- | --- |
 | Ruby | 3.4.12 (`.ruby-version`) | Any version manager works (chruby, rbenv, mise) |
 | PostgreSQL | 17 or newer, plus `pg_dump`/`psql` of the server's major version | Production runs 17, so avoid 18-only features. Backup tests shell out to `pg_dump`/`psql` |
-| libvips | 8.13 or newer, built with libheif and the libde265 plugin | Active Storage variants, thumbnails, HEIC to JPEG |
-| poppler | `pdftotext`, `pdftoppm` | PDF text extraction and page images for import |
+| libvips | 8.13 or newer, built with libheif and the libde265 plugin | Active Storage variants, thumbnails, shrinking stored photos (HEIC to JPEG) |
+| poppler | `pdftotext`, `pdftoppm`, `pdfimages`, `pdfinfo` | PDF text extraction and page images for import; PDF thumbnails; shrinking scanned PDFs |
 | Tesseract | with English data | OCR for scanned certificates |
 
 By default `config/database.yml` connects over the local socket as your OS user, so that role needs `CREATEDB`.
@@ -110,7 +110,8 @@ weekly update PR or run `bundle update brakeman` to fix it.
 ## Deploy
 
 CertTrack deploys with Kamal 2 to an Oracle Cloud ARM64 VM, with PostgreSQL 17 as an accessory, Cloudflare R2 for
-files and backups, and Resend for email. See [docs/DEPLOY.md](docs/DEPLOY.md).
+files and backups (plus a nightly copy of the files on the VM's own disk), and the office's Google Workspace account
+(`smtp.gmail.com`) for email. See [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Status
 

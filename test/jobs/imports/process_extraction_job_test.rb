@@ -1,4 +1,5 @@
 require "test_helper"
+require "support/import_samples"
 require_relative "../../services/imports/match_test_support"
 
 class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
@@ -43,6 +44,7 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
 
   test "auto-accept on: a clean extraction becomes a certificate" do
     item = image_item(extraction: extraction_with(ortiz_osha))
+    blob = item.file.blob
 
     certificate_count = Certificate.count
     with_auto_accept { process(item) }
@@ -55,7 +57,8 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
       [ certificate.crew_member, certificate.certificate_type, certificate.completed_on ]
     assert certificate.expiry_none?
     assert_nil certificate.verified_by
-    assert_equal [ item.file.blob ], certificate.files.blobs.to_a
+    assert_equal [ blob ], certificate.files.blobs.to_a
+    assert_not item.file.attached?, "the certificate holds the file now"
     assert certificates(:juan_osha30).reload.superseded?
     assert item.import_batch.reload.completed?
   end
@@ -131,7 +134,8 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
     [ item, item.split_items.sole ].each do |accepted|
       assert accepted.accepted?
       blob = accepted.certificate.files.blobs.sole
-      assert_equal accepted.file.blob, blob
+      assert_not accepted.file.attached?, "the certificate holds the file now"
+      assert_equal [ accepted.certificate ], ActiveStorage::Attachment.where(blob_id: blob.id).map(&:record)
       assert blob.service.exist?(blob.key), "#{blob.filename} was not uploaded"
       assert_equal 1, pdf_page_count(blob)
     end
@@ -183,13 +187,36 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
   test "a certificate the model missed can still be accepted from the review queue" do
     item = image_item(extraction: extraction_with)
     process(item)
+    blob = item.file.blob
 
     certificate = Imports::Accept.new(item, user: users(:manager), attributes: {
       crew_member_id: crew_members(:juan_ortiz).id, certificate_type_id: certificate_types(:osha30).id, completed_on: COMPLETED
     }).call
 
     assert item.reload.accepted?
-    assert_equal [ crew_members(:juan_ortiz), [ item.file.blob ] ], [ certificate.crew_member, certificate.files.blobs.to_a ]
+    assert_equal [ crew_members(:juan_ortiz), [ blob ] ], [ certificate.crew_member, certificate.files.blobs.to_a ]
+  end
+
+  test "a PDF uploaded on its own and split into its certificates leaves no whole copy behind" do
+    pages = [
+      certificate_lines(name: "OSHA 30 Hour", holder: "Juan A. Ortiz", completed: COMPLETED),
+      certificate_lines(name: "Flagger Certification", holder: "Li Chen", completed: COMPLETED)
+    ]
+    batch = ImportSamples.batch(users(:manager), "two cards.pdf" => synthetic_pdf(pages))
+    whole = batch.uploads.sole.blob
+    Imports::ExpandJob.perform_now(batch)
+    item = batch.import_items.sole
+    assert_equal whole, item.file.blob, "the upload's blob is the item's file until it is split"
+    item.update!(status: :extracting, extracted_text: marked_text(pages), extraction: extraction_with(ortiz_osha,
+      certificate_entry(pages: [ 2 ], holder: "Li Chen", code: "FLAGGER", name: "Flagger Certification", completed: COMPLETED)))
+
+    perform_enqueued_jobs(only: ActiveStorage::PurgeJob) { process(item) }
+
+    assert_not ActiveStorage::Blob.exists?(whole.id)
+    assert_not whole.service.exist?(whole.key)
+    family = [ item, item.split_items.sole ]
+    assert_equal [ "two cards p1.pdf", "two cards p2.pdf" ], family.map { |part| part.file.filename.to_s }
+    assert_equal family.map { |part| part.file.blob }.sort_by(&:id), ActiveStorage::Blob.order(:id).to_a
   end
 
   test "a later upload of a file the model found nothing in points at the queued item, not a silent rejection" do

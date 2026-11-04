@@ -1,0 +1,44 @@
+<%# Amber banner (admins) when the nightly copy of certificate files to the server's disk (Backups::FileCopyJob)
+    needs attention: its folder is missing or read-only, the disk is almost full, or no complete copy for 2 days.
+    Otherwise, and while copies are off (FILE_COPY_DIR unset), renders nothing. %>
+<% status = Backups::FileCopyStatus.current %>
+<% if status.needs_attention? %>
+  <div class="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status" id="file_copy_banner">
+    <% if status.folder_problem %>
+      <p class="font-semibold">Certificate files are not being copied to the server</p>
+      <p class="mt-1">
+        The server folder for the nightly copy <%= status.folder_problem == :missing ? "is missing" : "can't be written to" %>.
+        On the server, run <code class="rounded bg-amber-100 px-1"><%= Backups::FileCopyStore::SETUP_COMMAND %></code><% if status.folder_problem == :missing %>,
+        then redeploy with <code class="rounded bg-amber-100 px-1">bin/kamal deploy</code> so the folder is mounted<% end %>
+        (<%= Backups::FileCopyStore::SETUP_STEP %>).
+      </p>
+    <% elsif status.low_space? %>
+      <p class="font-semibold">Server disk almost full</p>
+      <p class="mt-1">
+        <%= number_to_human_size(status.free_bytes) %> of <%= number_to_human_size(status.total_bytes) %> is free.
+        The nightly copy of certificate files stops below <%= number_to_human_size(status.reserve_bytes) %> free, to leave room for the database<% if status.not_copied.positive? %>,
+        so <%= pluralize(status.not_copied, "file") %> <%= status.not_copied == 1 ? "is" : "are" %> not copied yet<% end %>.
+        Free up space on the server or make its disk bigger.
+      </p>
+    <% else %>
+      <p class="font-semibold">Nightly file copy is behind</p>
+      <p class="mt-1">
+        <% if status.failed.positive? %>
+          The last run could not copy <%= pluralize(status.failed, "file") %>.
+        <% else %>
+          The copy has not run to the end<% if (last_run_at = status.last_run_at) %> since <%= last_run_at.strftime("%b %-d, %Y %-l:%M %p") %><% end %>;
+          check <%= link_to "Jobs", "/jobs", class: "underline" %> for errors.
+        <% end %>
+        Run <code class="rounded bg-amber-100 px-1">bin/rails certtrack:file_copy_status</code> on the server for details.
+      </p>
+    <% end %>
+    <p class="mt-1">
+      <% if (last_success_at = status.last_success_at) %>
+        Last complete copy: <time datetime="<%= last_success_at.iso8601 %>"><%= last_success_at.strftime("%b %-d, %Y %-l:%M %p") %></time>
+        (<%= time_ago_in_words(last_success_at) %> ago).
+      <% else %>
+        No complete copy yet.
+      <% end %>
+    </p>
+  </div>
+<% end %>

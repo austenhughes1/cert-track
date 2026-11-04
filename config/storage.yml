@@ -6,6 +6,14 @@ local:
   service: Disk
   root: <%= Rails.root.join("storage") %>
 
+# The nightly copy of the certificate files on the VM's own disk (Backups::FileCopyJob), laid out
+# like any Disk service. Production sets FILE_COPY_DIR to /rails/file_copies, a Kamal volume
+# (config/deploy.yml). Backups::FileCopyStore reads FILE_COPY_DIR itself and does nothing while it
+# is unset; the tmp/ fallback (development and test) only keeps this service off "/".
+file_copies:
+  service: Disk
+  root: <%= ENV["FILE_COPY_DIR"].presence || Rails.root.join("tmp/file_copies") %>
+
 # Cloudflare R2 through the S3 API (production). The bucket stays private: files are served
 # through Rails with presigned URLs that expire in 5 minutes (config/initializers/active_storage.rb).
 r2:

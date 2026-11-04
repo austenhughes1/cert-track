@@ -74,7 +74,7 @@ class FileAccessTest < ActionDispatch::IntegrationTest
     assert_response :redirect
     follow_redirect!
     assert_response :success
-    assert_equal "image/png", response.media_type
+    assert_equal "image/jpeg", response.media_type # PdfThumbnailPreviewer (config/initializers/active_storage_previewers.rb)
   end
 
   test "proxied files are never marked cacheable by shared caches" do

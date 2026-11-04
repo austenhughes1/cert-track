@@ -1,12 +1,12 @@
-<%# Amber banner when the 90/day email guard held sends back today or yesterday; otherwise renders nothing. %>
+<%# Amber banner when the daily email cap (Notifications::SendBudget, MAIL_DAILY_LIMIT) held sends back today or yesterday; otherwise renders nothing. %>
 <% if (deferral = Notifications::SendBudget.recent_deferral) %>
   <% when_text = deferral.day == Date.current ? "today" : "yesterday" %>
   <div class="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status" id="email_cap_banner">
     <p class="font-semibold">Daily email limit reached</p>
     <p class="mt-1">
       <%= pluralize(deferral.deferred_count, "email") %> <%= deferral.deferred_count == 1 ? "was" : "were" %> held back <%= when_text %>
-      to stay under the <%= Notifications::SendBudget::DAILY_LIMIT %>-a-day sending limit
-      (<%= deferral.sent_count %> sent). Expiry alerts go out on the next daily run; weekly digests are retried
+      to stay under the <%= number_with_delimiter(Notifications::SendBudget.daily_limit) %>-a-day sending limit
+      (<%= number_with_delimiter(deferral.sent_count) %> sent). Expiry alerts go out on the next daily run; weekly digests are retried
       the next morning; import summaries go out the next morning at <%= Imports::SummaryDeliveryJob::RETRY_AT_HOUR %>:00 Denver time.
     </p>
   </div>

@@ -31,6 +31,9 @@ class Imports::ShellTest < ActiveSupport::TestCase
     with_path("") do
       error = assert_raises(Imports::Shell::CommandNotFound) { Imports::Shell.run("tesseract", "--version") }
       assert_match "Install tesseract-ocr and tesseract-ocr-eng", error.message
+
+      error = assert_raises(Imports::Shell::CommandNotFound) { Imports::Shell.run("pdfimages", "-list", "scan.pdf") }
+      assert_match "Install poppler-utils", error.message, "Certificates::PdfShrinker's tool names its package too"
     end
   end
 

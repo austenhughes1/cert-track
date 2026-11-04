@@ -1,7 +1,7 @@
 # The email an uploader gets when their import batch finishes (pipeline step 11).
 # Sent once per batch by ImportBatch#check_completion!. deliver_later goes through
-# Imports::SummaryDeliveryJob, which keeps it under the 90/day email cap (held back to the
-# next morning past it).
+# Imports::SummaryDeliveryJob, which keeps it under the daily email cap (Notifications::SendBudget;
+# held back to the next morning past it).
 #
 #   ImportMailer.with(batch:).summary
 class ImportMailer < ApplicationMailer

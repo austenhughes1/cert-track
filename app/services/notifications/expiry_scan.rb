@@ -6,7 +6,7 @@ module Notifications
   # when they opted in and have an email. A threshold is skipped for a recipient who already
   # got it or a more urgent one, so a missed week sends only the most urgent, never a burst.
   #
-  # Per email: reserve a send under the 90/day cap (past it, defer: no log rows, so the next
+  # Per email: reserve a send under the daily email cap (past it, defer: no log rows, so the next
   # run picks the items up), claim the send-log rows with INSERT ... ON CONFLICT DO NOTHING,
   # send only what this run claimed, then stamp sent_at. Concurrent or repeated runs can't
   # double-send. A failed delivery drops its claims and its reservation, so the next run retries it.

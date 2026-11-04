@@ -56,7 +56,7 @@ class Notifications::WeeklyDigestJobTest < ActiveJob::TestCase
 
   test "recipients past the cap are deferred and retried the next morning after the daily scan" do
     travel_to MONDAY
-    Notifications::SendBudget.record!(89)
+    Notifications::SendBudget.record!(Notifications::SendBudget.daily_limit - 1)
     first, second = User.digest_recipients.order(:id).to_a
 
     assert_emails(1) do
@@ -76,7 +76,7 @@ class Notifications::WeeklyDigestJobTest < ActiveJob::TestCase
 
   test "a deferral is not retried when the next day is Monday" do
     travel_to Time.zone.local(2026, 11, 8, 6, 30) # Sunday
-    Notifications::SendBudget.record!(90)
+    Notifications::SendBudget.record!(Notifications::SendBudget.daily_limit)
 
     assert_no_emails do
       assert_no_enqueued_jobs { Notifications::WeeklyDigestJob.perform_now([ users(:admin).id ]) }

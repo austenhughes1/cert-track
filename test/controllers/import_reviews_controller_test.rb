@@ -296,6 +296,10 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
 
     get import_review_path(heic)
     assert_select "img#review_preview_image[src*=?]", "/rails/active_storage/representations/redirect/"
+    src = css_select("img#review_preview_image").sole["src"]
+    variation = ActiveStorage::Variation.decode(src.split("/").fetch(-2))
+    assert_equal :jpeg, variation.format.to_sym, "a JPEG preview is a fraction of a PNG's size"
+    assert_equal({ quality: 80, strip: true }, variation.transformations[:saver])
   end
 
   test "show without a file says so" do
@@ -762,6 +766,7 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     back = new_item(original_filename: "back.jpg", page_range: nil, matched_crew_member: @juan, person_match: :matched,
       matched_certificate_type: @first_aid, type_match: :matched, proposed_certificate_number: "FA-77001")
     back.file.attach(blob("certificate.jpg"))
+    files = [ @item.file.blob, back.file.blob ]
     sign_in_as users(:manager)
 
     get import_review_path(@item)
@@ -782,7 +787,8 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_equal certificate, back.reload.certificate
     assert @item.accepted?
     assert back.accepted?
-    assert_equal [ @item.file.blob, back.file.blob ].map(&:id).sort, certificate.files.map(&:blob_id).sort
+    assert_equal files.map(&:id).sort, certificate.files.map(&:blob_id).sort
+    assert_not @item.file.attached? || back.file.attached?, "the certificate holds both files now"
   end
 
   test "merge with nothing left to merge re-renders" do

@@ -342,7 +342,7 @@ class UsersControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "send_test_digest refuses once today's email cap is used up" do
-    Notifications::SendBudget.record!(Notifications::SendBudget::DAILY_LIMIT)
+    Notifications::SendBudget.record!(Notifications::SendBudget.daily_limit)
     sign_in_as @admin
 
     assert_no_emails do

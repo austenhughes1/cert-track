@@ -7,7 +7,7 @@ class Maintenance::PurgeImportExtractionsJobTest < ActiveJob::TestCase
     stale.update_columns(reviewed_at: 31.days.ago)
     recent = import_items(:review_juan_first_aid) # still in the review queue
 
-    assert_equal 1, Maintenance::PurgeImportExtractionsJob.perform_now
+    assert_equal({ files: 0, uploads: 0, extractions: 1 }, Maintenance::PurgeImportExtractionsJob.perform_now)
 
     assert_nil stale.reload.extracted_text
     assert_nil stale.extraction
@@ -24,12 +24,32 @@ class Maintenance::PurgeImportExtractionsJobTest < ActiveJob::TestCase
     review = import_items(:review_juan_first_aid)
     [ failed, duplicate, review ].each { |item| item.update_columns(updated_at: 45.days.ago) }
 
-    assert_equal 2, Maintenance::PurgeImportExtractionsJob.perform_now
+    assert_equal({ files: 0, uploads: 0, extractions: 2 }, Maintenance::PurgeImportExtractionsJob.perform_now)
 
     assert_nil failed.reload.extracted_text
     assert_nil duplicate.reload.extracted_text
     assert_nil duplicate.extraction
     assert_not_nil review.reload.extracted_text
+  end
+
+  test "deletes a failed item's file along with its text, and uploads still kept after 30 days" do
+    batch = ImportBatch.create!(uploaded_by: users(:manager), status: :completed, created_at: 31.days.ago)
+    batch.uploads.attach(io: StringIO.new("PK zip"), filename: "crew.zip", content_type: "application/zip")
+    failed = batch.import_items.create!(status: :failed, sha256: "e" * 64, extracted_text: "DOB 1980-01-01",
+      error_message: "AI extraction failed after 3 attempts",
+      file: { io: StringIO.new("%PDF-1.4 cdl"), filename: "cdl.pdf", content_type: "application/pdf" })
+    rejected = batch.import_items.create!(status: :rejected, sha256: "a" * 64, rejection_reason: "Not a certificate",
+      reviewed_at: 31.days.ago, file: { io: StringIO.new("%PDF-1.4 outline"), filename: "outline.pdf", content_type: "application/pdf" })
+    failed.update_columns(updated_at: 31.days.ago)
+
+    counts = perform_enqueued_jobs { Maintenance::PurgeImportExtractionsJob.perform_now }
+
+    assert_equal({ files: 1, uploads: 1, extractions: 1 }, counts)
+    assert_not failed.reload.file.attached?
+    assert_nil failed.extracted_text
+    assert_not batch.reload.uploads.attached?
+    assert rejected.reload.file.attached?, "a rejected file stays the original for duplicate detection"
+    assert_equal [ rejected.file.blob ], ActiveStorage::Blob.all.to_a
   end
 
   test "is scheduled nightly in production" do

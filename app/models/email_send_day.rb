@@ -1,6 +1,6 @@
 # Durable per-day email counter (one row per Denver day). Notifications::SendBudget
-# applies the 90/day policy on top of it. Every write is a single atomic upsert, so
-# concurrent jobs can't overshoot the cap or lose increments.
+# applies the daily cap (MAIL_DAILY_LIMIT) on top of it. Every write is a single atomic
+# upsert, so concurrent jobs can't overshoot the cap or lose increments.
 class EmailSendDay < ApplicationRecord
   INCREMENT_SQL = {
     sent_count: "sent_count = email_send_days.sent_count + EXCLUDED.sent_count, updated_at = EXCLUDED.updated_at",

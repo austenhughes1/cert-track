@@ -38,7 +38,7 @@ module NotificationsTestSupport
   def with_failing_expiry_mailer(fail_for: ->(_params) { true })
     original = ExpiryMailer.method(:with)
     ExpiryMailer.define_singleton_method(:with) do |**params|
-      raise Errno::ECONNREFUSED, "smtp.resend.com" if fail_for.call(params)
+      raise Errno::ECONNREFUSED, "smtp.gmail.com" if fail_for.call(params)
 
       original.call(**params)
     end

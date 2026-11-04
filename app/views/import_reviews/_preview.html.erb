@@ -1,7 +1,9 @@
 <%# locals: (item:) %>
 <%# The file being reviewed: PDFs in the browser's viewer, images as an <img> (HEIC through a
-    PNG variant, since most browsers can't show it). Every URL goes through Active Storage's
-    signed-in redirect to a short-lived service URL. %>
+    JPEG variant, since most browsers can't show it; the variant is stored, and at quality
+    80 it is far smaller than a PNG). Every URL goes through Active Storage's signed-in
+    redirect to a short-lived service URL. Only items waiting for review come here: an
+    accepted item's file is its certificate's. %>
 <% file = item.file %>
 <section aria-label="File preview" id="review_preview">
   <% if file.attached? %>
@@ -30,7 +32,8 @@
       </div>
     <% elsif blob.representable? %>
       <div class="overflow-auto rounded-lg border border-gray-200 bg-gray-100 p-2">
-        <%= image_tag file.representation(resize_to_limit: [ 2000, 2000 ]), alt: "Uploaded certificate image #{blob.filename}",
+        <%= image_tag file.representation(resize_to_limit: [ 2000, 2000 ], format: :jpeg, saver: { quality: 80, strip: true }),
+              alt: "Uploaded certificate image #{blob.filename}",
               id: "review_preview_image", class: "mx-auto max-h-[78vh] w-auto" %>
       </div>
     <% else %>
@@ -41,7 +44,7 @@
   <% else %>
     <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center" id="review_preview_missing">
       <p class="text-sm font-medium text-gray-900">No file attached</p>
-      <p class="mt-1 text-sm text-gray-500">Check the details against the original upload in batch #<%= item.import_batch_id %>.</p>
+      <p class="mt-1 text-sm text-gray-500">This item has no file to check the details against (uploads aren't kept once batch #<%= item.import_batch_id %> is unpacked).</p>
     </div>
   <% end %>
 

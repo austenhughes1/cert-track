@@ -50,8 +50,18 @@ class ImportFileAccessTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "once accepted, the certificate shares the blob and viewers can open it like any certificate file" do
-    certificates(:juan_osha30).files.attach(@blob)
+  test "once accepted, the file is the certificate's and viewers can open it like any certificate file" do
+    Imports::Accept.new(@item, user: users(:manager), attributes: { crew_member_id: crew_members(:juan_ortiz).id }).call
+    assert_not @item.reload.file.attached?
+    sign_in_as users(:viewer)
+
+    get rails_blob_path(@blob, disposition: "inline")
+
+    assert_response :redirect
+  end
+
+  test "a photo a certificate shares with an item still in review opens like any certificate file" do
+    certificates(:juan_osha30).files.attach(@blob) # one photo holding two certificates, one accepted
     sign_in_as users(:viewer)
 
     get rails_blob_path(@blob, disposition: "inline")

@@ -111,6 +111,63 @@ class Compliance::PacketBuilderTest < ActiveSupport::TestCase
     assert_equal 1, ActiveStorage::Attachment.where(record: @project, name: "packet").count
   end
 
+  test "attach! records the build: who, when, counts, and a copy of the zip's index.pdf" do
+    attach certificates(:juan_osha30), "osha.pdf", pdf_bytes("juan osha")
+    attach certificates(:li_flagger), "front.pdf", pdf_bytes("li front")
+    attach certificates(:li_flagger), "back.pdf", pdf_bytes("li back")
+
+    freeze_time do
+      assert_difference -> { @project.packet_builds.count }, 1 do
+        builder.attach!(built_by: users(:viewer))
+      end
+
+      build = @project.packet_builds.sole
+      assert_equal users(:viewer), build.built_by
+      assert_equal Time.current, build.built_at
+      assert_equal @project.reload.packet_built_at, build.built_at
+      assert_equal "2417-packet-#{@today.iso8601}.zip", build.packet_filename
+      assert_equal [ builder.certificate_cells.size, 3, builder.report.gaps.size ], [ build.certificate_count, build.file_count, build.gap_count ]
+      assert_equal "2417-packet-#{@today.iso8601}-index.pdf", build.index_pdf.filename.to_s
+      assert_equal "application/pdf", build.index_pdf.content_type
+
+      index = build.index_pdf.download
+      @project.packet.blob.open { |file| Zip::File.open(file.path) { |zip| assert_equal zip.read("index.pdf"), index } }
+      assert_includes pdf_strings(index), "Generated #{Time.current.strftime("%b %-d, %Y %-l:%M %p %Z")} (America/Denver)"
+    end
+  end
+
+  test "rebuilding keeps each earlier build's record and index PDF" do
+    travel_to 2.days.ago do
+      Compliance::PacketBuilder.new(@project).attach!(built_by: users(:manager))
+    end
+    first = @project.packet_builds.sole
+    first_index = first.index_pdf.download
+    attach certificates(:juan_osha30), "osha.pdf", pdf_bytes("juan osha")
+
+    Compliance::PacketBuilder.new(@project).attach!
+
+    builds = @project.packet_builds.newest_first.to_a
+    assert_equal 2, builds.size
+    assert_equal first, builds.last
+    assert_nil builds.first.built_by
+    assert_equal [ 0, 1 ], builds.map(&:file_count).reverse
+    assert_equal first_index, first.reload.index_pdf.download
+    assert_not_equal first.index_pdf.blob, builds.first.index_pdf.blob
+  end
+
+  test "a failed build records nothing and leaves the earlier packet in place" do
+    builder.attach!
+    packet_blob = @project.reload.packet.blob
+    attach certificates(:juan_osha30), "osha.pdf", pdf_bytes("juan osha")
+    file = certificates(:juan_osha30).files.first.blob
+    file.service.delete(file.key) # file gone from storage
+
+    assert_raises(ActiveStorage::FileNotFoundError) { Compliance::PacketBuilder.new(@project).attach! }
+
+    assert_equal 1, @project.packet_builds.count
+    assert_equal packet_blob, @project.reload.packet.blob
+  end
+
   test "a project with no certificate files still gets an index" do
     Dir.mktmpdir do |dir|
       path = builder.write_zip(File.join(dir, "packet.zip"))

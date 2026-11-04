@@ -12,25 +12,44 @@ class Compliance::PacketJobTest < ActiveJob::TestCase
     Rails.cache = @original_cache
   end
 
-  test "request marks the project as building and enqueues the job" do
-    assert_enqueued_with(job: Compliance::PacketJob, args: [ @project ]) do
-      Compliance::PacketJob.request(@project)
+  test "request marks the project as building and enqueues the job with the requesting user's id" do
+    assert_enqueued_with(job: Compliance::PacketJob, args: [ @project, { built_by_id: users(:viewer).id } ]) do
+      Compliance::PacketJob.request(@project, built_by: users(:viewer))
     end
 
     assert_equal "building", Compliance::PacketJob.state(@project)
     assert Compliance::PacketJob.building?(@project)
   end
 
-  test "perform attaches the packet and clears the building state" do
-    Compliance::PacketJob.request(@project)
+  test "perform attaches the packet, records who built it and clears the building state" do
+    Compliance::PacketJob.request(@project, built_by: users(:manager))
 
     perform_enqueued_jobs
 
     @project.reload
     assert @project.packet.attached?
     assert_not_nil @project.packet_built_at
+    assert_equal users(:manager), @project.packet_builds.sole.built_by
     assert_nil Compliance::PacketJob.state(@project)
     assert_nil Rails.cache.read(Compliance::PacketJob.state_key(@project))
+  end
+
+  test "a build requested by a user deleted before it runs still happens, with no builder recorded" do
+    user = User.create!(email_address: "short-lived@example.com", password: "password123")
+    Compliance::PacketJob.request(@project, built_by: user)
+    user.destroy!
+
+    perform_enqueued_jobs
+
+    assert @project.reload.packet.attached?
+    assert_nil @project.packet_builds.sole.built_by
+  end
+
+  test "builds of one project run one at a time, whoever asked" do
+    job = Compliance::PacketJob.new(@project, built_by_id: users(:viewer).id)
+
+    assert_equal "Compliance::PacketJob/Project/#{@project.id}", job.concurrency_key
+    assert_equal job.concurrency_key, Compliance::PacketJob.new(@project).concurrency_key
   end
 
   test "a build that finished after the request is not building, even if the cache entry survives" do

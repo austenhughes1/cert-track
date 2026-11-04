@@ -4,7 +4,7 @@
 class Certificate < ApplicationRecord
   ALLOWED_CONTENT_TYPES = %w[application/pdf image/jpeg image/png image/heic image/heif image/webp].freeze
   MAX_FILE_SIZE = 25.megabytes
-  # Phone photos; converted to JPEG after commit (Certificates::ConvertHeicJob) so every browser shows them.
+  # Phone photos that browsers can't show; Certificates::ShrinkFilesJob always turns them into JPEGs.
   HEIC_CONTENT_TYPES = %w[image/heic image/heif].freeze
 
   # printed: taken from the card; computed: completed_on + type validity; manual: typed
@@ -39,8 +39,8 @@ class Certificate < ApplicationRecord
   after_save :reconcile_affected_groups
   after_update :rearm_expiry_notifications, if: :expiry_alert_inputs_changed?
   after_destroy :reconcile_after_destroy
-  after_save :note_heic_files
-  after_commit :convert_heic_files_later, on: %i[create update]
+  after_save :note_new_files
+  after_commit :shrink_new_files_later, on: %i[create update]
 
   scope :current, -> { where(superseded_at: nil) }
   scope :superseded, -> { where.not(superseded_at: nil) }
@@ -225,17 +225,19 @@ class Certificate < ApplicationRecord
       expiry_notifications.where("expiry_notifications.threshold > ?", urgency).delete_all
     end
 
-    # Only saves that attach files queue a conversion; Active Storage also touches the
-    # record when it analyzes each blob, and those commits must not queue it again.
-    def note_heic_files
+    # Only saves that attach files queue the shrink job, and only for the attachments they
+    # created (attach passes the files already there too). Active Storage also touches the
+    # record when it analyzes each blob, and the job swaps files itself: neither queues it again.
+    def note_new_files
       change = attachment_changes["files"]
-      @heic_files_attached ||= change.respond_to?(:blobs) && change.blobs.any? { |blob| HEIC_CONTENT_TYPES.include?(blob.content_type) }
+      return unless change.respond_to?(:attachments)
+
+      (@new_file_attachment_ids ||= []).concat(change.attachments.select(&:previously_new_record?).map(&:id))
     end
 
-    def convert_heic_files_later
-      return unless @heic_files_attached
-
-      @heic_files_attached = false
-      Certificates::ConvertHeicJob.perform_later(self)
+    def shrink_new_files_later
+      ids = @new_file_attachment_ids&.uniq
+      @new_file_attachment_ids = nil
+      Certificates::ShrinkFilesJob.perform_later(self, ids) if ids.present?
     end
 end

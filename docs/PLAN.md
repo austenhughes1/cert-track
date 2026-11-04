@@ -1,10 +1,10 @@
 # Certificate Tracking Service — Build Plan
 
-Nov 2, 2026 · @Austen Hughes
+Nov 2, 2026 (updated Nov 4, 2026) · @Austen Hughes
 
 ## Summary and how to use this plan
 
-Build **CertTrack** (working name), a Rails 8 app for ABA Ventures. It tracks crew certificates against per-project requirements, imports bulk uploads with AI, emails expiry warnings, and answers "does X have Y?". It runs at **$0/month** on free tiers, with one optional paid fallback that costs cents.
+Build **CertTrack** (working name), a Rails 8 app for ABA Ventures. It tracks crew certificates against per-project requirements, imports bulk uploads with AI, emails expiry warnings, and answers "does X have Y?". It runs at **$0/month** on free tiers while stored files stay under 10 GB. Past that, Cloudflare R2 bills cents per GB, which the owner accepted on Nov 4, 2026. The one other paid item is an optional AI fallback that costs cents.
 
 **In scope**
 
@@ -25,7 +25,7 @@ Build **CertTrack** (working name), a Rails 8 app for ABA Ventures. It tracks cr
 You are building CertTrack, specified in docs/PLAN.md. Read the whole file before doing anything.
 
 Rules:
-- Follow "Locked decisions" exactly. Do not substitute paid services, other frameworks or extra gems without asking me first. Free options are a hard requirement.
+- Follow "Locked decisions" exactly. Do not substitute paid services, other frameworks or extra gems without asking me first. Free options are a hard requirement. The one exception is R2 storage past 10 GB, which I accepted on Nov 4, 2026.
 - Work one phase at a time, in order, starting with Phase 0. Before coding a phase, restate its checklist and list open questions.
 - Write Minitest tests for every model, job and service object. A phase is done only when its acceptance criteria pass and bin/rails test is green.
 - Never send certificate files or personal data to any service not named in PLAN.md.
@@ -35,7 +35,7 @@ Rules:
 
 ## Locked decisions: stack and hosting
 
-Every layer runs on a free tier, so steady-state cost is **$0/month**. The only paid item is an AI fallback that stays off unless the free model proves inaccurate.
+Every layer runs on a free tier, so steady-state cost is **$0/month** while stored files stay under 10 GB. Past 10 GB, R2 bills $0.015/GB-month; the owner accepted that on Nov 4, 2026, rather than move files elsewhere. The only other paid item is an AI fallback that stays off unless the free model proves inaccurate.
 
 | Layer | Choice | Monthly cost | Notes |
 | --- | --- | --- | --- |
@@ -45,10 +45,10 @@ Every layer runs on a free tier, so steady-state cost is **$0/month**. The only 
 | Auth | Rails 8 authentication generator plus a `role` enum on `User` | $0 | No Devise needed |
 | Hosting | Oracle Cloud Always Free Ampere A1 VM: 2 OCPU, 12 GB RAM, ARM64, Ubuntu | $0 | 200 GB block storage, 10 TB egress/month ([Oracle](https://docs.oracle.com/en-us/iaas/Content/FreeTier/resourceref.htm)) |
 | Deploy | Kamal 2 with kamal-proxy (automatic Let's Encrypt TLS), arm64 images | $0 | Rails 8 default deploy tool |
-| File storage | Cloudflare R2 through the Active Storage S3 service | $0 under 10 GB | Free: 10 GB-month, 1M writes, 10M reads, no egress fees ([R2](https://developers.cloudflare.com/r2/pricing/)) |
-| Backups | Nightly `pg_dump` to a second R2 bucket, 14 kept | $0 | Lets a lost VM be rebuilt in under an hour |
-| Email | Resend free plan, sending from a verified subdomain such as `notify.abaventures.net` | $0 | 3,000/month, 100/day, 1 domain ([Resend](https://resend.com/pricing)) |
-| Text extraction | `poppler-utils` (`pdftotext`, `pdftoppm`) and Tesseract OCR in the Docker image | $0 | Runs locally; no data leaves the VM |
+| File storage | Cloudflare R2 through the Active Storage S3 service. Photos and scans are stored shrunk to 2400 px on the long side, JPEG quality 80; full-size originals are not kept | $0 under 10 GB, then $0.015/GB-month | Free: 10 GB-month, 1M writes, 10M reads, no egress fees ([R2](https://developers.cloudflare.com/r2/pricing/)). The owner accepted the overage past 10 GB on Nov 4, 2026; a Cloudflare budget alert warns of it |
+| Backups | Nightly `pg_dump` to a second R2 bucket, 14 kept. Nightly copy of the certificate files from R2 to the VM's own disk (`Backups::FileCopyJob`, 04:15); copies of deleted files are kept 30 days | $0 | The dumps let a lost VM be rebuilt in under an hour. The file copy covers a file deleted by mistake or a lost Cloudflare account |
+| Email | Google Workspace: the owner's existing account (`austen@abaventures.net`) over `smtp.gmail.com:587` with STARTTLS and an app password | $0 (existing subscription) | About 2,000 messages/day per account over a rolling 24 hours (500 on a trial account), shared with the owner's own mail. The app stops at `MAIL_DAILY_LIMIT` (1,000) a day ([Google](https://support.google.com/a/answer/166852)) |
+| Text extraction | `poppler-utils` (`pdftotext`, `pdftoppm`; `pdfimages` and `pdfinfo` for shrinking scans) and Tesseract OCR in the Docker image | $0 | Runs locally; no data leaves the VM |
 | AI (extraction, chat) | Cloudflare Workers AI free allocation via its OpenAI-compatible endpoint, called with the `ruby_llm` gem | $0 | 10,000 neurons/day; Cloudflare does not train on customer content ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/), [privacy](https://developers.cloudflare.com/workers-ai/privacy/)) |
 | AI paid fallback (off by default) | Claude Haiku 5.5 via `ruby_llm` | About $0.0005 per page | $0.10/M input, $0.50/M output under 100K-token prompts ([Anthropic](https://platform.claude.com/docs/en/docs/about-claude/pricing)) |
 | Archives and PDFs | `rubyzip` to unpack, `combine_pdf` to split multi-certificate PDFs | $0 | Both MIT licensed |
@@ -60,6 +60,8 @@ Every layer runs on a free tier, so steady-state cost is **$0/month**. The only 
 - **Render**: cheapest always-on setup is about $13/month (Starter web $7 plus Postgres $6). Its free web service sleeps and free Postgres expires after 30 days ([Render](https://render.com/articles/how-much-does-cloud-application-hosting-cost-for-small-businesses)).
 - **Gemini API free tier**: free and capable, but free-tier prompts and responses are used to improve Google products ([Google](https://ai.google.dev/gemini-api/docs/billing)). That rules it out for employee documents, which can include license numbers and dates of birth.
 - **Google Cloud e2-micro**: always free, but 1 GB RAM is too small for Rails, Postgres and OCR on one box. Keep as an emergency fallback only.
+- **Other file stores past 10 GB** (storage study, Nov 4, 2026): R2 Infrequent Access costs more until about 2 TB. Backblaze B2 saves under $1/month at 100 GB but adds a company this plan doesn't name to hold personal data. Oracle Object Storage costs more and shares the VM's account. Files on the VM's own disk would put every file on the machine most likely to disappear, so the disk holds only the second copy.
+- **Resend** for email (the first choice, never set up): 100 emails/day on the free plan. The owner's Google Workspace account sends more, costs nothing extra and needs only a DMARC record in DNS.
 
 **Oracle caveats Claude Code must handle**
 
@@ -77,8 +79,11 @@ Every layer runs on a free tier, so steady-state cost is **$0/month**. The only 
 | `SOLID_QUEUE_IN_PUMA` | `1` in production |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | R2 credentials |
 | `R2_BUCKET`, `R2_BACKUP_BUCKET` | Files bucket and backups bucket |
-| `RESEND_API_KEY`, `MAIL_FROM` | Outbound email |
-| `OFFICE_EMAIL` | Office inbox that crew expiry notices reply to, currently `austen@abaventures.net`. Not on the send-only `notify` subdomain |
+| `SMTP_USERNAME`, `SMTP_PASSWORD` | The Google Workspace account that sends (`austen@abaventures.net`) and its app password |
+| `MAIL_FROM` | Sender, `CertTrack <austen@abaventures.net>`. Must be `SMTP_USERNAME` or one of its Gmail "Send mail as" aliases, because Gmail rewrites any other From |
+| `MAIL_DAILY_LIMIT` | App emails per Denver day, default `1000`; a blank, zero, negative or non-numeric value means 1000 |
+| `SMTP_ADDRESS`, `SMTP_PORT` | Optional overrides, normally unset; defaults `smtp.gmail.com` and `587` |
+| `OFFICE_EMAIL` | Office inbox that crew expiry notices reply to, currently `austen@abaventures.net` (the same inbox that sends) |
 | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_AI_API_TOKEN` | Workers AI |
 | `AI_PROVIDER` | `workers_ai` (default), `ollama` or `anthropic`; `fake` for offline demos (tests always use it) |
 | `EXTRACTION_MODEL`, `EXTRACTION_VISION_MODEL` | Model IDs, chosen in the Phase 3 accuracy spike |
@@ -88,10 +93,11 @@ Every layer runs on a free tier, so steady-state cost is **$0/month**. The only 
 | `ANTHROPIC_API_KEY` | Optional; only for the paid fallback |
 | `ANTHROPIC_MODEL` | Optional; the fallback's model, default `claude-haiku-5-5` |
 | `OLLAMA_URL` | Optional; Ollama endpoint for `AI_PROVIDER=ollama`, default `http://localhost:11434/v1` |
+| `FILE_COPY_DIR` | Folder for the nightly copy of the certificate files, `/rails/file_copies` (a Kamal volume on the VM). Unset means file copies are off, as in development and test |
 
 ## Data model
 
-There are twelve tables. Certificates hang off crew members, requirements hang off projects, and import items stage AI results until they are accepted.
+There are thirteen tables. Certificates hang off crew members, requirements and packet builds hang off projects, and import items stage AI results until they are accepted.
 
 ```ruby
 # Schema sketch. Claude Code writes real migrations from this.
@@ -136,6 +142,8 @@ projects
   location       string
   starts_on, ends_on date
   status         integer  enum planned | active | closed
+  packet_built_at datetime nullable    # time of the latest packet build
+  # has_one_attached :packet   (latest zip only; deleted 7 days after it is built)
 
 project_requirements  # each project's subset of the master list
   project_id     ref      on_delete: :cascade
@@ -165,7 +173,7 @@ certificates          # one line item per earned certificate
   verified_at    datetime
   superseded_at  datetime nullable  # set when a newer cert of the same type is added
   notes          text
-  # has_many_attached :files
+  # has_many_attached :files   (photos and scans stored shrunk; see Implementation notes)
   # index [crew_member_id, certificate_type_id, superseded_at]
   # index [expires_on] where superseded_at is null
 
@@ -173,7 +181,7 @@ import_batches
   uploaded_by_id ref users
   status         integer  enum receiving | processing | needs_review | completed | failed
   files_count, items_count, accepted_count, review_count, error_count integer default 0
-  # has_many_attached :uploads   (raw files and zips as dropped)
+  # has_many_attached :uploads   (raw files and zips as dropped; deleted once unpacked)
 
 import_items          # one detected certificate (a file, or a page range of a PDF)
   import_batch_id ref     on_delete: :cascade
@@ -195,7 +203,17 @@ import_items          # one detected certificate (a file, or a page range of a P
   reviewed_by_id ref users nullable
   reviewed_at    datetime
   error_message  text
-  # has_one_attached :file
+  # has_one_attached :file   (until accepted: the certificate then holds the file; a failed
+  #                           item's file is deleted 30 days after it failed)
+
+packet_builds         # one per compliance packet built: the lasting record of what was sent
+  project_id     ref      on_delete: :cascade (Project has_many, dependent: :destroy)
+  built_by_id    ref users nullable, on_delete: :nullify   # who started it
+  built_at       datetime not null   # equals the time printed on index.pdf and packet_built_at
+  packet_filename string  not null   # the zip's name, e.g. "2417-packet-2026-11-04.zip"
+  certificate_count, file_count, gap_count integer default 0
+  # has_one_attached :index_pdf   ("<code>-packet-<date>-index.pdf", kept for good)
+  # index [project_id, built_at]
 
 expiry_notifications  # send log; prevents duplicates
   certificate_id ref      on_delete: :cascade
@@ -222,7 +240,7 @@ ai_usage_days
   - `expiring`: `expires_on` is within 30 days.
   - `lapses_on_project`: valid today but expires before the project's `ends_on`.
   - `valid`: everything else, including types that never expire.
-- **Dedupe.** Reject an import item whose `sha256` and page\_range pair already exists; mark it `duplicate` and link it to the original.
+- **Dedupe.** Reject an import item whose `sha256` and page\_range pair already exists; mark it `duplicate` and link it to the original. The `sha256` saved on the import row is of the file as uploaded, so a file is still recognized after its item lets go of it on accept, and after its stored copy is shrunk. Rejected items keep their files, because they stay the original for this check.
 - **Name normalization.** Compare names case-insensitively, without punctuation or middle initials, and check `name_aliases`. Accepting an import that matched on a variant spelling adds that spelling to `name_aliases`.
 
 ## Core features and screens
@@ -236,7 +254,7 @@ Nine screens cover the manual workflow. Everything here works without AI, so Pha
 | Certificate | nested under crew member | Add or edit a line item: type, number, issuer, completed and expires dates, notes. Drag-and-drop **multiple files per line item** (PDF, JPG, PNG, HEIC, WEBP; 25 MB max each) with thumbnail preview and download | admin, manager |
 | Master list | `/certificate_types` | CRUD for certificate types: aliases, validity months, issuing body, sort order | admin |
 | Projects | `/projects` | CRUD; a requirements editor that ticks types from the master list, each optionally limited to one role; "copy requirements from project"; crew assignments with role | admin, manager |
-| Compliance matrix | `/projects/:id/compliance` | Rows are assigned crew, columns are required types, cells are colored by status with the expiry date. Click a cell to open the certificate. Export CSV. **Download packet**: a zip of every current certificate file for the project's crew plus an index PDF | n/a |
+| Compliance matrix | `/projects/:id/compliance` | Rows are assigned crew, columns are required types, cells are colored by status with the expiry date. Click a cell to open the certificate. Export CSV. **Download packet**: a zip of every current certificate file for the project's crew plus an index PDF. The zip is kept 7 days; each build's index PDF is kept for good under "Past builds" | n/a |
 | Imports | `/imports` | Drop zone for many files or zips, live batch progress, review queue | admin, manager |
 | Ask and Chat | `/ask`, `/chat` | See the AI chatbot section | n/a (all roles can ask) |
 | Users | `/users` | Invite users, set roles, toggle digest emails | admin |
@@ -244,7 +262,15 @@ Nine screens cover the manual workflow. Everything here works without AI, so Pha
 **Implementation notes**
 
 - Use Active Storage direct uploads to R2. Configure CORS on the bucket for `https://certs.abaventures.net` (PUT from the browser).
-- Generate thumbnails with `image_processing` and libvips. Convert HEIC phone photos to JPEG on upload so every browser can show them.
+- Generate thumbnails with `image_processing` and libvips. A PDF's thumbnail comes from `PdfThumbnailPreviewer` (`config/initializers/active_storage_previewers.rb`): its first page as a 320 px JPEG at quality 80 from `pdftoppm`, about 3-5 KB instead of Poppler's 27-236 KB full-page PNG. 320 px is twice the largest PDF image the app shows (the 160 px thumbnail); raise `PREVIEW_SIZE` before showing a bigger one.
+- Store photos and scans shrunk; the full-size original is not kept (owner's decision, Nov 4, 2026). After any save that attaches files, `Certificates::ShrinkFilesJob` (imports queue) handles the attachments that save created:
+  - Images (JPEG, PNG, WEBP, HEIC, HEIF) become a JPEG that fits in 2400 × 2400 px and is never enlarged. EXIF orientation is applied, colours are converted to sRGB, transparency is flattened onto white, and the JPEG is saved at quality 80 with all metadata stripped, GPS included. The name keeps its base with a `.jpg` extension.
+  - HEIC and HEIF are always converted, so every browser can show them. So is any image carrying EXIF, XMP or IPTC metadata (a phone photo's GPS location, time and phone model), even when the JPEG isn't smaller, so no certificate photo is stored with it. Any other image is replaced only when the JPEG is under 80% of its size.
+  - Scanned PDFs: each page image drawn above 220 ppi is re-encoded in place at 200 ppi, quality 80. Pages, the text layer, fonts, outlines, metadata, tags and page labels are kept. The result must have the same page count and `pdftotext` output, every page must render and match the original, and it must be under 80% of the original's size. PDFs made on a computer have no big images and stay as they are.
+  - Left alone: encrypted or signed PDFs, and PDFs with forms, layers, attached files or scripts; CMYK and other unusual page images. A file that can't be read is kept as it is.
+  - The new file is marked (`shrunk` in its metadata) so it is never processed twice.
+  - Measured on generated samples: a phone JPEG keeps 8-15% of its size, a HEIC 13-32%, a PNG 1-6%, and a 300 dpi scanned PDF page 19-21% (1.1 MB becomes about 0.2 MB). OCR still read every name, date and number of 8 pt and up. Re-run the check on real samples once there are some.
+- Packets: every build records a `PacketBuild` with who started it, when, its counts and a copy of its `index.pdf`. Only the latest zip is stored. It is kept through the 7th day after the day it was built, whatever the time (`Project::PACKET_KEPT_FOR`; the packet page shows that date), and the 03:50 `Maintenance::PurgeOldPacketsJob` deletes it the next morning. The packet page then says the zip expired and offers Rebuild; its "Past builds" table lists every build, newest first, with an index PDF download. Every signed-in role may build packets and download them. A project with past builds can't be deleted, only closed.
 - Name files in the packet `Last_First - CODE - exp YYYY-MM-DD.ext` so a prime contractor's reviewer can scan them.
 - Compute compliance in one query per project (join assignments, requirements and current certificates) rather than per cell. Matrix pages must render in under 500 ms for 50 crew × 15 types.
 - Viewers are read-only. Enforce roles with a small `authorize!` helper in controllers; no extra gem.
@@ -260,15 +286,15 @@ Free local OCR reads every file first. A free model then turns the text into JSO
 **Steps (one job per step, all on Solid Queue)**
 
 1. **Intake.** `POST /imports` takes many files via direct upload: PDF, JPG, JPEG, PNG, HEIC, WEBP and ZIP, up to 500 MB per batch. Create an `ImportBatch` and enqueue `Imports::ExpandJob`.
-2. **Expand.** Unzip with `rubyzip` into `Dir.mktmpdir`, recursing into nested zips two levels deep. Skip `__MACOSX`, `.DS_Store`, `Thumbs.db` and hidden files. Reject entries with `..` or absolute paths. Stop at 2,000 entries or 2 GB uncompressed (zip-bomb guard). Each supported file is a candidate; hash it with SHA-256.
+2. **Expand.** Unzip with `rubyzip` into `Dir.mktmpdir`, recursing into nested zips two levels deep. Skip `__MACOSX`, `.DS_Store`, `Thumbs.db` and hidden files. Reject entries with `..` or absolute paths. Stop at 2,000 entries or 2 GB uncompressed (zip-bomb guard). Each supported file is a candidate; hash it with SHA-256. Once every upload is unpacked, the uploads themselves are deleted; a file uploaded on its own (not in a zip) stays, as its item's file. If unpacking stops on an unexpected error, the uploads are kept for the redo, and the nightly purge deletes them 30 days after the drop.
 3. **Extract text (free, local).** For PDFs run `pdftotext -layout` per page. If a page yields fewer than 40 characters, it is a scan: rasterize with `pdftoppm -r 300` and run `tesseract`. For images, auto-rotate and convert to grayscale with libvips, then run `tesseract`. Store the text in `extracted_text` with `=== page N ===` markers.
 4. **AI extraction (free model).** Send the page text, the master list (code, name, aliases) and the JSON schema below. Use `EXTRACTION_MODEL` through `ruby_llm` with structured output. If OCR text is unusable, send the page image (long side 1,568 px or less) to `EXTRACTION_VISION_MODEL` instead. A blank page needs no call. Without a vision model, unreadable pages are skipped and named in the certificate's notes. Usually one call per source file returns every certificate in it, with page numbers. A file with more than 24,000 characters of text takes one call per 24,000 characters, never splitting a page. Unreadable pages go in extra vision calls, as many images per call as the model accepts. The replies are merged.
-5. **Split.** For each certificate returned, create an `ImportItem`. Multi-page PDFs are split by page range with `combine_pdf`, and the split file is attached to the item.
+5. **Split.** For each certificate returned, create an `ImportItem`. Multi-page PDFs are split by page range with `combine_pdf`, and the split file is attached to the item. The whole PDF is not kept once its pages are split out.
 6. **Match type (Ruby).** Accept `certificate_type_code` only if it exists in the master list. Otherwise fuzzy-match `certificate_name_as_printed` against names and aliases with `pg_trgm`; similarity of 0.45 or more is a suggestion, not a match.
 7. **Match person (Ruby).** Normalize the holder name and compare against crew full names and `name_aliases` with `pg_trgm`. An exact normalized match is a match. Otherwise the best candidate at 0.6 or more, beating the runner-up by at least 0.15, becomes a suggestion. No candidate means review offers "create crew member".
 8. **Dates.** Parse ISO dates. Reject `completed_on` in the future and `expires_on` before `completed_on`. If `expires_on` is null and the type has `validity_months`, compute it and mark `computed`.
 9. **Decide.** Auto-accept only when all hold: type matched by code, person matched exactly, `completed_on` present, expiry present or type never expires, model confidence 0.85 or more, and `AUTO_ACCEPT_ENABLED` is on. Everything else goes to `needs_review`. Ship with `AUTO_ACCEPT_ENABLED=false` until the owner has reviewed about 100 items and trusts the output.
-10. **Review queue.** File preview on the left, editable proposed fields on the right: person picker showing suggestions, type picker, dates, number. Actions are Accept, Reject, Skip and "Create crew member from this", with keyboard shortcuts (`a`, `r`, `s`). Accepting creates the `Certificate`, attaches the file and sets `verified_by`. If two items share person, type and number (front and back photos of one card), offer to merge them into one certificate with two files.
+10. **Review queue.** File preview on the left, editable proposed fields on the right: person picker showing suggestions, type picker, dates, number. Actions are Accept, Reject, Skip and "Create crew member from this", with keyboard shortcuts (`a`, `r`, `s`). HEIC/HEIF photos are previewed as a JPEG (2000 px max, quality 80). Accepting creates the `Certificate`, moves the file to it (the import item no longer links to it, and import pages link to the certificate instead) and sets `verified_by`. If two items share person, type and number (front and back photos of one card), offer to merge them into one certificate with two files.
 11. **Finish.** When every item is terminal, set the batch status and email the uploader a summary: accepted, needs review, duplicates, failed.
 
 **Model output contract**
@@ -330,9 +356,11 @@ A daily job at 6:00 a.m. Mountain time emails one digest per manager whenever a 
 
 **Delivery**
 
-- Use Action Mailer over Resend SMTP; no extra gem.
-- Send from a verified subdomain such as `notify.abaventures.net`. Adding Resend's SPF and DKIM records there leaves the main domain's existing email setup alone.
-- The free plan caps sending at 100 emails/day. Count sends in the job. Past 90 in one day, defer the rest to the next run and show a banner on the dashboard. The digest design keeps normal volume to a few emails a day.
+- Use Action Mailer over the office's Google Workspace SMTP (`smtp.gmail.com:587`, STARTTLS required, an app password); no extra gem. It replaced Resend on Nov 4, 2026, before Resend was ever set up.
+- Send from the Workspace account itself: `MAIL_FROM` is `SMTP_USERNAME` or one of its Gmail "Send mail as" aliases, because Gmail rewrites any other From. Every app email lands in that account's Sent folder, and bounces arrive in its inbox.
+- Gmail allows about 2,000 emails a day per account over a rolling 24 hours (500 on a trial account), shared with the owner's own mail. Count sends in the job and stop at `MAIL_DAILY_LIMIT` (default 1,000) per Denver day. Past it, defer the rest to the next run and show a banner on the dashboard.
+- Invites and password resets aren't counted; the other ~1,000 covers them and the owner's own mail. Invites are never held back. Resets are, so a script posting the "Forgot password" form can't use up the account: one reset email per user every 15 minutes (the link's lifetime), at most 4 a day per user, and at most 100 a day in all (`PasswordsController`). The per-user cap stops someone who knows one address from using up everyone's resets. A held-back request gets the same answer as any other. Because Gmail's window is rolling, two full app days back to back could put up to 2,000 sends inside 24 hours; lower `MAIL_DAILY_LIMIT` for a hard margin.
+- The digest design keeps normal volume to a few emails a day.
 - Add Rails mailer previews for every email, and a "Send test digest to me" button on the Users page.
 
 ## AI chatbot: options and design
@@ -379,13 +407,13 @@ The Haiku estimate assumes two model round trips of about 4,000 input tokens and
 
 ## Cost estimate
 
-Expected running cost is **$0/month**, assuming up to 100 crew members with about 15 certificates each and files averaging 2 MB (about 3 GB stored).
+Expected running cost is **$0/month**, assuming up to 100 crew members with about 15 certificates each and files averaging 2 MB as uploaded (3 GB). Stored shrunk and without extra copies, that comes to about 0.5-0.7 GB if most files are photos or scans, and up to about 3 GB if most are PDFs made on a computer, which don't shrink. These sizes come from generated samples (storage study, Nov 4, 2026).
 
 | Item | Free allowance | Expected use | Monthly cost |
 | --- | --- | --- | --- |
-| Oracle A1 VM (app, Postgres, OCR) | 2 OCPU, 12 GB RAM, 200 GB disk | One VM | $0 |
-| Cloudflare R2 (files, backups) | 10 GB-month | About 3 GB of files, under 1 GB of backups | $0; $0.015/GB-month beyond 10 GB |
-| Resend email | 3,000/month, 100/day | 30 to 150/month | $0 |
+| Oracle A1 VM (app, Postgres, OCR, the nightly file copy) | 2 OCPU, 12 GB RAM, 200 GB disk | One VM, 100 GB boot volume | $0 |
+| Cloudflare R2 (files, backups) | 10 GB-month | About 0.5-3 GB of files, under 1 GB of backups | $0; beyond 10 GB $0.015/GB-month, e.g. about $1.37/month at 100 GB (accepted by the owner Nov 4, 2026) |
+| Google Workspace email | About 2,000/day per account, shared with the owner's own mail | 30 to 150/month | $0 (existing subscription) |
 | Workers AI (imports, chat) | 10,000 neurons/day | A few uploads and questions a day | $0 |
 | Domain | Already owned | One subdomain | $0 |
 | Optional: Haiku 5.5 for a one-time backlog | n/a | 2,000 pages | About $1, once |
@@ -402,8 +430,9 @@ There are six phases, each shippable on its own: the tracker is useful after Pha
 Owner, by hand:
 
 - [ ] Create an Oracle Cloud account with a US West home region. Create one A1 VM (2 OCPU, 12 GB, Ubuntu 24.04 LTS, 100 GB boot volume) and upgrade the tenancy to Pay As You Go. Open ports 80 and 443 in the security list.
-- [ ] Create a Cloudflare account, R2 buckets `certtrack-files` and `certtrack-backups`, an R2 API token, and a Workers AI API token. Note the account ID.
-- [ ] Create a Resend account, verify `notify.abaventures.net` and create an API key.
+- [ ] Create a Cloudflare account, R2 buckets `certtrack-files` and `certtrack-backups`, an R2 API token, and a Workers AI API token. Note the account ID. Add a Cloudflare budget alert so R2 spend past the free 10 GB is never a surprise.
+- [ ] Turn on 2-Step Verification for the sending Workspace account (`austen@abaventures.net`), create a CertTrack app password, publish a DMARC record for abaventures.net (it has none; `docs/DEPLOY.md` section 5, step 10), and after the first deploy confirm SPF, DKIM and DMARC pass for abaventures.net.
+- [ ] On the VM, before the first deploy, create the folder for the nightly file copy (`docs/DEPLOY.md`, "File copies").
 - [ ] Add a DNS A record pointing `certs.abaventures.net` at the VM's public IP.
 
 Claude Code:
@@ -424,10 +453,10 @@ Status (Nov 2, 2026): code complete; the app lives in the `cert-track` repo (Rai
 
 - [x] Migrations, models, validations and the model rules from the Data model section.
 - [x] Crew CRUD with trigram search and filters.
-- [x] Certificate line items with multiple attached files: direct upload to R2, HEIC to JPEG, thumbnails.
+- [x] Certificate line items with multiple attached files: direct upload to R2, photos and scans stored shrunk (2400 px JPEG at quality 80; scanned PDF pages at 200 ppi), thumbnails.
 - [x] Master list CRUD with aliases; seed the example list.
 - [x] Projects, requirements editor with optional role, "copy requirements", assignments.
-- [x] `Compliance::ProjectReport` service, matrix view, CSV export, packet zip built in a background job.
+- [x] `Compliance::ProjectReport` service, matrix view, CSV export, packet zip built in a background job (zip kept 7 days; each build's record and index PDF kept for good).
 - [x] Dashboard and role-based authorization.
 
 Done when: a project with 5 required types (one role-specific) and 3 assigned people shows correct `missing`, `expired`, `expiring`, `lapses_on_project` and `valid` cells; the packet zip holds the right files with the naming convention; a viewer gets a 403 on every write action.
@@ -436,12 +465,12 @@ Status (Nov 2, 2026): met in tests (`test/services/compliance/`, packet tests, `
 
 ### Phase 2: Expiration emails
 
-- [x] Action Mailer over Resend SMTP, digest and weekly mailers with previews.
-- [x] `Notifications::ExpiryScanJob` in `config/recurring.yml`, the send log, crew opt-in, 90/day cap, "send test digest" button.
+- [x] Action Mailer over Google Workspace SMTP (Resend until Nov 4, 2026), digest and weekly mailers with previews.
+- [x] `Notifications::ExpiryScanJob` in `config/recurring.yml`, the send log, crew opt-in, daily email cap (`MAIL_DAILY_LIMIT`, default 1,000), "send test digest" button.
 
 Done when: tests using `travel_to` show each threshold fires exactly once, a same-day re-run sends nothing, a missed week sends only the most urgent threshold, and a real digest arrives passing SPF and DKIM.
 
-Status (Nov 2, 2026): every `travel_to` criterion passes in `test/jobs/notifications/`. Still open: the real Resend delivery with SPF and DKIM, which waits on the `notify.abaventures.net` verification.
+Status (Nov 2, 2026): every `travel_to` criterion passes in `test/jobs/notifications/`. Still open (updated Nov 4, 2026): a real digest sent through Gmail with SPF, DKIM and DMARC passing for abaventures.net, which waits on the app password.
 
 ### Phase 3: Bulk import
 
@@ -463,7 +492,7 @@ Status (Nov 3, 2026): everything except the model spike is met in tests, using t
 `test/jobs/imports/ai_extract_job_test.rb` covers the 00:05 UTC reschedule. Since the first pass, these were added:
 - a "Read again" action (`Imports::Reread`);
 - a separate `imports` job queue, so backups and expiry emails never wait behind an import;
-- import summaries now count toward the 90/day email cap.
+- import summaries now count toward the daily email cap.
 
 Still open:
 - The spike. The harness (`bin/rails certtrack:eval_extraction`, `docs/IMPORT_SPIKE.md`) is built. Comparing models and the 90% accuracy check wait on real samples in `test/fixtures/import_samples/` and a Workers AI token.
@@ -492,6 +521,33 @@ The Ask box uses no AI. 4b is not started.
 - [ ] Error emails to admins via a `Rails.error` subscriber, plus a free uptime monitor on `/up`.
 - [ ] A written restore drill, rehearsed once.
 
+### Storage and email changes (Nov 4, 2026)
+
+A storage study found that most stored bytes were copies nothing read: a zipped iPhone photo was stored 4 to 5 times, and every packet added a full copy of its files for good. The owner decided the points below on Nov 4, 2026. Nothing was deployed yet, so no data needed moving.
+
+Owner decisions:
+
+- [x] Stay on R2 and pay its overage past 10 GB ($0.015/GB-month), with a Cloudflare budget alert (`docs/DEPLOY.md`, section 3).
+- [x] Delete packet zips 7 days after they are built, and keep each build's index PDF as the record of what was sent (`PacketBuild`, `Maintenance::PurgeOldPacketsJob` at 03:50).
+- [x] Store photos and scans shrunk to 2400 px, JPEG quality 80, without the full-size original (`Certificates::ShrinkFilesJob`, which replaces the HEIC-only `ConvertHeicJob`).
+- [x] Copy the certificate files from R2 to the VM's own disk every night, and keep copies of deleted files 30 days (`Backups::FileCopyJob` at 04:15; `certtrack:copy_files_now`, `certtrack:file_copy_status` and `certtrack:restore_files`; a dashboard banner for admins).
+- [x] Send email through the owner's Google Workspace account instead of Resend (`smtp.gmail.com:587`, an app password, `MAIL_DAILY_LIMIT` 1,000).
+- [x] Rejected import items keep their files: they stay the original for duplicate detection, and "Read again" can undo a wrong rejection. Only failed items' files are deleted, 30 days after they failed.
+
+Fixes that needed no decision:
+
+- [x] Raw uploads are deleted once unpacked.
+- [x] Accepting an import moves its file to the certificate. Deleting the certificate, or removing one of its files, now deletes the stored file, and no copy stays behind on the import pages.
+- [x] HEIC review previews are stored as a JPEG at quality 80 instead of a 2-4 MB PNG.
+- [x] PDF thumbnails come from a 320 px JPEG instead of a full-page PNG.
+
+The plan's volume (1,500 certificates at 2 MB) should now take about 0.5-0.7 GB instead of 11-13 GB, judging from generated samples. `test/integration/certificate_storage_lifecycle_test.rb` follows one zip (an iPhone HEIC photo and a scanned PDF) from the drop zone through review, shrinking, the nightly copy, a packet and its purge, to deletion.
+
+Still open:
+
+- Run the shrink legibility check on real samples once `test/fixtures/import_samples/` has some, since a shrunk file replaces its original for good.
+- After the first deploy, open a PDF thumbnail and a shrunk photo. The production image has older libvips and poppler than the dev machine.
+
 ## Risks, security and open questions
 
 The biggest risk of the $0 design is that free tiers can change or be withdrawn. Every free dependency therefore has a backup or a paid fallback that costs cents to $13/month.
@@ -502,15 +558,21 @@ The biggest risk of the $0 design is that free tiers can change or be withdrawn.
 | Free AI allocation too small for the first backlog | Imports take days | Automatic rescheduling; optional one-time Haiku run for about $1 |
 | Free model misreads a name or date | Wrong compliance data | Auto-accept off by default, review queue, accuracy harness |
 | Workers AI retires a model | Extraction or chat errors | Model IDs live in env vars; re-run the eval tasks and swap |
-| Resend's 100/day cap | Some emails a day late | Digest design and the 90/day guard |
+| Gmail's per-account limit (about 2,000/day, shared with the owner's mail) | Some emails a day late; if the account hits Gmail's limit, the owner's own mail is refused too | `MAIL_DAILY_LIMIT` 1,000 leaves about half for the owner; the digest design |
+| Stored files grow past R2's free 10 GB | R2 bills $0.015/GB-month, about $1.37/month at 100 GB | Photos and scans stored shrunk, packet zips deleted after 7 days, a Cloudflare budget alert; the owner accepted the cost on Nov 4, 2026 |
+| Files deleted from R2 by mistake, or the Cloudflare account lost | Certificate files gone | The nightly copy on the VM's disk; `certtrack:restore_files` puts files back; copies of deleted files are kept 30 days, findable by name for 14 (while a database backup from before the delete is kept) |
 | Single VM, no redundancy | Downtime during outages | Acceptable for an internal tool; uptime alerts |
 
 **Security and privacy (required, not optional)**
 
 - Certificates carry personal data, and CDL cards can show license numbers and dates of birth. Keep both R2 buckets private. Serve files only through authenticated Rails endpoints with signed URLs that expire within 5 minutes.
 - Encrypt `certificate_number` with Active Record encryption (`encrypts`). Purge `extracted_text` and `extraction` 30 days after an item is accepted, rejected, failed or marked duplicate (items still waiting for review keep theirs).
+- Import files: raw uploads are deleted once unpacked and never kept more than 30 days. A failed item's file is deleted 30 days after it failed. Rejected items keep their files, as the original for duplicate detection. An accepted file belongs only to its certificate, so deleting the certificate, or removing one of its files, deletes the stored file. `Maintenance::PurgeImportExtractionsJob` (nightly, 03:45) does all of this: first the failed items' files, then any uploads still kept, then the extracted text.
+- Certificate photos are stored without their EXIF, XMP and IPTC metadata, GPS location included (`Certificates::ShrinkFilesJob`). Two exceptions: a file libvips can't read is kept as it is, and a scanned PDF's page images keep whatever they hold. Import files are stored as uploaded, metadata included, until they are accepted: items waiting for review, rejected items (kept for good) and failed items (30 days). Only editors can open them. The nightly VM copy holds them too, and keeps its copy of a photo replaced on acceptance in its trash for 30 days.
+- Packet zips hold full copies of the crew's files, so they live at most 8 days and 4 hours: through the 7th day after the build day, then the 03:50 purge. Index PDFs hold crew names, certificate numbers and dates, and are kept for good as the record of what was sent (owner's decision, Nov 4, 2026). They go only with their project, and a project with past builds can't be deleted.
+- The nightly file copies on the VM are plain files that only the app's user and root can read (files 0600, folders 0700), on the same machine as the database. They are not encrypted.
 - Encrypt database dumps with a key from Rails credentials before uploading them to R2.
-- Data leaves the VM only to Cloudflare (storage and Workers AI), Resend (email) and, if switched on, Anthropic. Nothing else.
+- Data leaves the VM only to Cloudflare (storage and Workers AI), Google (email content, through the owner's Workspace account) and, if switched on, Anthropic. Nothing else.
 - Invite-only accounts with no public sign-up, `force_ssl`, and the generator's built-in rate limit on sign-in.
 
 **Open questions for the owner**
@@ -523,7 +585,7 @@ The biggest risk of the $0 design is that free tiers can change or be withdrawn.
 
 ## Sources
 
-Prices and limits checked November 2, 2026.
+Prices and limits checked November 2, 2026; R2, Cloudflare billing and Google Workspace entries checked November 4, 2026.
 
 - [Oracle Cloud Always Free resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/resourceref.htm): A1 allowance, block storage, egress, idle reclamation
 - [InfoQ: Oracle cuts Always Free A1 allowance](https://infoq.com/news/2026/07/oracle-cloud-free-tier-limits/)
@@ -531,7 +593,9 @@ Prices and limits checked November 2, 2026.
 - [Cloudflare Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)
 - [Cloudflare Workers AI data usage](https://developers.cloudflare.com/workers-ai/privacy/)
 - [Cloudflare Workers AI OpenAI-compatible endpoints](https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility)
-- [Resend pricing](https://resend.com/pricing) and [Resend free tier announcement](https://resend.com/blog/new-free-tier)
+- [Cloudflare budget alerts](https://developers.cloudflare.com/billing/manage/budget-alerts/): email when usage-based spend crosses a dollar threshold; no cap
+- [Gmail sending limits in Google Workspace](https://support.google.com/a/answer/166852): 2,000 messages/day per user (500 on trials), over a rolling 24 hours
+- [Google: sign in with app passwords](https://support.google.com/accounts/answer/185833): needs 2-Step Verification; revoked when the account password changes
 - [Claude API pricing](https://platform.claude.com/docs/en/docs/about-claude/pricing): Haiku 5.5 rates
 - [Claude PDF support](https://platform.claude.com/docs/build-with-claude/pdf-support): 1,500 to 3,000 tokens per page
 - [Gemini API billing](https://ai.google.dev/gemini-api/docs/billing): free-tier data use

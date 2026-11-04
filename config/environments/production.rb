@@ -59,15 +59,20 @@ Rails.application.configure do
   # Set host to be used by links generated in mailer templates.
   config.action_mailer.default_url_options = { host: ENV.fetch("APP_HOST", "certs.abaventures.net"), protocol: "https" }
 
-  # Outbound email via Resend SMTP; the API key is the password. Sender is MAIL_FROM (ApplicationMailer).
+  # Outbound email through the office's Google Workspace account: smtp.gmail.com:587 with
+  # STARTTLS required, so the password never goes out unencrypted. SMTP_USERNAME is the account
+  # and SMTP_PASSWORD an app password for it. Sender is MAIL_FROM (ApplicationMailer); the daily
+  # cap is Notifications::SendBudget. SMTP_ADDRESS and SMTP_PORT are overrides, unset normally.
   config.action_mailer.delivery_method = :smtp
   config.action_mailer.smtp_settings = {
-    address: "smtp.resend.com",
-    port: 587,
-    user_name: "resend",
-    password: ENV["RESEND_API_KEY"],
+    address: ENV.fetch("SMTP_ADDRESS", "smtp.gmail.com"),
+    port: Integer(ENV.fetch("SMTP_PORT", 587)),
+    user_name: ENV["SMTP_USERNAME"],
+    password: ENV["SMTP_PASSWORD"],
     authentication: :plain,
-    enable_starttls_auto: true
+    enable_starttls: true,
+    open_timeout: 5,
+    read_timeout: 15
   }
 
   # Enable locale fallbacks for I18n (makes lookups for any locale fall back to

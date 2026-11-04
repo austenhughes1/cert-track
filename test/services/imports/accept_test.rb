@@ -11,6 +11,7 @@ class Imports::AcceptTest < ActiveSupport::TestCase
 
   test "creates a verified import certificate from the item's proposals and file" do
     item = review_item(type: certificate_types(:flagger), holder_name_raw: "Juan Ortiz")
+    blob = item.file.blob
 
     certificate = nil
     freeze_time do
@@ -26,7 +27,7 @@ class Imports::AcceptTest < ActiveSupport::TestCase
     assert_equal [ item.proposed_completed_on, "30-9990001", "Example Safety Training LLC" ],
       [ certificate.completed_on, certificate.certificate_number, certificate.issued_by ]
     assert_equal users(:manager), certificate.verified_by
-    assert_equal [ item.file.blob ], certificate.files.blobs.to_a
+    assert_equal [ blob ], certificate.files.blobs.to_a
 
     assert item.accepted?
     assert_equal certificate, item.certificate
@@ -393,17 +394,94 @@ class Imports::AcceptTest < ActiveSupport::TestCase
     assert batch.reload.processing?
   end
 
-  test "accepts a HEIC photo; the certificate gets the same blob" do
+  test "the certificate takes over the item's file: the item lets go of it, the stored file stays" do
     item = review_item
-    item.file.attach(io: file_fixture("certificate.heic").open, filename: "IMG_1.heic", content_type: "image/heic")
+    blob = item.file.blob
 
     certificate = accept(item)
 
-    assert_equal [ "image/heic" ], certificate.files.blobs.map(&:content_type)
-    assert_enqueued_with(job: Certificates::ConvertHeicJob, args: [ certificate ])
+    assert_not item.file.attached?
+    assert_not item.reload.file.attached?
+    assert_equal [ certificate ], ActiveStorage::Attachment.where(blob_id: blob.id).map(&:record)
+    assert_equal file_fixture("certificate.jpg").binread, certificate.files.sole.download
+  end
+
+  test "deleting an accepted certificate deletes its stored file" do
+    item = review_item(import_batch: finished_batch)
+    blob = item.file.blob
+    certificate = accept(item)
+
+    perform_enqueued_jobs { certificate.destroy! }
+
+    assert_deleted_from_storage blob
+    assert item.reload.accepted?
+    assert_nil item.certificate
+    assert_not item.file.attached?
+  end
+
+  test "removing one file from a merged certificate deletes that stored file only" do
+    front = review_item(import_batch: finished_batch)
+    back = review_item(import_batch: finished_batch, original_filename: "back.png",
+      file: { io: StringIO.new(file_fixture("certificate.png").binread), filename: "back.png", content_type: "image/png" })
+    front_blob, back_blob = front.file.blob, back.file.blob
+    certificate = Imports::Merge.new(front, others: [ back ], user: users(:manager)).call
+
+    perform_enqueued_jobs { certificate.files_attachments.find_by!(blob: back_blob).purge_later }
+
+    assert_deleted_from_storage back_blob
+    assert_equal [ front_blob ], certificate.reload.files.blobs.to_a
+    assert [ front, back ].none? { |merged| merged.reload.file.attached? }
+  end
+
+  test "one photo holding two certificates: each accepted item lets go of its own link only" do
+    photo = review_item(import_batch: finished_batch)
+    blob = photo.file.blob
+    sibling = review_item(import_batch: finished_batch, type: certificate_types(:flagger), sha256: photo.sha256, source_item: photo, file: blob)
+
+    first = accept(photo)
+
+    assert_not photo.reload.file.attached?
+    assert_equal blob, sibling.reload.file.blob, "the sibling still waiting for review keeps the photo"
+    perform_enqueued_jobs { first.destroy! }
+    assert ActiveStorage::Blob.exists?(blob.id), "kept while the sibling still needs it"
+    assert_equal file_fixture("certificate.jpg").binread, sibling.reload.file.download
+
+    second = accept(sibling)
+    assert_equal [ blob ], second.files.blobs.to_a
+    perform_enqueued_jobs { second.destroy! }
+    assert_deleted_from_storage blob
+  end
+
+  test "an accepted HEIC photo leaves no copy behind once its certificate's files are processed" do
+    skip_unless_heif_supported
+    item = review_item(import_batch: finished_batch, original_filename: "IMG_0042.HEIC",
+      file: { io: file_fixture("certificate.heic").open, filename: "IMG_0042.HEIC", content_type: "image/heic" })
+    heic = item.file.blob
+
+    certificate = perform_enqueued_jobs { accept(item) }
+
+    assert_deleted_from_storage heic
+    files = certificate.reload.files.blobs.to_a
+    assert_equal [ "image/jpeg" ], files.map(&:content_type)
+    assert_equal files, ActiveStorage::Blob.all.to_a, "the certificate's files are the only ones stored"
   end
 
   private
+    # A batch whose summary was already sent, so accepting its last item sends no email.
+    def finished_batch
+      @finished_batch ||= ImportBatch.create!(uploaded_by: users(:manager), status: :needs_review, summary_sent_at: 1.hour.ago)
+    end
+
+    # The blob row and the stored file are both gone.
+    def assert_deleted_from_storage(blob)
+      assert_not ActiveStorage::Blob.exists?(blob.id), "#{blob.filename}: blob row kept"
+      assert_not blob.service.exist?(blob.key), "#{blob.filename}: stored file kept"
+    end
+
+    def skip_unless_heif_supported
+      skip "libvips #{Vips.version_string} has no HEIF loader" if Vips.type_find("VipsOperation", "heifload").zero?
+    end
+
     # A flagger card as ProcessExtractionJob leaves it when the expiry text wasn't a date:
     # no proposed expiry, the raw text kept under "unreadable".
     def unreadable_expiry_item(text, type: certificate_types(:flagger), **attrs)

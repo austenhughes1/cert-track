@@ -25,6 +25,11 @@ module Backups
       "#{PREFIX}cert_track-#{time.utc.strftime("%Y%m%dT%H%M%SZ")}.sql.gz.enc"
     end
 
+    # When the backup with key was taken, in the app's time zone; nil for a key not made by key_for.
+    def self.taken_at(key)
+      ActiveSupport::TimeZone["UTC"].strptime(key[/\d{8}T\d{6}/], "%Y%m%dT%H%M%S").in_time_zone if KEY_PATTERN.match?(key.to_s)
+    end
+
     attr_reader :bucket, :client
 
     def initialize(client: nil, bucket: ENV.fetch("R2_BACKUP_BUCKET"))

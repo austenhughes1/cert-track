@@ -66,4 +66,37 @@ class ProjectTest < ActiveSupport::TestCase
     project.packet.attach(io: StringIO.new("zip"), filename: "packet.zip", content_type: "application/zip")
     assert project.packet.attached?
   end
+
+  test "packet_kept_until is the last day the current zip is kept" do
+    project = projects(:tower_2417)
+    assert_nil project.packet_kept_until
+
+    built_at = Time.zone.local(2026, 11, 4, 15, 30)
+    project.update!(packet_built_at: built_at,
+      packet: { io: StringIO.new("zip"), filename: "packet.zip", content_type: "application/zip" })
+
+    assert_equal Date.new(2026, 11, 11), project.packet_kept_until
+
+    project.update!(packet_built_at: Time.zone.local(2026, 11, 4, 2, 0)) # before the 03:50 purge
+    assert_equal Date.new(2026, 11, 11), project.packet_kept_until
+  end
+
+  test "packet_purge_cutoff is the start of the day after the last kept day, in Denver" do
+    assert_equal Time.zone.local(2026, 11, 4), Project.packet_purge_cutoff(Time.zone.local(2026, 11, 11, 3, 50))
+    assert_equal Time.zone.local(2026, 11, 5), Project.packet_purge_cutoff(Time.zone.local(2026, 11, 12, 0, 1))
+    assert_equal "America/Denver", Project.packet_purge_cutoff.time_zone.name
+  end
+
+  test "packet_expired? once a built packet's zip is gone" do
+    project = projects(:tower_2417)
+    assert_not project.packet_expired?, "never built"
+
+    project.update!(packet_built_at: 8.days.ago,
+      packet: { io: StringIO.new("zip"), filename: "packet.zip", content_type: "application/zip" })
+    assert_not project.packet_expired?
+
+    project.packet.purge
+    assert project.reload.packet_expired?
+    assert_nil project.packet_kept_until
+  end
 end

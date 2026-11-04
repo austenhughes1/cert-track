@@ -1,6 +1,7 @@
 <% content_for :title, "Dashboard" %>
 
 <%= render "dashboard/email_cap_banner" %>
+<%= render "dashboard/file_copy_banner" if can?(:admin) %>
 
 <div class="mb-4 flex items-end justify-between gap-4">
   <div>

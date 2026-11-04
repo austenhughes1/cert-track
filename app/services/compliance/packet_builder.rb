@@ -14,7 +14,8 @@ module Compliance
   #   builder = Compliance::PacketBuilder.new(project)
   #   builder.entries               # => [Entry(name:, crew_member:, certificate_type:, certificate:, blob:)]
   #   builder.write_zip(path)       # writes the zip to path
-  #   builder.attach!               # builds in a temp dir, attaches project.packet, sets packet_built_at
+  #   builder.attach!(built_by: user) # builds in a temp dir, attaches project.packet, sets packet_built_at,
+  #                                   # and records a PacketBuild holding a copy of index.pdf
   class PacketBuilder
     INDEX_NAME = "index.pdf".freeze
     MAX_PART_LENGTH = 60
@@ -55,6 +56,11 @@ module Compliance
       "#{self.class.slug_for(project)}-packet-#{today.iso8601}.zip"
     end
 
+    # Name of the index.pdf copy kept on the PacketBuild, e.g. "2417-packet-2026-11-04-index.pdf".
+    def index_filename
+      "#{File.basename(filename, ".zip")}-index.pdf"
+    end
+
     # Required cells with a current certificate, in matrix order: [row, cell] pairs.
     def certificate_cells
       @certificate_cells ||= report.rows.flat_map do |row|
@@ -81,16 +87,16 @@ module Compliance
     end
 
     # PDF bytes for index.pdf.
-    def index_pdf
+    def index_pdf(generated_at: Time.current)
       PacketIndexPdf.new(project: project, rows: index_rows, gaps: index_gaps, summary: report.summary,
-        generated_at: Time.current).render
+        generated_at: generated_at).render
     end
 
     # Writes the packet to path (index.pdf first, then the files) and returns path.
-    def write_zip(path)
+    def write_zip(path, index: index_pdf)
       Zip::OutputStream.open(path) do |zip|
         zip.put_next_entry(INDEX_NAME)
-        zip.write(index_pdf)
+        zip.write(index)
 
         entries.each do |entry|
           zip.put_next_entry(entry.name)
@@ -101,14 +107,29 @@ module Compliance
     end
 
     # Builds the zip in a temp directory, uploads it, attaches it as project.packet
-    # (replacing any earlier packet) and stamps project.packet_built_at.
-    def attach!
+    # (replacing any earlier packet) and stamps project.packet_built_at. Also records a
+    # PacketBuild (built_by: a User or nil) holding a copy of this build's index.pdf, which
+    # outlives the zip. packet_built_at and the build's built_at are the time printed on
+    # the index. Both files are uploaded before anything is saved; a blob left behind by a
+    # failed save is caught by Maintenance::PurgeUnattachedBlobsJob.
+    def attach!(built_by: nil)
+      built_at = Time.current
+      index = index_pdf(generated_at: built_at)
+
       Dir.mktmpdir("packet") do |dir|
-        path = write_zip(File.join(dir, filename))
-        blob = File.open(path, "rb") do |io|
+        path = write_zip(File.join(dir, filename), index: index)
+        zip_blob = File.open(path, "rb") do |io|
           ActiveStorage::Blob.create_and_upload!(io: io, filename: filename, content_type: "application/zip")
         end
-        project.update!(packet: blob, packet_built_at: Time.current)
+        index_blob = ActiveStorage::Blob.create_and_upload!(io: StringIO.new(index), filename: index_filename,
+          content_type: "application/pdf")
+
+        Project.transaction do
+          project.update!(packet: zip_blob, packet_built_at: built_at)
+          project.packet_builds.create!(built_by: built_by, built_at: built_at, packet_filename: filename,
+            certificate_count: certificate_cells.size, file_count: entries.size, gap_count: report.gaps.size,
+            index_pdf: index_blob)
+        end
       end
       project.packet
     end

@@ -1,6 +1,6 @@
 module Imports
   # ImportMailer's delivery job (ImportMailer.delivery_job), so the import summary that
-  # ImportBatch#check_completion! sends once per batch counts against the 90/day email cap
+  # ImportBatch#check_completion! sends once per batch counts against the daily email cap
   # like every other email (Notifications::SendBudget, docs/PLAN.md "Delivery").
   #
   # Each send first reserves one of today's (Denver) sends. Past the cap the email is held

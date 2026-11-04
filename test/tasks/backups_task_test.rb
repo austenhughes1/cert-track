@@ -32,6 +32,19 @@ class BackupsTaskTest < ActiveSupport::TestCase
     assert_includes decrypt_and_gunzip(uploads[key]), "CREATE TABLE public.users"
   end
 
+  test "certtrack:list_backups prints each backup's key and Denver time, oldest first" do
+    keys = %w[db/cert_track-20261104T100000Z.sql.gz.enc db/cert_track-20261103T100000Z.sql.gz.enc]
+
+    output, = capture_io do
+      with_stubbed_r2(list_objects_v2: list_response(keys + [ "db/notes.txt" ])) do
+        Rake::Task["certtrack:list_backups"].execute
+      end
+    end
+
+    assert_equal [ "db/cert_track-20261103T100000Z.sql.gz.enc  Nov 3, 2026 3:00 AM MST",
+      "db/cert_track-20261104T100000Z.sql.gz.enc  Nov 4, 2026 3:00 AM MST" ], output.lines.map(&:chomp)
+  end
+
   test "certtrack:restore_latest restores into TARGET_DATABASE and prints row counts" do
     skip_unless_pg_tools
     key, bytes = encrypted_backup_of_test_database

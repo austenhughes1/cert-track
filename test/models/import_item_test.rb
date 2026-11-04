@@ -1,8 +1,15 @@
 require "test_helper"
 
 class ImportItemTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+
   def build(**attrs)
     ImportItem.new({ import_batch: import_batches(:march_batch), sha256: "a" * 64 }.merge(attrs))
+  end
+
+  def with_file(item)
+    item.file.attach(io: StringIO.new("%PDF-1.4 stale"), filename: "card.pdf", content_type: "application/pdf")
+    item.tap(&:save!)
   end
 
   def count_queries(&block)
@@ -122,6 +129,39 @@ class ImportItemTest < ActiveSupport::TestCase
     end
     assert_equal text, recent_failure.reload.extracted_text
     assert failed.failed? && split_duplicate.duplicate?, "only the text goes; the items stay"
+  end
+
+  test "purge_stale_files! deletes the files of items that failed more than 30 days ago, and nothing else" do
+    failed = with_file(build(sha256: "e" * 64, status: :failed, error_message: "OCR failed"))
+    recent_failure = with_file(build(sha256: "f" * 64, status: :failed))
+    rejected = with_file(build(sha256: "a" * 64, status: :rejected, reviewed_at: 40.days.ago))
+    review = with_file(build(sha256: "b" * 64, status: :needs_review))
+    [ failed, rejected, review ].each { |item| item.update_columns(updated_at: 40.days.ago) }
+    failed_blob = failed.file.blob
+
+    assert_equal [ failed ], ImportItem.file_purgeable.to_a
+    assert_no_changes -> { failed.reload.updated_at } do
+      assert_equal 1, perform_enqueued_jobs { ImportItem.purge_stale_files! }
+    end
+
+    assert_not failed.reload.file.attached?
+    assert failed.failed?, "only the file goes; the item stays"
+    assert_not ActiveStorage::Blob.exists?(failed_blob.id)
+    assert_not failed_blob.service.exist?(failed_blob.key)
+    [ recent_failure, rejected, review ].each { |item| assert item.reload.file.attached?, item.status }
+    assert_equal 0, ImportItem.purge_stale_files!
+  end
+
+  test "purge_stale_files! keeps a stored file a certificate still holds" do
+    failed = with_file(build(sha256: "e" * 64, status: :failed))
+    certificate = certificates(:li_flagger)
+    certificate.files.attach(failed.file.blob)
+    failed.update_columns(updated_at: 31.days.ago)
+
+    perform_enqueued_jobs { ImportItem.purge_stale_files! }
+
+    assert_not failed.reload.file.attached?
+    assert_equal "%PDF-1.4 stale", certificate.reload.files.sole.download
   end
 
   test "a rejected item may have no digest; other items need one" do

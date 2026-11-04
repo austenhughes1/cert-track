@@ -57,7 +57,8 @@ class ProjectsController < ApplicationController
   # blocks assignments and requirements from being added while we check and delete.
   def destroy
     deleted = @project.with_lock do
-      next false if @project.project_assignments.exists? || @project.project_requirements.exists?
+      # Packet builds are the lasting record of what was sent, so they keep the project too.
+      next false if @project.project_assignments.exists? || @project.project_requirements.exists? || @project.packet_builds.exists?
 
       @project.destroy!
     end
@@ -66,7 +67,7 @@ class ProjectsController < ApplicationController
       redirect_to projects_path, notice: "Deleted #{@project.display_name}.", status: :see_other
     else
       redirect_to @project, status: :see_other,
-        alert: "#{@project.display_name} has crew assignments or requirements, so it can't be deleted. Close it instead to keep its history."
+        alert: "#{@project.display_name} has crew assignments, requirements or past packets, so it can't be deleted. Close it instead to keep its history."
     end
   end
 

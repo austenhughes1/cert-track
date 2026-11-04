@@ -11,6 +11,7 @@ class Imports::ExpandJobTest < ActiveJob::TestCase
 
   test "a plain upload becomes one pending item that reuses the upload's blob" do
     batch = ImportSamples.batch(@user, "ortiz.pdf" => @pdf)
+    upload = batch.uploads.sole.blob
 
     perform(batch)
 
@@ -20,19 +21,51 @@ class Imports::ExpandJobTest < ActiveJob::TestCase
     item = batch.import_items.sole
     assert item.pending?
     assert_equal [ "ortiz.pdf", Digest::SHA256.hexdigest(@pdf), nil ], [ item.original_filename, item.sha256, item.page_range ]
-    assert_equal batch.uploads.sole.blob, item.file.blob
+    assert_equal upload, item.file.blob
     assert_enqueued_with(job: Imports::ExtractTextJob, args: [ item ])
     assert_no_enqueued_emails
+
+    # The upload itself is gone; its blob stays as the item's file.
+    assert_not batch.uploads.attached?
+    perform_enqueued_jobs(only: ActiveStorage::PurgeJob)
+    assert_equal @pdf, item.reload.file.download
   end
 
-  test "a mislabelled upload gets a blob with the real content type" do
+  test "a mislabelled upload gets a blob with the real content type, and the upload is deleted" do
     batch = ImportSamples.batch(@user, "scan.jpg" => @pdf)
+    upload = batch.uploads.sole.blob
 
     perform(batch)
 
     item = batch.import_items.sole
-    assert_not_equal batch.uploads.sole.blob, item.file.blob
+    assert_not_equal upload, item.file.blob
     assert_equal [ "application/pdf", "scan.jpg", @pdf ], [ item.file.content_type, item.file.filename.to_s, item.file.download ]
+    assert_deleted_from_storage upload
+  end
+
+  test "a zip is deleted once unpacked; each item keeps its own copy of its file" do
+    batch = ImportSamples.batch(@user, "crew.zip" => ImportSamples.zip("ortiz.pdf" => @pdf, "notes.txt" => "renew in May"))
+    zip = batch.uploads.sole.blob
+
+    perform(batch)
+
+    assert_not batch.reload.uploads.attached?
+    assert_deleted_from_storage zip
+    assert_equal [ @pdf ], batch.import_items.pending.map { |item| item.file.download }
+    assert_equal 1, ActiveStorage::Blob.count, "only the PDF's own file is left"
+  end
+
+  test "rejected and duplicate uploads are not kept" do
+    earlier = ImportSamples.batch(@user, "ortiz.pdf" => @pdf)
+    perform(earlier)
+    batch = ImportSamples.batch(@user, "copy.pdf" => @pdf, "notes.txt" => "renew in May")
+    uploads = batch.uploads.blobs.to_a
+
+    perform(batch)
+
+    assert_equal %w[duplicate rejected], batch.import_items.order(:id).pluck(:status)
+    uploads.each { |upload| assert_deleted_from_storage upload }
+    assert_equal [ earlier.import_items.sole.file.blob ], ActiveStorage::Blob.all.to_a
   end
 
   test "a zip becomes one item per file, named by its path, each with its own file" do
@@ -133,6 +166,38 @@ class Imports::ExpandJobTest < ActiveJob::TestCase
     assert_match "Unsupported", by_name["readme.txt"].rejection_reason
     assert_match "nested more than 2 levels", by_name["too_deep.zip/level1.zip/level2.zip"].rejection_reason
     assert_enqueued_jobs 5, only: Imports::ExtractTextJob
+  end
+
+  test "a file accepted earlier is still a duplicate, though its item no longer holds the file" do
+    earlier = ImportSamples.batch(@user, "ortiz.pdf" => @pdf)
+    perform(earlier)
+    accepted = earlier.import_items.sole
+    accepted.update!(status: :needs_review, matched_crew_member: crew_members(:juan_ortiz), person_match: :matched,
+      matched_certificate_type: certificate_types(:osha30), type_match: :matched, proposed_completed_on: Date.current - 30)
+    Imports::Accept.new(accepted, user: @user).call
+    assert_not accepted.reload.file.attached?
+
+    batch = ImportSamples.batch(@user, "crew.zip" => ImportSamples.zip("ortiz again.pdf" => @pdf))
+    perform(batch)
+
+    assert_equal accepted, batch.import_items.sole.duplicate_of
+  end
+
+  test "a file whose failed item's file was purged is read again as a new item" do
+    earlier = ImportSamples.batch(@user, "ortiz.pdf" => @pdf)
+    perform(earlier)
+    failed = earlier.import_items.sole
+    failed.update!(status: :failed, error_message: "OCR failed")
+    failed.update_columns(updated_at: 31.days.ago)
+    ImportItem.purge_stale_files!
+    assert_not failed.reload.file.attached?
+
+    batch = ImportSamples.batch(@user, "ortiz.pdf" => @pdf)
+    perform(batch)
+
+    item = batch.import_items.sole
+    assert item.pending?
+    assert_equal @pdf, item.file.download
   end
 
   test "a zip nested three levels deep is rejected; two levels is read" do
@@ -262,6 +327,22 @@ class Imports::ExpandJobTest < ActiveJob::TestCase
     assert item.file.attached?
     assert_equal 1, batch.reload.files_count
     assert_enqueued_jobs 1, only: Imports::ExtractTextJob
+    assert_not batch.uploads.attached?, "deleted once the redo finished"
+    perform_enqueued_jobs(only: ActiveStorage::PurgeJob)
+    assert_equal @pdf, item.reload.file.download
+  end
+
+  test "a run that dies after unpacking some files keeps the uploads for the redo" do
+    batch = ImportSamples.batch(@user, "a.pdf" => @pdf, "b.pdf" => ImportSamples.pdf({ number: "B" }))
+
+    assert_raises(WorkerDied) { DyingExpandJob.perform_now(batch) }
+    assert_equal 2, batch.reload.uploads.count
+    assert_equal 0, batch.files_count
+
+    perform(batch)
+
+    assert_equal %w[a.pdf b.pdf], batch.import_items.order(:id).pluck(:original_filename)
+    assert_not batch.reload.uploads.attached?
   end
 
   test "an unexpected error is reported, recorded on the batch, and items made so far are still read" do
@@ -277,6 +358,7 @@ class Imports::ExpandJobTest < ActiveJob::TestCase
     assert_equal 2, batch.files_count # so a later run doesn't wipe and redo it
     assert_enqueued_jobs 1, only: Imports::ExtractTextJob
     assert batch.processing?
+    assert_equal 2, batch.uploads.count, "kept: b.pdf was never imported (the nightly purge deletes them after 30 days)"
   end
 
   class ExplodingExpandJob < Imports::ExpandJob
@@ -288,9 +370,28 @@ class Imports::ExpandJobTest < ActiveJob::TestCase
       end
   end
 
+  # Not a StandardError, like a worker killed mid-run: nothing rescues it.
+  class WorkerDied < Exception; end
+
+  class DyingExpandJob < Imports::ExpandJob
+    private
+      def record(batch, entry, pending, **options)
+        raise WorkerDied if entry.name == "b.pdf"
+
+        super
+      end
+  end
+
   private
     def perform(batch)
       Imports::ExpandJob.perform_now(batch)
+    end
+
+    # The blob row and the stored file are both gone once the purge has run.
+    def assert_deleted_from_storage(blob)
+      perform_enqueued_jobs(only: ActiveStorage::PurgeJob)
+      assert_not ActiveStorage::Blob.exists?(blob.id), "#{blob.filename}: blob row kept"
+      assert_not blob.service.exist?(blob.key), "#{blob.filename}: stored file kept"
     end
 
     # A second database session, like another Solid Queue worker's (the test's own

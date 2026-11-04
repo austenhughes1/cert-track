@@ -7,7 +7,7 @@
     <h1 class="text-2xl font-semibold">Import batch #<%= @batch.id %></h1>
     <p class="mt-1 text-sm text-gray-500">
       Uploaded by <%= @batch.uploaded_by.display_name %> on <%= import_time(@batch.created_at) %>
-      · <%= pluralize(@batch.uploads.count, "upload") %> dropped
+      <% if (size = import_batch_size_label(@batch)) %>· <span id="batch_size"><%= size %></span><% end %>
     </p>
   </div>
   <%= link_to "Review queue", import_reviews_path,

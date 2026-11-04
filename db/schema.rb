@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_03_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_04_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -201,6 +201,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_190000) do
     t.index ["status"], name: "index_import_items_on_status"
   end
 
+  create_table "packet_builds", force: :cascade do |t|
+    t.bigint "project_id", null: false
+    t.bigint "built_by_id"
+    t.datetime "built_at", null: false
+    t.string "packet_filename", null: false
+    t.integer "certificate_count", default: 0, null: false
+    t.integer "file_count", default: 0, null: false
+    t.integer "gap_count", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["built_by_id"], name: "index_packet_builds_on_built_by_id"
+    t.index ["project_id", "built_at"], name: "index_packet_builds_on_project_id_and_built_at"
+  end
+
   create_table "project_assignments", force: :cascade do |t|
     t.bigint "project_id", null: false
     t.bigint "crew_member_id", null: false
@@ -277,6 +291,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_190000) do
   add_foreign_key "import_items", "import_items", column: "duplicate_of_id", on_delete: :nullify
   add_foreign_key "import_items", "import_items", column: "source_item_id", on_delete: :cascade
   add_foreign_key "import_items", "users", column: "reviewed_by_id", on_delete: :restrict
+  add_foreign_key "packet_builds", "projects", on_delete: :cascade
+  add_foreign_key "packet_builds", "users", column: "built_by_id", on_delete: :nullify
   add_foreign_key "project_assignments", "crew_members", on_delete: :restrict
   add_foreign_key "project_assignments", "crew_roles", on_delete: :restrict
   add_foreign_key "project_assignments", "projects", on_delete: :cascade

@@ -33,9 +33,10 @@ module Imports
     STDERR_LIMIT = 500
     # Tesseract's OpenMP threads fight each other when several jobs OCR at once on a small VM.
     CHILD_ENV = { "OMP_THREAD_LIMIT" => "1" }.freeze
+    # Also used by Certificates::PdfShrinker (pdfimages).
     PACKAGES = {
-      "pdfinfo" => "poppler-utils", "pdftotext" => "poppler-utils", "pdftoppm" => "poppler-utils",
-      "tesseract" => "tesseract-ocr and tesseract-ocr-eng"
+      "pdfimages" => "poppler-utils", "pdfinfo" => "poppler-utils", "pdftotext" => "poppler-utils",
+      "pdftoppm" => "poppler-utils", "tesseract" => "tesseract-ocr and tesseract-ocr-eng"
     }.freeze
 
     class << self
