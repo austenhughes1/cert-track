@@ -291,6 +291,17 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
     assert_nil lifetime.certificate.expires_on
   end
 
+  test "an unread QR code and unread details flag the item for a clearer copy, and a clean one isn't flagged" do
+    clean = process(image_item(extraction: normalized(ortiz_osha)))
+    assert_equal [], clean.quality_flags
+
+    qr = process(image_item(filename: "qr.jpg", sha256: SecureRandom.hex(32), unread_qr_pages: [ 1 ], extraction: normalized(ortiz_osha)))
+    assert_equal [ "qr_unreadable" ], qr.quality_flags
+
+    nameless = process(image_item(filename: "blur.jpg", sha256: SecureRandom.hex(32), extraction: normalized(ortiz_osha(holder: nil))))
+    assert_equal [ "hard_to_read" ], nameless.quality_flags
+  end
+
   test "expiry rule: a printed period, the type's validity, the 2-year default, and OSHA's none" do
     entry = ->(**overrides) { ortiz_osha(code: "FLAGGER", name: "Flagger Certification", **overrides) }
     propose = lambda do |certificate, sha|

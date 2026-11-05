@@ -16,6 +16,14 @@ class Imports::DeciderTest < ActiveSupport::TestCase
     Imports::Config.with(auto_accept_enabled: true) { Imports::Decider.new(record).call }
   end
 
+  test "a flagged image is never auto-accepted, and says why" do
+    record = item
+    record.quality_flags = [ "qr_unreadable" ]
+
+    assert_equal :review, decide(record)
+    assert_includes Imports::Config.with(auto_accept_enabled: true) { Imports::Decider.new(record).reasons }, "The image is too small or blurry to read everything"
+  end
+
   test "accepts when every rule holds and auto-accept is on" do
     assert_equal :accept, decide(item)
     assert_empty Imports::Config.with(auto_accept_enabled: true) { Imports::Decider.new(item).reasons }

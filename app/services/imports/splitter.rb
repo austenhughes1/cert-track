@@ -81,6 +81,7 @@ module Imports
       @pdf = @original_blob&.content_type == PDF_CONTENT_TYPE
       @full_text = item.extracted_text
       @full_barcodes = Array(item.barcodes).select { |barcode| barcode.is_a?(Hash) }.map(&:stringify_keys)
+      @full_unread_qr_pages = item.unread_qr_pages.dup
       load_document
       certificates.each_with_index.map do |certificate, index|
         pages = pages_for(certificate)
@@ -145,6 +146,7 @@ module Imports
           item.file = split if split
         end
         item.barcodes = barcodes_for(pages, cut: split.present?) if pdf?
+        item.unread_qr_pages = unread_qr_pages_for(pages, cut: split.present?) if pdf?
         item.save!
         item
       end
@@ -159,7 +161,9 @@ module Imports
           sha256: item.sha256, original_filename: item.original_filename, page_range:,
           extracted_text: text, extraction: { "certificates" => [ certificate ], "non_certificate_pages" => [] },
           provider: item.provider, ai_units_used: 0, file: split || @original_blob,
-          barcodes: pdf? ? barcodes_for(pages, cut: split.present?) : @full_barcodes
+          barcodes: pdf? ? barcodes_for(pages, cut: split.present?) : @full_barcodes,
+          unread_qr_pages: pdf? ? unread_qr_pages_for(pages, cut: split.present?) : item.unread_qr_pages,
+          read_by_ocr: item.read_by_ocr
         )
       end
 
@@ -170,6 +174,12 @@ module Imports
           page = Integer(barcode["page"].to_s, exception: false)
           barcode.merge("page" => page - offset) if page && pages.include?(page)
         end
+      end
+
+      # The same for the pages with a QR code that couldn't be read.
+      def unread_qr_pages_for(pages, cut:)
+        offset = cut ? pages.first - 1 : 0
+        (@full_unread_qr_pages & pages).map { |page| page - offset }
       end
 
       # An attachable for the cut-out pages, or nil when the PDF can't be split.

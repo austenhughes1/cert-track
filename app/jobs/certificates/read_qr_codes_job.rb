@@ -25,8 +25,11 @@ module Certificates
     retry_on ActiveRecord::Deadlocked, wait: 5.seconds, attempts: 3
 
     def perform(certificate, attachment_ids)
+      @unread = false
       texts = attachments_to_read(certificate, attachment_ids).flat_map { |attachment| qr_texts(attachment.blob) }
       assign_verification_link(certificate, texts) if texts.any?
+      # New files are a new reading: a clearer copy clears the image quality flags.
+      certificate.update_columns(quality_flags: @unread && texts.empty? ? [ "qr_unreadable" ] : [])
 
       Verification::CheckJob.perform_later(certificate)
     end
@@ -41,7 +44,10 @@ module Certificates
       end
 
       def qr_texts(blob)
-        blob.open { |file| QrReader.new(file.path, content_type: blob.content_type).call }.map { |code| code["text"] }
+        blob.open do |file|
+          reader = QrReader.new(file.path, content_type: blob.content_type)
+          reader.call.map { |code| code["text"] }.tap { @unread ||= reader.undecoded_pages.any? }
+        end
       end
 
       # Under row locks, the crew member's first as Verification::Run and Certificate's saves take

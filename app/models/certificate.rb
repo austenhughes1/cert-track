@@ -6,6 +6,7 @@
 # certificate unless it is verified fake); recording or replacing that result re-ranks them.
 class Certificate < ApplicationRecord
   include Authenticity
+  include ImageQualityFlags
 
   ALLOWED_CONTENT_TYPES = %w[application/pdf image/jpeg image/png image/heic image/heif image/webp].freeze
   MAX_FILE_SIZE = 25.megabytes

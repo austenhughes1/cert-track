@@ -10,6 +10,29 @@ class Certificates::ReadQrCodesJobTest < ActiveJob::TestCase
     @training = CertificateIssuer.find_by_code("360TRAINING")
   end
 
+  test "a clearer file clears the image quality flag" do
+    skip_unless_zbarimg
+    @certificate.update_columns(quality_flags: [ "qr_unreadable", "hard_to_read" ])
+
+    perform(attach("redcross_qr.png"))
+
+    assert_equal [], @certificate.reload.quality_flags
+  end
+
+  test "a file with a QR code that can't be decoded flags the certificate" do
+    skip_unless_zbarimg
+    reader = Struct.new(:undecoded_pages) { def call = [] }.new([ 1 ])
+    original = Certificates::QrReader.method(:new)
+    Certificates::QrReader.define_singleton_method(:new) { |*, **| reader }
+    begin
+      perform(attach("redcross_qr.png"))
+    ensure
+      Certificates::QrReader.define_singleton_method(:new, original)
+    end
+
+    assert_equal [ "qr_unreadable" ], @certificate.reload.quality_flags
+  end
+
   test "a certificate without a link takes the QR link on an issuer's domain, and that issuer, then is checked" do
     skip_unless_zbarimg
     assert_nil @certificate.verification_url

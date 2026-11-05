@@ -17,6 +17,8 @@ module Certificates
   # MAX_SCAN_PIXELS. zbarimg only ever reads these page images, never the uploaded file itself.
   #
   # Codes come back in page order, each page and text once; page numbers are those of this file.
+  # After call, undecoded_pages lists the pages that decoded nothing where a QR code seems to be
+  # there anyway (Certificates::QrFinder): too small or blurry to read.
   # Never raises for a file it can't read (unsupported, corrupt, password-protected, a tool failing
   # or timing out): it logs a warning, without anything read from the file, and returns what it
   # read so far, usually []. Without zbarimg it returns [] and logs that once.
@@ -59,7 +61,7 @@ module Certificates
       end
     end
 
-    attr_reader :path, :content_type, :timeout, :max_pages
+    attr_reader :path, :content_type, :timeout, :max_pages, :undecoded_pages
 
     # timeout: seconds each tool call may take.
     def initialize(path, content_type:, timeout: Imports::Shell::DEFAULT_TIMEOUT, max_pages: MAX_PAGES)
@@ -67,6 +69,7 @@ module Certificates
       @content_type = content_type
       @timeout = timeout
       @max_pages = max_pages
+      @undecoded_pages = []
     end
 
     # [{ "page" => Integer, "text" => String }, ...]
@@ -79,7 +82,7 @@ module Certificates
 
       Dir.mktmpdir("certtrack-qr") do |dir|
         each_page(dir) do |number, render|
-          read_page(render).each { |text| codes << { "page" => number, "text" => text } }
+          read_page(render, number).each { |text| codes << { "page" => number, "text" => text } }
         end
       end
       codes.uniq
@@ -132,7 +135,7 @@ module Certificates
       end
 
       # The QR texts on one page: as it is, else at 2x, else at 3x. Its images are deleted after.
-      def read_page(render)
+      def read_page(render, number)
         image = render.call(1)
         texts = decode(image)
         return texts if texts.any?
@@ -145,6 +148,7 @@ module Certificates
         ensure
           FileUtils.rm_f(bigger) if bigger
         end
+        @undecoded_pages << number if QrFinder.new(image).present?
         []
       ensure
         FileUtils.rm_f(image) if image

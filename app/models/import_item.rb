@@ -2,6 +2,7 @@
 # AI proposals stay here until a person (or the auto-accept rules) turns them into a Certificate.
 class ImportItem < ApplicationRecord
   include Authenticity
+  include ImageQualityFlags
 
   TERMINAL_STATUSES = %w[accepted rejected duplicate failed].freeze
   # Still being read by the pipeline (text extraction, then AI): the batch isn't finished.

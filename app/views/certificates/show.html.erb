@@ -39,6 +39,12 @@
   </div>
 </div>
 
+<% if @certificate.quality_flagged? %>
+  <div class="mb-6 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status" id="image_quality_flag">
+    <%= safe_join(@certificate.quality_sentences, " ") %> <%= ImageQualityFlags::ASK %> Adding the clearer file clears this.
+  </div>
+<% end %>
+
 <% if @certificate.superseded? %>
   <div class="mb-6 rounded-md border border-gray-200 bg-gray-100 px-4 py-3 text-sm text-gray-700" role="status" id="superseded_notice">
     <% if @certificate.authenticity_confirmed_fake? %>

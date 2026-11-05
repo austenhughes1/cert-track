@@ -161,6 +161,7 @@ module Imports
           verified_by: user, verified_at: (Time.current if user)
         )
         certificate.assign_attributes(authenticity_source.authenticity_attributes)
+        certificate.quality_flags = all_items.flat_map(&:quality_flags).uniq
         assign_expiry(certificate)
         reset_stale_fake(certificate)
         blobs = all_items.filter_map { |accepted| accepted.file.blob if accepted.file.attached? }.uniq(&:id)

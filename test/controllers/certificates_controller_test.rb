@@ -10,6 +10,16 @@ class CertificatesControllerTest < ActionDispatch::IntegrationTest
 
   # --- show / new ---
 
+  test "the certificate page shows the image quality flag" do
+    certificate = @juan.certificates.first
+    certificate.update_columns(quality_flags: [ "hard_to_read" ])
+    sign_in_as users(:manager)
+
+    get crew_member_certificate_path(@juan, certificate)
+
+    assert_select "#image_quality_flag", /too small or blurry.*Adding the clearer file clears this/m
+  end
+
   test "Other... for the type adds it from the typed name, and a manager can use it" do
     sign_in_as users(:manager)
 

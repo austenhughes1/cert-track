@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_05_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_05_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -114,6 +114,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_05_130000) do
     t.string "authenticity_method"
     t.text "authenticity_note"
     t.jsonb "authenticity_details", default: {}, null: false
+    t.jsonb "quality_flags", default: [], null: false
     t.index ["authenticity_checked_by_id"], name: "index_certificates_on_authenticity_checked_by_id"
     t.index ["authenticity_status"], name: "index_certificates_on_authenticity_status_current", where: "(superseded_at IS NULL)"
     t.index ["certificate_issuer_id"], name: "index_certificates_on_certificate_issuer_id"
@@ -233,6 +234,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_05_130000) do
     t.string "authenticity_method"
     t.text "authenticity_note"
     t.jsonb "authenticity_details", default: {}, null: false
+    t.integer "unread_qr_pages", default: [], null: false, array: true
+    t.boolean "read_by_ocr", default: false, null: false
+    t.jsonb "quality_flags", default: [], null: false
     t.index ["authenticity_checked_by_id"], name: "index_import_items_on_authenticity_checked_by_id"
     t.index ["certificate_id"], name: "index_import_items_on_certificate_id"
     t.index ["duplicate_of_id"], name: "index_import_items_on_duplicate_of_id"

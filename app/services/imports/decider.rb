@@ -35,6 +35,7 @@ module Imports
         ("There is no expiration date and the type expires" unless expiry_known?),
         ("The model's confidence is below #{Imports::Config.auto_accept_confidence}" unless confident?),
         ("The dates need checking" if date_problems?),
+        ("The image is too small or blurry to read everything" if item.quality_flagged?),
         authenticity_reason,
         ("The issuer's site hasn't been asked yet" if @issuer_check_pending)
       ].compact

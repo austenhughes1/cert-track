@@ -14,7 +14,8 @@ module Imports
   # Text already stored is used as it is, without running the tools again: an item sent back
   # through the pipeline (Imports::Reread, which clears a PDF item's text first: it may hold
   # only the item's pages), or a run that died after saving it. Stored QR codes are kept the
-  # same way; an item with none is read for them again.
+  # same way; an item with none is read for them again. Pages with a QR code that couldn't be
+  # decoded go in unread_qr_pages, for the image quality flag (Imports::ImageQuality).
   #
   # Items that are no longer pending or extracting (rejected, already done) are left
   # alone, and a deleted item discards the job.
@@ -59,11 +60,13 @@ module Imports
         item.file.open do |file|
           if item.extracted_text.nil?
             result = TextExtractor.new(file.path, content_type: item.file.content_type, timeout: tool_timeout).call
-            item.update!(extracted_text: result.text, error_message: nil)
+            item.update!(extracted_text: result.text, read_by_ocr: result.pages.any?(&:ocr), error_message: nil)
           end
           if item.barcodes.blank?
-            barcodes = Certificates::QrReader.new(file.path, content_type: item.file.content_type, timeout: tool_timeout).call
-            item.update!(barcodes: barcodes)
+            reader = Certificates::QrReader.new(file.path, content_type: item.file.content_type, timeout: tool_timeout)
+            barcodes = reader.call
+            item.update!(barcodes: barcodes, unread_qr_pages: ImageQuality.unread_qr_pages(item.extracted_text,
+              undecoded_pages: reader.undecoded_pages, decoded_pages: barcodes.map { |code| code["page"] }))
           end
         end
       rescue ActiveStorage::FileNotFoundError

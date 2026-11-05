@@ -63,6 +63,9 @@
                 <%= item.matched_crew_member.display_name %>
               <% end %>
               <%= import_match_badge(import_person_match_state(item)) %>
+              <% if item.quality_flagged? %>
+                <span class="ml-1 inline-flex items-center whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title="<%= item.quality_sentences.join(" ") %>" data-quality-flag>Hard to read</span>
+              <% end %>
             </td>
             <td class="px-4 py-2">
               <% if item.matched_certificate_type %>

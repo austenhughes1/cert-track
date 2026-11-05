@@ -9,6 +9,13 @@ class Imports::AcceptTest < ActiveSupport::TestCase
     Imports::Accept.new(item, user:, **options).call
   end
 
+  test "the image quality flag carries to the certificate" do
+    certificate = accept(review_item(type: certificate_types(:flagger), holder_name_raw: "Juan Ortiz", quality_flags: [ "qr_unreadable" ]))
+
+    assert_equal [ "qr_unreadable" ], certificate.quality_flags
+    assert certificate.quality_flagged?
+  end
+
   test "creates a verified import certificate from the item's proposals and file" do
     item = review_item(type: certificate_types(:flagger), holder_name_raw: "Juan Ortiz")
     blob = item.file.blob

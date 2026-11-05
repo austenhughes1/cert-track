@@ -30,6 +30,12 @@
     </div>
   </div>
 
+  <% if @item.quality_flagged? %>
+    <div class="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status" id="image_quality_flag">
+      <%= safe_join(@item.quality_sentences, " ") %> <%= ImageQualityFlags::ASK %>
+    </div>
+  <% end %>
+
   <% if @errors.present? %>
     <div class="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" id="error_explanation">
       <p class="font-medium"><%= pluralize(@errors.size, "problem") %> to fix:</p>

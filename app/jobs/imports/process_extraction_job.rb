@@ -125,6 +125,7 @@ module Imports
           matched_crew_member: person.crew_member, person_match: person.match, person_suggestions: person.suggestions,
           proposed_completed_on: dates.completed_on, proposed_expires_on: dates.expires_on,
           proposed_expires_on_source: dates.expires_on_source,
+          quality_flags: Imports::ImageQuality.flags(item, certificate, dates),
           error_message: dates.errors.join(" ").presence
         )
         item.reset_fake_for_new_reading! # Read again kept a person's fake result: is it about these details?

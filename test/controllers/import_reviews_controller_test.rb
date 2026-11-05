@@ -237,6 +237,25 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_select "#raw_unread_pages", count: 0
   end
 
+  test "a flagged image shows on the review screen and in the queue, asking for a clearer copy" do
+    @item.update!(quality_flags: [ "qr_unreadable", "hard_to_read" ])
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+    assert_select "#image_quality_flag", /QR code appears to be on this file.*too small or blurry.*Ask for a clearer copy/m
+
+    get import_reviews_path
+    assert_select "##{dom_id(@item)} [data-quality-flag]", "Hard to read"
+  end
+
+  test "an image that isn't flagged shows no such notice" do
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+
+    assert_select "#image_quality_flag", count: 0
+  end
+
   test "Other... for the type starts from the printed name and adds a type on accept, for a manager" do
     @item.update!(certificate_name_raw: "Scaffold Safety Online Course", matched_certificate_type: nil, type_match: :unmatched)
     sign_in_as users(:manager)

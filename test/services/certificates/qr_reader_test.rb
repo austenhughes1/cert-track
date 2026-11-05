@@ -43,6 +43,21 @@ class Certificates::QrReaderTest < ActiveSupport::TestCase
     assert_equal [ { "page" => 1, "text" => REDCROSS_LINK } ], read(path, "image/png")
   end
 
+  test "undecoded_pages lists a page with a QR code that can't be decoded, not one without any" do
+    modules = (Vips::Image.gaussnoise(35, 35, mean: 128, sigma: 80, seed: 1) > 128).cast(:uchar)
+    tiny = modules.resize(2, kernel: :nearest).gaussblur(0.6)
+    (Vips::Image.black(945, 1000) + 255).cast(:uchar).insert(tiny, 400, 500).cast(:uchar).pngsave(file("tiny.png"))
+    (Vips::Image.black(945, 1000) + 255).cast(:uchar).pngsave(file("blank.png"))
+
+    unread = Certificates::QrReader.new(file("tiny.png"), content_type: "image/png")
+    blank = Certificates::QrReader.new(file("blank.png"), content_type: "image/png")
+
+    assert_equal [], unread.call, "a code too blurred to decode"
+    assert_equal [ 1 ], unread.undecoded_pages
+    assert_equal [], blank.call
+    assert_equal [], blank.undecoded_pages
+  end
+
   test "a page that reads nothing is tried at 2x, then 3x, then given up" do
     blank = Vips::Image.black(850, 1100).invert.cast(:uchar).copy(interpretation: :b_w)
     blank.pngsave(file("blank.png"))
@@ -202,8 +217,8 @@ class Certificates::QrReaderTest < ActiveSupport::TestCase
       scales = []
       reader = Certificates::QrReader.new(path, content_type: content_type)
       reader.singleton_class.prepend(Module.new do
-        define_method(:read_page) do |render|
-          super(->(scale) { scales << scale unless scale == 1; render.call(scale) })
+        define_method(:read_page) do |render, number|
+          super(->(scale) { scales << scale unless scale == 1; render.call(scale) }, number)
         end
       end)
       [ reader, scales ]
