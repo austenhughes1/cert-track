@@ -4,7 +4,7 @@ class Ai::ClientTest < ActiveSupport::TestCase
   include ActiveSupport::Testing::TimeHelpers
 
   TEXT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast".freeze
-  PLAIN_MODEL = "@cf/google/gemma-3-12b-it".freeze # no JSON Mode
+  PLAIN_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct".freeze # no JSON Mode
   SCHEMA = Imports::Extraction::Schema::JSON_SCHEMA
   ENV_KEYS = %w[CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_AI_API_TOKEN ANTHROPIC_API_KEY OLLAMA_URL].freeze
   FakeResponse = Struct.new(:status, :body, :headers, keyword_init: true)

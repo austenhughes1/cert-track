@@ -192,7 +192,8 @@ class Ai::ConfigTest < ActiveSupport::TestCase
     assert_equal 204_805, known[:output_per_million]
     assert known[:known]
     assert Ai::Config.structured_output?("@cf/meta/llama-3.3-70b-instruct-fp8-fast")
-    assert_not Ai::Config.structured_output?("@cf/google/gemma-3-12b-it")
+    assert_not Ai::Config.structured_output?("@cf/meta/llama-3.2-11b-vision-instruct")
+    assert Ai::Config.model_settings("@cf/meta/llama-4-scout-17b-16e-instruct")[:vision]
     assert_equal 1, Ai::Config.max_images("@cf/meta/llama-3.2-11b-vision-instruct")
 
     unknown = Ai::Config.model_settings("@cf/someone/new-model")

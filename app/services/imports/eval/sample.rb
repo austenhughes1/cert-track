@@ -13,6 +13,8 @@ module Imports
         ".webp" => "image/webp", ".heic" => "image/heic", ".heif" => "image/heif"
       }.freeze
       EXPECTED_SUFFIX = ".expected.json"
+      # Blank answer templates hold this until the owner fills them in (docs/IMPORT_SPIKE.md).
+      PLACEHOLDER = "FILL IN"
       IGNORED = /\A\.|\.(json|md|txt)\z/i # .keep, answer files, notes
 
       attr_reader :path, :content_type, :expected_path
@@ -31,6 +33,8 @@ module Imports
             skipped << "#{name}: #{path.extname.casecmp?(".zip") ? "zip archives are not scored; unzip the files to include them" : "not a PDF or image"}"
           elsif !expected.exist?
             skipped << "#{name}: no #{expected.basename} beside it"
+          elsif expected.read.include?(PLACEHOLDER)
+            skipped << "#{name}: #{expected.basename} still says #{PLACEHOLDER}"
           else
             samples << new(path, content_type: content_type, expected_path: expected)
           end

@@ -53,6 +53,8 @@ How to fill it in:
 
 Write the answers from the files themselves, not from a model's output, or the score will flatter that model.
 
+An answer file that still contains `FILL IN` (the placeholder in blank templates) isn't scored yet. The run lists it under "skipped", so you can score the samples you've finished while the rest wait.
+
 ## 2. Set up Workers AI in your shell
 
 The eval runs in development on your machine. It needs only the Workers AI account ID and token (DEPLOY.md section 4):
@@ -61,7 +63,7 @@ The eval runs in development on your machine. It needs only the Workers AI accou
 eval "$(grep -E 'CLOUDFLARE_(ACCOUNT_ID|AI_API_TOKEN)=' ~/.config/certtrack/deploy.env)"
 ```
 
-Meta's license for `@cf/meta/llama-3.2-11b-vision-instruct` has to be accepted once per Cloudflare account. If its first run fails with a license error, accept it and run again:
+Vision candidates are Llama 4 Scout, Mistral Small 3.1 and Gemma 4, which all read a test image correctly through the app's own client on Nov 4, 2026. `@cf/meta/llama-3.2-11b-vision-instruct` is not: Workers AI answers HTTP 400 "Internal Server Error" whenever an image is sent to it through the OpenAI-compatible endpoint the app uses. Its Meta license was accepted on this account on Nov 4. For a new account, or if a future run fails with a license error, accept it like this:
 
 ```bash
 curl -s "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/@cf/meta/llama-3.2-11b-vision-instruct" \
@@ -80,12 +82,15 @@ Text models (pages whose OCR text is readable):
 bin/rails "certtrack:eval_extraction[workers_ai,@cf/meta/llama-3.3-70b-instruct-fp8-fast]"
 bin/rails "certtrack:eval_extraction[workers_ai,@cf/meta/llama-3.1-8b-instruct-fp8-fast]"
 bin/rails "certtrack:eval_extraction[workers_ai,@cf/mistralai/mistral-small-3.1-24b-instruct]"
+bin/rails "certtrack:eval_extraction[workers_ai,@cf/google/gemma-4-26b-a4b-it]"
 ```
 
-The vision model, scored alone. `VISION_ONLY=1` withholds the OCR text, so every page goes to the vision model as an image:
+The vision models, each scored alone. `VISION_ONLY=1` withholds the OCR text, so every page goes to the vision model as an image:
 
 ```bash
-VISION_ONLY=1 bin/rails "certtrack:eval_extraction[workers_ai,@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/meta/llama-3.2-11b-vision-instruct]"
+VISION_ONLY=1 bin/rails "certtrack:eval_extraction[workers_ai,@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/meta/llama-4-scout-17b-16e-instruct]"
+VISION_ONLY=1 bin/rails "certtrack:eval_extraction[workers_ai,@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/mistralai/mistral-small-3.1-24b-instruct]"
+VISION_ONLY=1 bin/rails "certtrack:eval_extraction[workers_ai,@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/google/gemma-4-26b-a4b-it]"
 ```
 
 Then run the best text model with the vision model as the third argument, the way production runs. Pages that OCR can't read go to the vision model, except blank ones, which need no AI call. Without a vision model those pages are skipped and named in the certificate's notes; a sample with nothing else readable fails with "set EXTRACTION_VISION_MODEL".
@@ -93,10 +98,10 @@ Then run the best text model with the vision model as the third argument, the wa
 Other options:
 
 - `SAMPLES_DIR=/path/to/folder` scores a different folder.
-- `@cf/google/gemma-3-12b-it` and `@cf/meta/llama-4-scout-17b-16e-instruct` are further candidates, priced in `config/ai_models.yml`. To try a model that isn't in that file, add its rates from the [pricing page](https://developers.cloudflare.com/workers-ai/platform/pricing/) first. Otherwise the run reports deliberately high default rates.
+- Llama 4 Scout is also a text candidate (`[workers_ai,@cf/meta/llama-4-scout-17b-16e-instruct]`). One model for both text and images keeps the setup simple. To try a model that isn't in `config/ai_models.yml`, add its rates from the [pricing page](https://developers.cloudflare.com/workers-ai/platform/pricing/) first. Otherwise the run reports deliberately high default rates. That file also notes the models ruled out on Nov 4, 2026 (Gemma 3 retired, Qwen 3 never answers, plain Llama 3.1 8B refuses schemas).
 - `bin/rails "certtrack:eval_extraction[anthropic]"` scores Claude Haiku 5.5 (it needs `ANTHROPIC_API_KEY` and the owner's go-ahead), and `[ollama,<model>]` scores a local Ollama model.
 
-**Budget.** Each run uses part of the same 10,000 free daily neurons as production imports. Usage is printed at the end. For 25 samples, a rough guide is 2,500 neurons for the 70B model, 500 for the 8B model, 2,000 for Mistral Small, and 2,000 to 3,000 for a vision-only run. Spread the runs over two UTC days, or do them before go-live. If the allocation runs out, the run stops, prints what it scored so far, and tells you to re-run after 00:05 UTC. The budget is checked before every AI call, and one file can take several: one per 24,000 characters of readable text, plus one per unreadable page (four per call for Llama 4 Scout). A file estimated to need more than the whole daily budget is refused before its first call, with a message to split it.
+**Budget.** Each run uses part of the same 10,000 free daily neurons as production imports. Usage is printed at the end. For 25 samples, a rough guide is 2,500 neurons for the 70B model, 500 for the 8B model, 2,000 for Mistral Small, 700 for Gemma 4, and 1,500 to 2,500 for a vision-only run. Spread the runs over two UTC days, or do them before go-live. If the allocation runs out, the run stops, prints what it scored so far, and tells you to re-run after 00:05 UTC. The budget is checked before every AI call, and one file can take several: one per 24,000 characters of readable text, plus one per unreadable page (four per call for Llama 4 Scout). A file estimated to need more than the whole daily budget is refused before its first call, with a message to split it.
 
 ## 4. Read the results
 
@@ -127,7 +132,7 @@ Add a results table under Phase 3 in `docs/PLAN.md`:
 | --- | --- | --- | --- | --- | --- | --- |
 | @cf/meta/llama-3.3-70b-instruct-fp8-fast | 96% | 92% | 92% | 88% | 2,610 | misses printed expiry on wallet cards |
 | @cf/meta/llama-3.1-8b-instruct-fp8-fast | ... | | | | | |
-| @cf/meta/llama-3.2-11b-vision-instruct (vision only) | ... | | | | | |
+| @cf/meta/llama-4-scout-17b-16e-instruct (vision only) | ... | | | | | |
 ```
 
 Then pick the text model with the best score. When two are close, take the one that uses fewer neurons: it drains a backlog faster. Pick the vision model the same way.

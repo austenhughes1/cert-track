@@ -6,7 +6,7 @@ module Imports
     # the AI usage is recorded in ai_usage_days like any other call (it spends the same allocation).
     #
     #   report = Imports::Eval::Runner.new(dir: "test/fixtures/import_samples", provider: "workers_ai",
-    #     model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", vision_model: "@cf/meta/llama-3.2-11b-vision-instruct").call
+    #     model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", vision_model: "@cf/meta/llama-4-scout-17b-16e-instruct").call
     #   puts report.to_s
     #
     # Raises NoSamples when the directory has no scorable sample, and Ai::ConfigurationError when

@@ -27,6 +27,19 @@ class Imports::Eval::SampleTest < ActiveSupport::TestCase
     end
   end
 
+  test "skips a sample whose answer file is still a blank template, so it can't score as wrong" do
+    with_samples_dir do |dir|
+      write_sample(dir, "done", {})
+      dir.join("todo.jpg").binwrite("jpg")
+      dir.join("todo.expected.json").write('{"certificates":[{"pages":[1],"holder_name":"FILL IN"}]}')
+
+      samples, skipped = Imports::Eval::Sample.discover(dir)
+
+      assert_equal [ "done.pdf" ], samples.map(&:name)
+      assert_equal [ "todo.jpg: todo.expected.json still says FILL IN" ], skipped
+    end
+  end
+
   test "expected reads the answer file, and a bare array is the certificate list" do
     with_samples_dir do |dir|
       path = dir.join("card.pdf")
