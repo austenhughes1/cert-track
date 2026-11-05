@@ -17,6 +17,25 @@ module Imports
   # Imports::Accept (auto) or needs_review; an auto-accept the Certificate model refuses goes
   # to review with the reason in error_message.
   #
+  # Phase 3b (step 6b): Imports::Splitter gives each item the QR codes on its own pages. The
+  # issuer is matched (Imports::IssuerMatcher) from those QR links and the printed
+  # verification_url, the model's certificate_issuer_code, then the printed issuer name.
+  # proposed_verification_code is the model's, else the id in a matched issuer's QR link
+  # (Imports::IssuerMatcher.code_in_link); proposed_verification_url is that QR link, else the
+  # printed address, else the matched issuer's link_template with the code. When the pages
+  # carry several of the issuer's QR links (one page or photo with several people's cards), the
+  # one with the certificate's code or number, else the one naming the holder, is used; none
+  # when they can't be told apart. A printed address on another site than the matched issuer's
+  # gives way to the issuer's own link for the code, unless it imitates an issuer's site: then
+  # it is kept, so the check flags it. Verification::Run then checks the item with local rules
+  # only, before Imports::Decider (which never auto-accepts a flagged item). When the matched
+  # issuer's site can confirm the code (a network Verification::Checkers key) and automatic
+  # checks are on, Verification::CheckJob asks it once this job's transaction has committed,
+  # and the item waits for review: it isn't auto-accepted before the issuer's site has answered.
+  # A person's Not found or Doesn't match that Imports::Reread kept goes back to needs a check
+  # when this reading's issuer, code or link (for a mismatch also the person or dates) differ
+  # from the ones they checked (Authenticity#reset_fake_for_new_reading!), before the check.
+  #
   # Runs in one transaction under a row lock on the item, so a retry or a second copy of the
   # job never splits twice: an item that is no longer pending or extracting is left alone.
   # Errors are retried; after the last attempt the item is failed with the error message. A
@@ -39,6 +58,7 @@ module Imports
     end
 
     def perform(item)
+      @network_checks = []
       ImportItem.transaction do
         next unless ImportItem::PIPELINE_STATUSES.include?(ImportItem.where(id: item.id).lock.pick(:status))
 
@@ -46,6 +66,7 @@ module Imports
         process(item)
       end
 
+      @network_checks.each { |checked| Verification::CheckJob.perform_later(checked) }
       item.import_batch.check_completion!
     end
 
@@ -81,7 +102,8 @@ module Imports
             part.item.mark_duplicate_of!(original)
           else
             propose(part.item, part.certificate)
-            decide(part.item)
+            asking_issuer = check_authenticity(part.item)
+            decide(part.item, issuer_check_pending: asking_issuer)
           end
         end
       end
@@ -93,6 +115,7 @@ module Imports
           certificate_type: type.type).call
 
         item.update!(
+          **issuer_proposal(item, certificate),
           holder_name_raw: text(certificate["holder_name"]),
           certificate_name_raw: text(certificate["certificate_name_as_printed"]),
           issuer_raw: text(certificate["issuer"]),
@@ -104,10 +127,64 @@ module Imports
           proposed_expires_on_source: dates.expires_on_source,
           error_message: dates.errors.join(" ").presence
         )
+        item.reset_fake_for_new_reading! # Read again kept a person's fake result: is it about these details?
       end
 
-      def decide(item)
-        return item.needs_review! unless Imports::Decider.new(item).call == :accept
+      # Step 6b: the issuer match, then the verification code and link (see the class comment).
+      # The item's barcodes are the QR codes on its own pages (Imports::Splitter).
+      def issuer_proposal(item, certificate)
+        qr_texts = Array(item.barcodes).filter_map { |barcode| text(barcode["text"], limit: nil) if barcode.is_a?(Hash) }
+        printed_url = Certificate.normalize_verification_url(text(certificate["verification_url"], limit: nil))
+        issuer = Imports::IssuerMatcher.new(code: text(certificate["certificate_issuer_code"]), name_as_printed: text(certificate["issuer"]),
+          urls: [ *qr_texts, printed_url ].compact).call
+        known = issuer.issuer if issuer.match == :matched
+        code = text(certificate["verification_code"], limit: nil)
+        qr_link = issuer_qr_link(qr_texts, known, codes: [ code, text(certificate["certificate_number"], limit: nil) ].compact,
+          holder: text(certificate["holder_name"]))
+        code ||= Imports::IssuerMatcher.code_in_link(known, qr_link)
+
+        { matched_certificate_issuer: issuer.issuer, issuer_match: issuer.match, issuer_suggestions: issuer.suggestions,
+          proposed_verification_code: code, proposed_verification_url: qr_link || verification_link(printed_url, known, code) }
+      end
+
+      # The QR link on the matched issuer's domain (see the class comment). codes: the model's
+      # verification code and certificate number.
+      def issuer_qr_link(qr_texts, known, codes:, holder:)
+        links = qr_texts.filter_map { |qr_text| Certificate.normalize_verification_url(qr_text) if known&.owns_url?(qr_text) }.uniq
+        return links.first if links.size <= 1
+
+        by_code = links.select { |link| (found = Imports::IssuerMatcher.code_in_link(known, link)) && codes.any? { found.casecmp?(it) } }
+        return by_code.first if by_code.one?
+
+        by_holder = links.select do |link|
+          Verification::NameMatch.compare_last_name(holder, Verification::QrLink.parse(link)&.holder&.last_name) == "match"
+        end
+        by_holder.first if by_holder.one?
+      end
+
+      # The printed address, or the matched issuer's own link for the code when the printed one is
+      # on another site that doesn't imitate an issuer's (see the class comment).
+      def verification_link(printed_url, known, code)
+        own = known&.link_for(code)
+        return printed_url || own if printed_url.nil? || own.nil? || known.owns_url?(printed_url)
+
+        Verification::Lookalike.for_issuers.lookalike?(printed_url) ? printed_url : own
+      end
+
+      # Local rules only (no request to the issuer's site): a flagged item is never auto-accepted.
+      # The issuer's site is asked after commit when the run held that back (Verification::Run trusts
+      # only a matched issuer: a code sent to a merely suggested one could come back "not found" for a
+      # real certificate, and flag it). Returns whether it will be asked; until it answers, the item
+      # isn't auto-accepted (Imports::Decider's issuer_check_pending:).
+      def check_authenticity(item)
+        run = Verification::Run.new(item, network: false)
+        run.call
+        @network_checks << item if run.automatic_check_deferred?
+        run.automatic_check_deferred?
+      end
+
+      def decide(item, issuer_check_pending:)
+        return item.needs_review! unless Imports::Decider.new(item, issuer_check_pending:).call == :accept
 
         Imports::Accept.new(item, user: nil, auto: true).call
       rescue ActiveRecord::RecordInvalid => error
@@ -122,8 +199,12 @@ module Imports
         certificate[field].presence || (unreadable[field] if unreadable.is_a?(Hash))
       end
 
-      def text(value)
-        value.to_s.squish.truncate(TEXT_LIMIT).presence unless value.is_a?(Hash) || value.is_a?(Array)
+      # Squished text, cut to limit (nil: never cut, for codes and links a cut would break).
+      def text(value, limit: TEXT_LIMIT)
+        return if value.is_a?(Hash) || value.is_a?(Array)
+
+        text = value.to_s.squish.presence
+        limit && text ? text.truncate(limit) : text
       end
 
       # 0..1, rounded down to 2 places so 0.849 never passes a 0.85 threshold. nil when not a number.

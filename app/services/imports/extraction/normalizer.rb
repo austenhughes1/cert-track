@@ -15,15 +15,25 @@ module Imports
     #   - confidence: a number clamped to 0..1, rounded DOWN to 2 places (0.849 is 0.84, so it
     #     can't pass a 0.85 threshold); missing means 0
     #   - strings squished and capped in length; "null", "N/A", "unknown" and "" become null
+    #   - certificate_issuer_code (Phase 3b) kept only when it is an active issuer's code
+    #     (upcased), else null with a note, like the type code
+    #   - verification_code: squished; null when longer than its limit (cut short, it would check
+    #     the wrong certificate). verification_url: spaces removed (OCR splits addresses), and null
+    #     unless it looks like a web address (a dotted host ending in letters, no e-mail address)
     #   - entries with nothing in them are dropped (their pages count as non-certificate pages)
     #
     #   Imports::Extraction::Normalizer.new(pages: [1, 2], codes: %w[OSHA30 FLAGGER]).call(raw)
     #   # => { "certificates" => [...], "non_certificate_pages" => [2] }
+    #
+    # issuer_codes: the active issuer codes; left out, they are looked up when a reply names one.
     class Normalizer
       STRING_LIMITS = {
         "holder_name" => 120, "certificate_name_as_printed" => 200, "issuer" => 200,
         "certificate_number" => 80, "notes" => 500
       }.freeze
+      VERIFICATION_CODE_LIMIT = 80
+      VERIFICATION_URL_LIMIT = 500
+      WEB_HOST = /\.[a-z]{2,}\z/ # ends in a top-level domain: not "30.5"
       DATE_FIELDS = %w[completed_on expires_on].freeze
       BLANK_VALUES = %w[null nil none n/a na unknown - ?].freeze
       ISO_DATE = /\A(\d{4})-(\d{2})-(\d{2})(?:[T ][\d:.]+Z?)?\z/
@@ -36,9 +46,10 @@ module Imports
       UNREADABLE_LIMIT = 40
       CONTENT_FIELDS = %w[holder_name certificate_type_code certificate_name_as_printed certificate_number completed_on expires_on].freeze
 
-      def initialize(pages:, codes:)
+      def initialize(pages:, codes:, issuer_codes: nil)
         @pages = Array(pages).map(&:to_i).sort
         @codes = codes.to_set { |code| code.to_s.upcase }
+        @issuer_codes = issuer_codes&.to_set { |code| code.to_s.upcase }
       end
 
       def call(raw)
@@ -62,7 +73,10 @@ module Imports
             "certificate_type_code" => code(entry["certificate_type_code"], notes),
             "certificate_name_as_printed" => string(entry["certificate_name_as_printed"], "certificate_name_as_printed"),
             "issuer" => string(entry["issuer"], "issuer"),
+            "certificate_issuer_code" => issuer_code(entry["certificate_issuer_code"], notes),
             "certificate_number" => string(entry["certificate_number"], "certificate_number"),
+            "verification_code" => verification_code(entry["verification_code"]),
+            "verification_url" => verification_url(entry["verification_url"]),
             "completed_on" => date(entry["completed_on"], "completed_on", notes, unreadable),
             "expires_on" => date(entry["expires_on"], "expires_on", notes, unreadable),
             "confidence" => confidence(entry["confidence"]),
@@ -80,12 +94,15 @@ module Imports
         end
 
         def string(value, field)
+          squished(value)&.truncate(STRING_LIMITS.fetch(field, 200))
+        end
+
+        # The squished text, or nil for a blank, a placeholder ("N/A") or a non-string.
+        def squished(value)
           return if value.nil? || value.is_a?(Hash) || value.is_a?(Array)
 
           text = value.to_s.squish
-          return if text.empty? || BLANK_VALUES.include?(text.downcase)
-
-          text.truncate(STRING_LIMITS.fetch(field, 200))
+          text unless text.empty? || BLANK_VALUES.include?(text.downcase)
         end
 
         def code(value, notes)
@@ -95,6 +112,31 @@ module Imports
 
           notes << "Model suggested unknown type code #{text.truncate(20).inspect}."
           nil
+        end
+
+        def issuer_code(value, notes)
+          text = string(value, "certificate_number")&.upcase
+          return if text.nil?
+          return text if issuer_codes.include?(text)
+
+          notes << "Model suggested unknown issuer code #{text.truncate(20).inspect}."
+          nil
+        end
+
+        def issuer_codes
+          @issuer_codes ||= CertificateIssuer.active.pluck(:code).to_set
+        end
+
+        def verification_code(value)
+          text = squished(value)
+          text if text && text.length <= VERIFICATION_CODE_LIMIT
+        end
+
+        def verification_url(value)
+          text = squished(value)&.gsub(/\s+/, "")
+          return if text.nil? || text.length > VERIFICATION_URL_LIMIT || text.include?("@")
+
+          text if CertificateIssuer.host_of(Certificate.normalize_verification_url(text))&.match?(WEB_HOST)
         end
 
         def date(value, field, notes, unreadable)

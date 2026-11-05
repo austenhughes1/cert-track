@@ -409,6 +409,188 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
     assert item.import_batch.reload.failed?
   end
 
+  # --- Phase 3b: issuers, verification code and link, authenticity --------------------------
+
+  REDCROSS_QR = "https://www.redcross.org/take-a-class/qrcode?certnumber=TEST123".freeze
+
+  test "a two-certificate PDF with a QR code on page 2: the second item gets it and its issuer by domain" do
+    pages = [
+      certificate_lines(name: "OSHA 30 Hour", holder: "Juan A. Ortiz", completed: COMPLETED),
+      certificate_lines(name: "Adult First Aid CPR AED", holder: "Li Chen", completed: COMPLETED, issuer: "Red Cross Training")
+    ]
+    issuer("REDCROSS")
+    item = pdf_item(pages, barcodes: [ { "page" => 2, "text" => REDCROSS_QR } ], extraction: extraction_with(ortiz_osha,
+      certificate_entry(pages: [ 2 ], holder: "Li Chen", code: "FIRSTAID", name: "Adult First Aid CPR AED", completed: COMPLETED,
+        issuer: "Red Cross Training")))
+
+    process(item)
+    split = item.split_items.sole
+
+    assert_equal [], item.barcodes
+    assert_equal [ nil, "unmatched", nil, nil ],
+      [ item.matched_certificate_issuer, item.issuer_match, item.proposed_verification_code, item.proposed_verification_url ]
+    assert_equal [ { "page" => 1, "text" => REDCROSS_QR } ], split.barcodes, "page 2 of the upload is page 1 of its own file"
+    assert_equal [ issuer("REDCROSS"), "matched" ], [ split.matched_certificate_issuer, split.issuer_match ]
+    assert_equal issuer("REDCROSS").id, split.issuer_suggestions.first["id"]
+    assert_equal [ "TEST123", REDCROSS_QR ], [ split.proposed_verification_code, split.proposed_verification_url ]
+    assert_equal "Red Cross Training", split.issuer_raw
+  end
+
+  test "the model's issuer code and printed code give the issuer's direct link; a printed link wins over it" do
+    item = image_item(extraction: extraction_with(ortiz_osha(issuer: "American Red Cross", issuer_code: "redcross", verification_code: "RC 77")))
+    printed = image_item(sha256: SecureRandom.hex(32), extraction: extraction_with(ortiz_osha(issuer_code: "REDCROSS",
+      verification_code: "RC-1", verification_url: "redcross.org/confirm")))
+    issuer("REDCROSS")
+
+    process(item)
+    process(printed)
+
+    assert_equal [ issuer("REDCROSS"), "matched", "RC 77" ],
+      [ item.matched_certificate_issuer, item.issuer_match, item.proposed_verification_code ]
+    assert_equal "https://www.redcross.org/take-a-class/qrcode?certnumber=RC%2077", item.proposed_verification_url
+    assert_equal [ "RC-1", "https://redcross.org/confirm" ], [ printed.proposed_verification_code, printed.proposed_verification_url ]
+  end
+
+  test "the model's code wins over the id in the QR link; a QR link on another site is no issuer's" do
+    issuer("REDCROSS")
+    item = image_item(barcodes: [ { "page" => 1, "text" => REDCROSS_QR } ],
+      extraction: extraction_with(ortiz_osha(verification_code: "PRINTED-1")))
+    lookalike = image_item(sha256: SecureRandom.hex(32), barcodes: [ { "page" => 1, "text" => "https://redcross-verify.com/c?certnumber=X9" } ],
+      extraction: extraction_with(ortiz_osha))
+
+    process(item)
+    process(lookalike)
+
+    assert_equal [ "PRINTED-1", REDCROSS_QR ], [ item.proposed_verification_code, item.proposed_verification_url ]
+    assert_equal [ nil, "unmatched", nil, nil ], [ lookalike.matched_certificate_issuer, lookalike.issuer_match,
+      lookalike.proposed_verification_code, lookalike.proposed_verification_url ]
+    assert_equal 1, lookalike.barcodes.size, "kept for the authenticity rules"
+  end
+
+  test "a printed link on another site gives way to the matched issuer's own link; a printed lookalike is kept and flagged" do
+    issuer("REDCROSS")
+    elsewhere = image_item(extraction: extraction_with(ortiz_osha(issuer_code: "REDCROSS", verification_code: "RC-1",
+      verification_url: "https://records.example-training.com/c/1")))
+    lookalike = image_item(sha256: SecureRandom.hex(32), extraction: extraction_with(ortiz_osha(issuer_code: "REDCROSS",
+      verification_code: "RC-1", verification_url: "https://www.redcross-verify.com/c/12345")))
+    unknown = image_item(sha256: SecureRandom.hex(32), extraction: extraction_with(ortiz_osha(verification_code: "RC-1",
+      verification_url: "https://records.example-training.com/c/1")))
+
+    [ elsewhere, lookalike, unknown ].each { |item| process(item) }
+
+    assert_equal "https://www.redcross.org/take-a-class/qrcode?certnumber=RC-1", elsewhere.proposed_verification_url
+    assert_equal "https://www.redcross-verify.com/c/12345", lookalike.proposed_verification_url
+    assert lookalike.authenticity_suspicious?, "so it is never auto-accepted, and the panel doesn't link it"
+    assert_equal "https://records.example-training.com/c/1", unknown.proposed_verification_url, "no issuer link to prefer"
+  end
+
+  test "several of the issuer's QR codes on one photo: the one with the certificate's code or number, else the holder's, else none" do
+    issuer("REDCROSS")
+    other = "https://www.redcross.org/take-a-class/qrcode?certnumber=OTHER456"
+    training = "https://verify.360training.com/qrcode-certificate-validation?enrollmentId=%s&s_fname=%s&s_lname=%s&issued=03/14/2025"
+    juans, marias = format(training, "111", "Juan", "Ortiz"), format(training, "222", "Maria", "Garcia")
+    cases = {
+      "by code" => [ [ other, REDCROSS_QR ], ortiz_osha(verification_code: "TEST123"), [ "TEST123", REDCROSS_QR ] ],
+      "by number" => [ [ other, REDCROSS_QR ], ortiz_osha(number: "test123"), [ "TEST123", REDCROSS_QR ] ],
+      "by holder" => [ [ marias, juans ], ortiz_osha(issuer_code: "360TRAINING"), [ "111", juans ] ],
+      "can't tell" => [ [ other, REDCROSS_QR ], ortiz_osha, [ nil, nil ] ]
+    }
+
+    cases.each do |label, (texts, certificate, expected)|
+      item = image_item(sha256: SecureRandom.hex(32), barcodes: texts.map { |text| { "page" => 1, "text" => text } },
+        extraction: extraction_with(certificate))
+
+      process(item)
+
+      assert_equal expected, [ item.proposed_verification_code, item.proposed_verification_url ], label
+      assert item.issuer_matched?, label
+    end
+  end
+
+  test "an item the issuer's site will be asked about waits for review, even when it would be auto-accepted" do
+    item = image_item(extraction: extraction_with(ortiz_osha(issuer_code: "NOF", verification_code: "NOF-1")))
+    issuer("NOF")
+
+    Verification::Config.with(auto_checks: true) do
+      with_auto_accept { assert_enqueued_with(job: Verification::CheckJob, args: [ item ]) { process(item) } }
+    end
+
+    assert item.needs_review?
+    assert_nil item.certificate
+    with_auto_accept do
+      assert_equal [ "The issuer's site hasn't been asked yet" ], Imports::Decider.new(item, issuer_check_pending: true).reasons
+      assert_empty Imports::Decider.new(item).reasons
+    end
+
+    plain = image_item(sha256: SecureRandom.hex(32), extraction: extraction_with(ortiz_osha(issuer_code: "NOF", verification_code: "NOF-1")))
+    with_auto_accept { process(plain) }
+    assert plain.accepted?, "with automatic checks off nothing is asked, so nothing is waited for"
+  end
+
+  test "a printed name only suggests an issuer, and its link template is not used" do
+    issuer("REDCROSS")
+    item = image_item(extraction: extraction_with(ortiz_osha(issuer: "American Red Cros", verification_code: "RC-1")))
+
+    process(item)
+
+    assert_equal [ issuer("REDCROSS"), "suggested" ], [ item.matched_certificate_issuer, item.issuer_match ]
+    assert_equal [ "RC-1", nil ], [ item.proposed_verification_code, item.proposed_verification_url ]
+  end
+
+  test "authenticity is checked with local rules only, before deciding, and carried to an auto-accepted certificate" do
+    item = image_item(extraction: extraction_with(ortiz_osha))
+
+    with_verification_run(status: :needs_check) do |calls|
+      with_auto_accept { process(item) }
+
+      assert_equal [ [ item.id, { network: false } ] ], calls
+    end
+    assert item.accepted?
+    assert_equal [ "needs_check", "rules", "Set by the test." ],
+      [ item.certificate.authenticity_status, item.certificate.authenticity_method, item.certificate.authenticity_note ]
+  end
+
+  test "a flagged item is never auto-accepted" do
+    Authenticity::FLAGGED_STATUSES.each do |status|
+      item = image_item(sha256: SecureRandom.hex(32), extraction: extraction_with(ortiz_osha))
+
+      with_verification_run(status:) { with_auto_accept { process(item) } }
+
+      assert item.needs_review?, status
+      assert_nil item.certificate, status
+      assert_equal status, item.authenticity_status
+    end
+  end
+
+  test "an issuer whose site can confirm the code is asked once the item is saved, when automatic checks are on" do
+    item = image_item(extraction: extraction_with(ortiz_osha(issuer_code: "NOF", verification_code: "NOF-1")))
+    issuer("NOF")
+
+    Verification::Config.with(auto_checks: true) do
+      assert_enqueued_with(job: Verification::CheckJob, args: [ item ]) { process(item) }
+    end
+    assert_equal "NOF-1", item.proposed_verification_code
+  end
+
+  test "no issuer check is enqueued with checks off, without a code, for an assisted issuer or a suggested one" do
+    issuer("NOF")
+    items = {
+      "checks off" => [ false, ortiz_osha(issuer_code: "NOF", verification_code: "NOF-1") ],
+      "no code" => [ true, ortiz_osha(issuer_code: "NOF") ],
+      "assisted issuer" => [ true, ortiz_osha(issuer_code: "REDCROSS", verification_code: "RC-1") ],
+      "suggested issuer" => [ true, ortiz_osha(issuer: "National OSHA Foundatoin", verification_code: "NOF-1") ]
+    }
+
+    items.each do |label, (checks, certificate)|
+      item = image_item(sha256: SecureRandom.hex(32), extraction: extraction_with(certificate))
+      Verification::Config.with(auto_checks: checks) do
+        assert_no_enqueued_jobs(only: Verification::CheckJob) { process(item) }
+      end
+      assert item.needs_review?, label
+    end
+    assert_equal "suggested", ImportItem.order(:id).last.issuer_match
+  end
+
   private
     # The extraction AiExtractJob would store for these model certificates (string keys).
     def normalized(*certificates)

@@ -51,7 +51,8 @@ class Imports::DeciderTest < ActiveSupport::TestCase
       "no confidence" => item(confidence: nil),
       "date problems noted" => item(error_message: "The completion date 2027-01-01 is in the future."),
       "completion date in the future" => item(proposed_completed_on: Date.current + 1),
-      "expiry before completion" => item(proposed_expires_on: Date.current - 20)
+      "expiry before completion" => item(proposed_expires_on: Date.current - 20),
+      "flagged for review" => item(authenticity_status: :suspicious)
     }.each do |label, record|
       assert_equal :review, decide(record), label
       assert_equal 1, Imports::Config.with(auto_accept_enabled: true) { Imports::Decider.new(record).reasons.size }, label
@@ -68,6 +69,41 @@ class Imports::DeciderTest < ActiveSupport::TestCase
     record = item(matched_certificate_type: certificate_types(:cdl_a), proposed_expires_on: Date.current + 400, proposed_expires_on_source: :printed)
 
     assert_equal :accept, decide(record)
+  end
+
+  test "a flagged authenticity check is named; one that needs a person or can't be done doesn't block" do
+    Authenticity::FLAGGED_STATUSES.each do |status|
+      reasons = Imports::Config.with(auto_accept_enabled: true) { Imports::Decider.new(item(authenticity_status: status)).reasons }
+      assert_equal [ "Flagged for review: #{Authenticity::LABELS.fetch(status).downcase_first}" ], reasons
+    end
+    assert_equal "Flagged for review: suspicious link",
+      Imports::Config.with(auto_accept_enabled: true) { Imports::Decider.new(item(authenticity_status: :suspicious)).reasons.sole }
+
+    %i[unchecked needs_check verified cannot_verify].each do |status|
+      assert_equal :accept, decide(item(authenticity_status: status)), status
+    end
+  end
+
+  test "a flag only for review blocks auto-accept, whatever found it; a person's not found is named as fake" do
+    %w[automatic:national_cpr_foundation qr_details:qr_details_360training qr_link verification_link].each do |method|
+      record = item(authenticity_status: :mismatch, authenticity_method: method)
+      assert_equal :review, decide(record), method
+      assert_equal [ "Flagged for review: doesn't match issuer" ],
+        Imports::Config.with(auto_accept_enabled: true) { Imports::Decider.new(record).reasons }
+    end
+
+    fake = item(authenticity_status: :not_found, authenticity_method: "person")
+    assert_equal :review, decide(fake)
+    assert_equal [ "Confirmed fake: not found by issuer" ], Imports::Config.with(auto_accept_enabled: true) { Imports::Decider.new(fake).reasons }
+  end
+
+  test "an issuer check still waiting for the issuer's site keeps it for review" do
+    Imports::Config.with(auto_accept_enabled: true) do
+      decider = Imports::Decider.new(item(authenticity_status: :needs_check), issuer_check_pending: true)
+
+      assert_equal :review, decider.call
+      assert_equal [ "The issuer's site hasn't been asked yet" ], decider.reasons
+    end
   end
 
   test "the confidence threshold comes from Imports::Config" do

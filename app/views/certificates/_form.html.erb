@@ -1,9 +1,11 @@
-<%# locals: (certificate:, crew_member:) %>
+<%# locals: (certificate:, crew_member:, issuer_choice: nil, other_issuer_name: nil) %>
+<%# issuer_choice: "other" when the issuer picker's "Other…" was chosen (CertificatesController). %>
 <% input_class = "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
 <% types = CertificateType.active.ordered.to_a %>
 <% types.unshift(certificate.certificate_type) if certificate.certificate_type && !types.include?(certificate.certificate_type) %>
 <% type_options = types.map { |type| [ "#{type.name} (#{type.code}) · #{type.never_expires? ? "never expires" : "valid #{pluralize(type.validity_months, "month")}"}", type.id ] } %>
 <% selected_type = certificate.certificate_type %>
+<% saved_issuer = certificate.certificate_issuer if certificate.certificate_issuer&.persisted? %>
 <%# Direct uploads that already finished before a validation error; resubmitted so nothing is uploaded twice. %>
 <% carried_over = certificate.files.reject(&:persisted?).map(&:blob).select do |blob|
      blob.persisted? && Certificate::ALLOWED_CONTENT_TYPES.include?(blob.content_type) && blob.byte_size <= Certificate::MAX_FILE_SIZE
@@ -36,10 +38,14 @@
       <%= form.label :certificate_number, "Certificate or card number", class: "block text-sm font-medium text-gray-700" %>
       <%= form.text_field :certificate_number, autocomplete: "off", class: "#{input_class} font-mono" %>
     </div>
-    <div>
-      <%= form.label :issued_by, "Issued by", class: "block text-sm font-medium text-gray-700" %>
-      <%= form.text_field :issued_by, autocomplete: "off", placeholder: "Trainer or provider", class: input_class %>
-    </div>
+    <%# The issuer's name as printed (an import's reading, or older records); the picker below is the issuer. %>
+    <% if certificate.issued_by_in_database.present? || certificate.issued_by.present? %>
+      <div>
+        <%= form.label :issued_by, "Issuer as printed", class: "block text-sm font-medium text-gray-700" %>
+        <%= form.text_field :issued_by, autocomplete: "off", aria: { describedby: "issued_by_hint" }, class: input_class %>
+        <p id="issued_by_hint" class="mt-1 text-xs text-gray-500">The trainer or provider named on the card.</p>
+      </div>
+    <% end %>
 
     <div>
       <%= form.label :completed_on, "Completed on", class: "block text-sm font-medium text-gray-700" %>
@@ -65,6 +71,27 @@
       </p>
     </div>
   </div>
+
+  <fieldset class="space-y-4 rounded-md border border-gray-200 p-4" id="verification_fields">
+    <legend class="px-1 text-sm font-medium text-gray-700">How to check it</legend>
+    <%= render "shared/issuer_picker", form: form, issuers: CertificateIssuer.active.ordered.to_a,
+          selected: issuer_choice || certificate.certificate_issuer_id, current: saved_issuer,
+          other_name: other_issuer_name, input_class: input_class %>
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div>
+        <%= form.label :verification_code, "Verification code", class: "block text-sm font-medium text-gray-700" %>
+        <%= form.text_field :verification_code, autocomplete: "off", spellcheck: false, aria: { describedby: "verification_code_hint" },
+              class: "#{input_class} font-mono" %>
+        <p id="verification_code_hint" class="mt-1 text-xs text-gray-500">What you type into the issuer's lookup page, often the certificate ID.</p>
+      </div>
+      <div>
+        <%= form.label :verification_url, "Verification link", class: "block text-sm font-medium text-gray-700" %>
+        <%= form.text_field :verification_url, autocomplete: "off", spellcheck: false, inputmode: "url",
+              placeholder: "https://", aria: { describedby: "verification_url_hint" }, class: input_class %>
+        <p id="verification_url_hint" class="mt-1 text-xs text-gray-500">The certificate's own page on the issuer's site, from its QR code or printed address.</p>
+      </div>
+    </div>
+  </fieldset>
 
   <div>
     <%= form.label :notes, class: "block text-sm font-medium text-gray-700" %>

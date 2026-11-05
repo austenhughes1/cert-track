@@ -1,8 +1,11 @@
 module Ask
   module Answers
-    # "What's missing on 2417?" Missing and expired requirements (Compliance::ProjectReport
-    # #gaps) on one project, or on every active project (Compliance::Overview) when none
-    # is named. Narrowed by a person or a type. One section per project.
+    # "What's missing on 2417?" Missing, expired and confirmed fake requirements
+    # (Compliance::ProjectReport#gaps) on one project, or on every active project
+    # (Compliance::Overview) when none is named. Narrowed by a person or a type. One
+    # section per project. A certificate only flagged for review is a gap only if its dates make it one.
+    #   2417 · Tower 2417 Upgrade has 3 gaps (1 confirmed fake, 1 expired, 1 missing): Juan Ortiz: Flagger
+    #   (confirmed fake: not found by issuer); Mari Garcia: Flagger (missing), First Aid/CPR/AED (expired ...).
     class Gaps < Base
       def call
         reports = project ? [ Compliance::ProjectReport.new(project, today: today) ] : Compliance::Overview.new(Project.active.ordered, today: today).reports
@@ -46,10 +49,10 @@ module Ask
           end
         end
 
-        # "3 missing, 2 expired"
+        # "1 confirmed fake, 2 expired, 3 missing"
         def breakdown(gaps)
           gaps.group_by(&:status).sort_by { |status, _| Compliance::SEVERITY.index(status) }
-            .map { |status, status_gaps| "#{status_gaps.size} #{status}" }.join(", ")
+            .map { |status, status_gaps| "#{status_gaps.size} #{Compliance.label(status).downcase}" }.join(", ")
         end
 
         # "Mari Garcia: Flagger (missing), First Aid/CPR/AED (expired Oct 29, 2026); Li Chen: ..."
@@ -66,7 +69,7 @@ module Ask
         end
 
         def gap_text(gap)
-          state = gap.status == "expired" ? "expired #{date(gap.certificate.expires_on)}" : "missing"
+          state = gap_state(gap)
           certificate_type ? state : "#{gap.certificate_type.name} (#{state})"
         end
 

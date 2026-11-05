@@ -5,10 +5,33 @@ module Imports
   #   Imports::Accept.new(item, user: nil, auto: true).call # pipeline, Imports::Decider said :accept
   #
   # attributes may override crew_member_id, certificate_type_id, completed_on, expires_on,
-  # certificate_number, issued_by and notes; a key that is present but blank clears the value.
+  # certificate_number, issued_by, notes, and (Phase 3b) certificate_issuer_id,
+  # verification_code and verification_url; a key that is present but blank clears the value.
   # Without overrides the item's proposals are used (matched_crew_member and
   # matched_certificate_type hold the match or top suggestion, or a reviewer's pick saved with
-  # "Save edits": person_match picked, type_match matched).
+  # "Save edits": person_match picked, type_match matched). The controller resolves the issuer
+  # picker's "Other..." (CertificateIssuer.find_or_create_from_name!) before calling this.
+  #
+  # Issuer and verification (Phase 3b): the certificate gets the item's matched issuer (when a
+  # person accepts, the match or top suggestion they were shown; when auto-accepting, only a
+  # match), proposed_verification_code and proposed_verification_url, and its authenticity
+  # check (authenticity_* columns: accepting a flagged item is a person's decision, and the
+  # certificate stays flagged for review, counting by its dates; one a person recorded as not
+  # found or not matching stays confirmed fake, so it counts as not valid and is left out of
+  # packets, or is kept as history when a genuine certificate of its type is on file: see
+  # Certificate). Unless the certificate's details differ from the ones that person checked on
+  # the item (the review screen saves its edits before recording a result): a code typed over a
+  # misread one, another issuer or link, or for a mismatch another person or card date. Then it
+  # is needs_check again, saying what changed (Authenticity), and is checked again after the
+  # accept commits. In a merge, the issuer is the first match among the items (else the first
+  # suggestion), the code and link come together from the first item that has either (the back
+  # of a card often carries the QR code), and the check is a person's confirmed fake if any, else
+  # a flagged item's, else a person's result, else the most conclusive. When what the
+  # certificate's check would compare isn't what that check compared (the reviewer changed the
+  # issuer, code, link, person or a date of the card; a merge took them from another item; or a
+  # person accepted a suggested issuer or person, which an item's check doesn't trust),
+  # Verification::CheckJob checks the certificate again after the accept commits. So an issuer's
+  # "Verified" for the printed name can't carry over to a certificate for someone else.
   #
   # Expiry: a printed proposal is kept as printed. A computed or missing one is left for the
   # Certificate model to derive from the final type and completion date (computed, or none
@@ -52,7 +75,10 @@ module Imports
     # The item's status doesn't allow this review action. errors are on the item.
     class NotReviewable < ActiveRecord::RecordInvalid; end
 
-    OVERRIDABLE_ATTRIBUTES = %i[crew_member_id certificate_type_id completed_on expires_on certificate_number issued_by notes].freeze
+    OVERRIDABLE_ATTRIBUTES = %i[crew_member_id certificate_type_id completed_on expires_on certificate_number issued_by notes
+      certificate_issuer_id verification_code verification_url].freeze
+    # Least to most conclusive, for picking a merged certificate's authenticity check.
+    AUTHENTICITY_RANK = %w[unchecked cannot_verify needs_check verified].freeze
     # %s is the text the AI read, e.g. "2027-06".
     UNREADABLE_EXPIRY_MESSAGE = %(The card's expiry ("%s") could not be read. Type the expiry date from the card.).freeze
     REVIEWABLE_STATUSES = %w[needs_review].freeze
@@ -99,6 +125,7 @@ module Imports
         certificate
       end
 
+      Verification::CheckJob.perform_later(certificate) if recheck?(certificate)
       all_items.map(&:import_batch).uniq.each(&:check_completion!) unless @auto
       certificate
     end
@@ -125,10 +152,16 @@ module Imports
           certificate_number: @attributes.key?(:certificate_number) ? @attributes[:certificate_number] : item.proposed_certificate_number,
           issued_by: @attributes.key?(:issued_by) ? @attributes[:issued_by] : item.issuer_raw,
           notes: @attributes[:notes].presence,
+          certificate_issuer: override(:certificate_issuer_id) { |id| CertificateIssuer.find_by(id: id) } ||
+            default(:certificate_issuer_id, proposed_verification["certificate_issuer"]),
+          verification_code: @attributes.key?(:verification_code) ? @attributes[:verification_code] : proposed_verification["verification_code"],
+          verification_url: @attributes.key?(:verification_url) ? @attributes[:verification_url] : proposed_verification["verification_url"],
           source: :import, import_item_id: item.id, # by id: a refused certificate must not ride along on item.created_certificates
           verified_by: user, verified_at: (Time.current if user)
         )
+        certificate.assign_attributes(authenticity_source.authenticity_attributes)
         assign_expiry(certificate)
+        reset_stale_fake(certificate)
         blobs = all_items.filter_map { |accepted| accepted.file.blob if accepted.file.attached? }.uniq(&:id)
         certificate.files.attach(blobs) if blobs.any?
         certificate
@@ -144,6 +177,61 @@ module Imports
 
       def default(key, proposal)
         @attributes.key?(key) ? nil : proposal
+      end
+
+      # The issuer, code and link the items propose (see the class comment).
+      def proposed_verification
+        @proposed_verification ||= begin
+          issuer = all_items.find(&:issuer_matched?)&.matched_certificate_issuer
+          issuer ||= all_items.lazy.filter_map(&:matched_certificate_issuer).first unless @auto
+          source = all_items.find { |accepted| accepted.proposed_verification_code.present? || accepted.proposed_verification_url.present? }
+          { "certificate_issuer" => issuer, "verification_code" => source&.proposed_verification_code,
+            "verification_url" => source&.proposed_verification_url }
+        end
+      end
+
+      # A person's confirmed fake, else a flagged item's check (a merge never hides either), else a
+      # person's result, else the most conclusive; ties go to item.
+      def authenticity_source
+        all_items.each_with_index.max_by do |accepted, index|
+          by = if accepted.authenticity_confirmed_fake? then 3
+          elsif accepted.authenticity_flagged? then 2
+          elsif accepted.authenticity_set_by_person? then 1
+          else 0
+          end
+          [ by, AUTHENTICITY_RANK.index(accepted.authenticity_status).to_i, -index ]
+        end.first
+      end
+
+      # A person's not_found or mismatch on the item was about the details they checked (kept with
+      # it, Authenticity). When the certificate's differ, it isn't confirmed fake (see the class comment).
+      def reset_stale_fake(certificate)
+        source = authenticity_source
+        return unless source.authenticity_confirmed_fake?
+
+        changed = source.authenticity_changed_since_check(source.authenticity_inputs(database: true), now: certificate.authenticity_inputs)
+        certificate.assign_attributes(source.authenticity_reset_attributes(changed)) if changed.any?
+      end
+
+      # Whether what the certificate's check compares (Verification::Run: the issuer, code, link,
+      # holder and the card's own dates) differs from what its copied check compared. An item's check
+      # trusts the issuer only when issuer_match is matched, and holds the person to the member only
+      # when matched or picked; a computed expiry is never compared. Never when auto-accepting (the
+      # pipeline's own check covers the certificate, Imports::ProcessExtractionJob), nor over a
+      # person's result, which Run leaves alone. Always when a person's fake result was reset.
+      def recheck?(certificate)
+        return false if @auto
+        return true if certificate.authenticity_method == Authenticity::DETAILS_CHANGED_METHOD
+
+        source = authenticity_source
+        return false if source.authenticity_set_by_person?
+
+        checked = [ (source.matched_certificate_issuer_id if source.issuer_matched?), source.proposed_verification_code,
+          source.proposed_verification_url, (source.matched_crew_member_id if source.person_matched? || source.person_picked?),
+          source.proposed_completed_on, (source.proposed_expires_on unless source.proposed_expiry_computed? || source.proposed_expiry_none?) ]
+        now = [ certificate.certificate_issuer_id, certificate.verification_code, certificate.verification_url, certificate.crew_member_id,
+          certificate.completed_on, (certificate.expires_on unless certificate.expiry_computed? || certificate.expiry_none?) ]
+        now != checked
       end
 
       def assign_expiry(certificate)

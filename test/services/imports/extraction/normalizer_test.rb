@@ -10,7 +10,8 @@ class Imports::Extraction::NormalizerTest < ActiveSupport::TestCase
       "certificates" => [ {
         "pages" => [ 1 ], "holder_name" => "Juan A. Ortiz", "certificate_type_code" => "OSHA30",
         "certificate_name_as_printed" => "OSHA 30-Hour Construction", "issuer" => "Example Safety Training LLC",
-        "certificate_number" => "30-1234567", "completed_on" => "2025-03-14", "expires_on" => nil,
+        "certificate_issuer_code" => nil, "certificate_number" => "30-1234567", "verification_code" => nil,
+        "verification_url" => nil, "completed_on" => "2025-03-14", "expires_on" => nil,
         "confidence" => 0.92, "notes" => "No expiration printed"
       } ],
       "non_certificate_pages" => [ 2 ]
@@ -119,6 +120,52 @@ class Imports::Extraction::NormalizerTest < ActiveSupport::TestCase
     assert_equal [ 2 ], data["non_certificate_pages"]
   end
 
+  test "an issuer code is kept only when it is an active issuer's, case-insensitive, else null with a note" do
+    data = normalize({ "certificates" => [ certificate("certificate_issuer_code" => "redcross "),
+      certificate("certificate_issuer_code" => "OSHA", "pages" => [ 2 ]) ] }, pages: [ 1, 2 ], issuer_codes: %w[REDCROSS NOF])
+
+    assert_equal [ "REDCROSS", nil ], data["certificates"].map { |entry| entry["certificate_issuer_code"] }
+    assert_match 'unknown issuer code "OSHA"', data["certificates"].last["notes"]
+  end
+
+  test "without issuer_codes, the active issuers' codes are looked up when a reply names one" do
+    CertificateIssuer.create!(name: "American Red Cross", code: "REDCROSS")
+    CertificateIssuer.create!(name: "Retired Provider", code: "RETIRED", active: false)
+    normalizer = Imports::Extraction::Normalizer.new(pages: [ 1 ], codes: CODES)
+
+    codes = %w[REDCROSS RETIRED].map do |code|
+      normalizer.call("certificates" => [ certificate("certificate_issuer_code" => code) ])["certificates"].sole["certificate_issuer_code"]
+    end
+    assert_equal [ "REDCROSS", nil ], codes
+  end
+
+  test "verification codes are kept as printed, but never cut short" do
+    entry = normalize({ "certificates" => [ certificate("verification_code" => "  RC-123  456 ") ] })["certificates"].sole
+    assert_equal "RC-123 456", entry["verification_code"]
+
+    [ "N/A", "", "9" * 81, { "code" => "1" } ].each do |value|
+      assert_nil normalize({ "certificates" => [ certificate("verification_code" => value) ] })["certificates"].sole["verification_code"], value.inspect
+    end
+  end
+
+  test "a verification link must look like a web address; OCR's spaces are taken out" do
+    {
+      "redcross.org/confirm" => "redcross.org/confirm",
+      "https://www.redcross.org/take-a-class/ qrcode?certnumber=1" => "https://www.redcross.org/take-a-class/qrcode?certnumber=1",
+      "WWW.ATSSA.COM/verify" => "WWW.ATSSA.COM/verify",
+      "info@redcross.org" => nil,
+      "Call 1-800-621-7615" => nil,
+      "30.5" => nil,
+      "ftp://files.example.com" => nil,
+      "Scan the QR code" => nil,
+      "unknown" => nil,
+      "https://#{"a" * 500}.com" => nil
+    }.each do |printed, expected|
+      actual = normalize({ "certificates" => [ certificate("verification_url" => printed) ] })["certificates"].sole["verification_url"]
+      expected.nil? ? assert_nil(actual, printed) : assert_equal(expected, actual, printed)
+    end
+  end
+
   test "a bare array or garbage still yields the contract shape" do
     assert_equal 1, normalize([ certificate ])["certificates"].size
     assert_equal({ "certificates" => [], "non_certificate_pages" => [ 1 ] }, normalize("nonsense"))
@@ -126,8 +173,8 @@ class Imports::Extraction::NormalizerTest < ActiveSupport::TestCase
   end
 
   private
-    def normalize(raw, pages: [ 1 ])
-      Imports::Extraction::Normalizer.new(pages: pages, codes: CODES).call(raw)
+    def normalize(raw, pages: [ 1 ], issuer_codes: [])
+      Imports::Extraction::Normalizer.new(pages: pages, codes: CODES, issuer_codes: issuer_codes).call(raw)
     end
 
     def certificate(overrides = {})

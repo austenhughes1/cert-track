@@ -9,9 +9,12 @@ module Compliance
   # out entirely: they are not on the crew any more, so they are neither gaps nor rows.
   # A column type that does not apply to a person's effective role (the assignment's
   # role, else the member's role) is a "not_required" cell with no certificate.
+  # A current certificate a person confirmed fake with its issuer is a "fake" cell
+  # (Compliance.status_for): a gap like a missing or expired one. One only flagged for review
+  # keeps the status its dates give it.
   class ProjectReport
     NOT_REQUIRED = "not_required".freeze
-    GAP_STATUSES = %w[missing expired].freeze
+    GAP_STATUSES = %w[missing expired fake].freeze
     CSV_HEADER = [ "Last name", "First name", "Role", "Employer" ].freeze
 
     Cell = Data.define(:certificate_type, :status, :certificate, :expires_on) do
@@ -92,7 +95,7 @@ module Compliance
       end
     end
 
-    # Missing and expired cells, in row then column order.
+    # Missing, expired and fake cells, in row then column order.
     def gaps
       @gaps ||= rows.flat_map do |row|
         row.gaps.map do |cell|
@@ -102,18 +105,19 @@ module Compliance
       end
     end
 
-    # True when no required cell is missing or expired.
+    # True when no required cell is missing, expired or fake.
     def compliant?
       gaps.empty?
     end
 
-    # The current certificates shown in required cells (packet building, file preloads).
+    # The current certificates shown in required cells, fake ones included (file preloads).
     def certificates
       @certificates ||= rows.flat_map { |row| row.cells.filter_map(&:certificate) }
     end
 
     # One line per row: name, role, employer, then one column per type code holding
-    # "valid (2027-03-14)", "expired (2025-01-02)", "missing", "not required" and so on.
+    # "valid (2027-03-14)", "expired (2025-01-02)", "confirmed fake (2027-03-14)",
+    # "missing", "not required" and so on.
     def to_csv
       lines = [ CSV_HEADER + columns.map(&:code) ]
       rows.each do |row|
@@ -164,7 +168,7 @@ module Compliance
       end
 
       def csv_value(cell)
-        text = cell.status.tr("_", " ")
+        text = (Compliance::LABELS[cell.status] || cell.status.tr("_", " ")).downcase
         cell.expires_on ? "#{text} (#{cell.expires_on.iso8601})" : text
       end
 

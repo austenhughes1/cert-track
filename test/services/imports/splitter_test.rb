@@ -146,6 +146,37 @@ class Imports::SplitterTest < ActiveSupport::TestCase
     assert_equal "=== page 2 ===\n#{PAGES[1].join("\n")}", parts.last.item.extracted_text
   end
 
+  test "each part gets the QR codes on its own pages, numbered as in its own file" do
+    barcodes = [ { "page" => 1, "text" => "https://www.redcross.org/take-a-class/qrcode?certnumber=A1" },
+                 { "page" => 4, "text" => "https://verify.360training.com/qrcode-certificate-validation?enrollmentId=9" },
+                 { "page" => 2, "text" => "https://example.com/brochure" } ]
+    item = pdf_item(PAGES, extraction: nil, barcodes:)
+
+    first, second = split(item, certificate_entry(pages: [ 1 ]), certificate_entry(pages: [ 3, 4 ])).map { ImportItem.find(_1.item.id) }
+
+    assert_equal [ barcodes[0] ], first.barcodes
+    assert_equal [ barcodes[1].merge("page" => 2) ], second.barcodes, "page 4 of the upload is page 2 of the cut-out file"
+  end
+
+  test "a part that keeps the whole file keeps the file's page numbers" do
+    barcodes = [ { "page" => 2, "text" => "https://www.redcross.org/take-a-class/qrcode?certnumber=A1" } ]
+    item = pipeline_item(bytes: "%PDF-1.4\n%%EOF\n", filename: "broken.pdf", content_type: "application/pdf",
+      extracted_text: marked_text(PAGES.first(2)), barcodes:)
+
+    first, second = split(item, certificate_entry(pages: [ 1 ]), certificate_entry(pages: [ 2 ])).map { ImportItem.find(_1.item.id) }
+
+    assert_equal [ [], barcodes ], [ first.barcodes, second.barcodes ]
+  end
+
+  test "every item of an image shares its QR codes" do
+    barcodes = [ { "page" => 1, "text" => "https://www.redcross.org/take-a-class/qrcode?certnumber=A1" } ]
+    item = image_item(extraction: nil, barcodes:)
+
+    parts = split(item, certificate_entry(pages: [ 1 ]), certificate_entry(pages: [ 1 ], holder: "Li Chen"))
+
+    assert_equal [ barcodes, barcodes ], parts.map { ImportItem.find(_1.item.id).barcodes }
+  end
+
   test "no certificates, no parts" do
     assert_equal [], Imports::Splitter.new(pdf_item(PAGES, extraction: nil)).call([])
   end

@@ -1,0 +1,131 @@
+<% content_for :title, "Issuers" %>
+<% turbo_refreshes_with method: :morph, scroll: :preserve %>
+
+<div class="mb-4 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-semibold">Issuers</h1>
+    <p class="mt-1 max-w-3xl text-sm text-gray-500">
+      Who issues certificates and how each one's are checked. Imports recognise an issuer by its QR code's website,
+      its code or its name, and the authenticity panel shows reviewers where to look a certificate up.
+    </p>
+  </div>
+  <%= link_to "New issuer", new_certificate_issuer_path, class: "rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+</div>
+
+<% if @needs_details_count.positive? && @status != "needs_details" %>
+  <div class="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" id="needs_details_banner">
+    <%= pluralize(@needs_details_count, "issuer was", plural: "issuers were") %> added with <%= CertificateIssuersHelper::OTHER_LABEL %>
+    and <%= @needs_details_count == 1 ? "needs its" : "need their" %> verification details.
+    <%= link_to "Show #{@needs_details_count == 1 ? "it" : "them"}", certificate_issuers_path(status: "needs_details"), class: "font-medium underline" %>
+  </div>
+<% end %>
+
+<% active_count = @counts_by_active.fetch(true, 0) %>
+<% inactive_count = @counts_by_active.fetch(false, 0) %>
+<nav class="mb-4 flex gap-1 text-sm" aria-label="Filter by status">
+  <% [ [ nil, "Active", active_count ], [ "needs_details", "Needs details", @needs_details_count ],
+       [ "inactive", "Inactive", inactive_count ], [ "all", "All", active_count + inactive_count ] ].each do |status, label, count| %>
+    <%= link_to certificate_issuers_path(status: status), aria: { current: ("page" if @status == status) },
+          class: class_names("rounded-md px-3 py-1.5 font-medium", @status == status ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-200") do %>
+      <%= label %> <span class="ml-0.5 tabular-nums opacity-70"><%= count %></span>
+    <% end %>
+  <% end %>
+</nav>
+
+<% if @certificate_issuers.empty? %>
+  <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
+    <% if active_count + inactive_count == 0 %>
+      <p class="text-sm font-medium text-gray-900">No issuers yet</p>
+      <p class="mt-1 text-sm text-gray-500">
+        Add the first one: <%= link_to "new issuer", new_certificate_issuer_path, class: "text-blue-700 hover:underline" %>,
+        or run <code>bin/rails db:seed</code> for the default list.
+      </p>
+    <% else %>
+      <p class="text-sm font-medium text-gray-900">
+        <%= { "needs_details" => "No issuers need details", "inactive" => "No inactive issuers" }.fetch(@status, "No active issuers") %>
+      </p>
+      <p class="mt-1 text-sm text-gray-500"><%= link_to "Show all issuers", certificate_issuers_path(status: "all"), class: "text-blue-700 hover:underline" %></p>
+    <% end %>
+  </div>
+<% else %>
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <tr>
+          <th scope="col" class="px-3 py-2" title="Position: lower numbers come first">Order</th>
+          <th scope="col" class="px-3 py-2">Code</th>
+          <th scope="col" class="px-3 py-2">Name</th>
+          <th scope="col" class="px-3 py-2">How it verifies</th>
+          <th scope="col" class="px-3 py-2">Check</th>
+          <th scope="col" class="px-3 py-2">Domains</th>
+          <th scope="col" class="px-3 py-2">Status</th>
+          <th scope="col" class="px-3 py-2 text-right" title="Current certificates from this issuer (superseded history not counted)">Current certs</th>
+          <th scope="col" class="px-3 py-2"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        <% @certificate_issuers.each do |issuer| %>
+          <% usage = @usage.fetch(issuer.id) %>
+          <tr id="<%= dom_id(issuer) %>" class="<%= class_names("align-top hover:bg-gray-50", "bg-gray-50 text-gray-400": !issuer.active?) %>">
+            <td class="whitespace-nowrap px-3 py-2 text-xs tabular-nums text-gray-400"><%= issuer.position || "–" %></td>
+            <td class="<%= class_names("whitespace-nowrap px-3 py-2 font-mono text-xs font-semibold", issuer.active? ? "text-gray-900" : "text-gray-400") %>" data-column="code"><%= issuer.code %></td>
+            <td class="px-3 py-2" data-column="name">
+              <span class="<%= class_names("font-medium", issuer.active? ? "text-gray-900" : "text-gray-400") %>"><%= issuer.name %></span>
+              <% if certificate_issuer_needs_details?(issuer) %>
+                <span class="ml-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" data-needs-details
+                      title="Added with <%= CertificateIssuersHelper::OTHER_LABEL %> in an issuer picker; no method or domains yet">Needs details</span>
+              <% end %>
+              <% if issuer.aliases.any? %>
+                <p class="mt-0.5 max-w-xs truncate text-xs text-gray-500" title="<%= issuer.aliases.join("\n") %>">Also: <%= issuer.aliases.join(", ") %></p>
+              <% end %>
+            </td>
+            <td class="px-3 py-2" data-column="method"><%= certificate_issuer_method_label(issuer) %></td>
+            <td class="px-3 py-2" data-column="check">
+              <% if issuer.automatic_check? %>
+                <span class="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700"
+                      title="<%= issuer.automatic_check %>"><%= certificate_issuer_check_label(issuer) %></span>
+              <% else %>
+                <span class="text-gray-500"><%= certificate_issuer_check_label(issuer) %></span>
+              <% end %>
+            </td>
+            <td class="px-3 py-2 font-mono text-xs" data-column="domains">
+              <%= issuer.domains.any? ? issuer.domains.join(", ") : tag.span("—", class: "font-sans text-gray-400") %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2" data-column="status">
+              <% if issuer.active? %>
+                <span class="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">Active</span>
+              <% else %>
+                <span class="inline-flex rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">Inactive</span>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums" data-column="current-certificates"
+                title="<%= pluralize(usage.certificates, "certificate") %> including history"><%= usage.current_certificates %></td>
+            <td class="whitespace-nowrap px-3 py-2">
+              <div class="flex items-center justify-end gap-3">
+                <%= link_to "Edit", edit_certificate_issuer_path(issuer), class: "text-blue-700 hover:underline" %>
+                <% if issuer.active? %>
+                  <%= button_to "Deactivate", certificate_issuer_path(issuer), method: :patch,
+                        params: { certificate_issuer: { active: false }, status: @status },
+                        class: "cursor-pointer text-gray-600 hover:underline",
+                        form: { data: { turbo_confirm: "Deactivate #{issuer.name}? Certificates that name it keep it." } } %>
+                <% else %>
+                  <%= button_to "Reactivate", certificate_issuer_path(issuer), method: :patch,
+                        params: { certificate_issuer: { active: true }, status: @status },
+                        class: "cursor-pointer text-blue-700 hover:underline" %>
+                <% end %>
+                <% unless usage.in_use? %>
+                  <%= button_to "Delete", certificate_issuer_path(issuer), method: :delete, params: { status: @status },
+                        class: "cursor-pointer text-red-700 hover:underline",
+                        form: { data: { turbo_confirm: "Delete #{issuer.name}? Nothing uses it yet." } } %>
+                <% end %>
+              </div>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-2 text-xs text-gray-500">
+    Issuers in use (certificates or import matches) can't be deleted; deactivate them instead.
+  </p>
+<% end %>

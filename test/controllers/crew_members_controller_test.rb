@@ -161,6 +161,21 @@ class CrewMembersControllerTest < ActionDispatch::IntegrationTest
 
     get crew_members_path(status: "lapses_on_project")
     assert_equal [ @juan.id ], listed_member_ids
+
+    get crew_members_path(status: "fake")
+    assert_empty listed_member_ids
+    # Flagged by an automatic check only: still counted by its dates, so not "fake".
+    certificates(:juan_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:mismatch],
+      authenticity_method: "automatic:aha_ecards")
+    get crew_members_path(status: "fake")
+    assert_empty listed_member_ids
+    certificates(:juan_flagger).update_columns(authenticity_method: Authenticity::PERSON_METHOD)
+    get crew_members_path(status: "fake")
+    assert_equal [ @juan.id ], listed_member_ids
+    assert_select "select[name=status] option[value=fake][selected]", "Has confirmed fake"
+
+    get crew_members_path(status: "flagged") # no longer a filter: ignored
+    assert_select "select[name=status] option[selected]", count: 0
   end
 
   test "filters combine with search" do
@@ -247,6 +262,19 @@ class CrewMembersControllerTest < ActionDispatch::IntegrationTest
     assert_select "a", text: "Hide history"
   end
 
+  test "history marks a confirmed fake certificate kept behind a genuine one" do
+    certificates(:juan_flagger).record_authenticity!(status: :not_found, method: "person", by: users(:manager))
+    sign_in_as users(:viewer)
+
+    get crew_member_path(@juan, history: 1)
+
+    assert_select "#current_certificates tr##{dom_id(certificates(:juan_flagger_old))} [data-status=expired]"
+    assert_select "#superseded_certificates tr##{dom_id(certificates(:juan_flagger))} [data-status=fake][title=?]",
+      "Confirmed fake: Not found by issuer", text: "Confirmed fake"
+    assert_select "#superseded_certificates tr##{dom_id(certificates(:juan_first_aid_old))} [data-status]", count: 0
+    assert_select "#history", /confirmed fake ones a genuine one on file replaced/
+  end
+
   test "show lists details, aliases and expiry email opt-in" do
     sign_in_as users(:viewer)
 
@@ -283,6 +311,55 @@ class CrewMembersControllerTest < ActionDispatch::IntegrationTest
       assert_select "a[href=?]", crew_member_certificate_path(@juan, certificates(:juan_flagger))
     end
     assert_select "##{dom_id(project_assignments(:closed_juan))}", text: /Project closed/
+  end
+
+  test "show marks a certificate a person confirmed fake on the certificate list and the project requirements" do
+    sign_in_as users(:viewer)
+    certificates(:juan_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:not_found],
+      authenticity_method: Authenticity::PERSON_METHOD)
+
+    get crew_member_path(@juan)
+
+    assert_select "#current_certificates tr##{dom_id(certificates(:juan_flagger))} span[data-status=fake]",
+      text: "Confirmed fake" do |spans|
+      assert_equal "Confirmed fake: Not found by issuer", spans.first["title"]
+      assert_includes spans.first["class"], "bg-red-800"
+    end
+    assert_select "#current_certificates [data-authenticity-review]", count: 0
+    assert_select "#current_certificates tr##{dom_id(certificates(:juan_osha30))} [data-status=valid]"
+    assert_select "##{dom_id(project_assignments(:tower_juan))} li[data-status=fake]", text: /Flagger.*Confirmed fake/m
+  end
+
+  test "show keeps a certificate an automatic check flagged at its date status, with a Review marker" do
+    sign_in_as users(:viewer)
+    certificates(:juan_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:not_found],
+      authenticity_method: "automatic:aha_ecards")
+
+    get crew_member_path(@juan)
+
+    assert_select "#current_certificates tr##{dom_id(certificates(:juan_flagger))}" do
+      assert_select "span[data-status=expiring]"
+      assert_select "span[data-authenticity-review=not_found][title^=?]", "Flagged for review: Not found by issuer.", text: /Review/
+    end
+    assert_select "#current_certificates [data-authenticity-review]", 1
+    assert_select "##{dom_id(project_assignments(:tower_juan))} li[data-status=expiring]", text: /Flagger/ do
+      assert_select "[data-authenticity-review=not_found]"
+    end
+    assert_select "[data-status=fake]", count: 0
+  end
+
+  test "index shows confirmed fake as a member's worst status, but not a flag for review" do
+    sign_in_as users(:manager)
+    certificates(:juan_osha30).update_columns(authenticity_status: Certificate.authenticity_statuses[:suspicious],
+      authenticity_method: "qr_link")
+
+    get crew_members_path
+    assert_select "tr##{dom_id(@juan)} [data-status=?]", "expiring" # juan_flagger, as without the flag
+
+    certificates(:juan_osha30).update_columns(authenticity_status: Certificate.authenticity_statuses[:mismatch],
+      authenticity_method: Authenticity::PERSON_METHOD)
+    get crew_members_path
+    assert_select "tr##{dom_id(@juan)} [data-status=?]", "fake", text: "Confirmed fake"
   end
 
   test "show says an ended assignment on an active project is no longer tracked" do

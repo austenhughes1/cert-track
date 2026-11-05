@@ -26,7 +26,7 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
     patch import_review_path(@item), params: { review: review_params }
     assert_response :forbidden
-    %i[accept reject skip create_crew_member merge reread].each do |action|
+    %i[accept reject skip create_crew_member merge reread check].each do |action|
       post send("#{action}_import_review_path", @item), params: { review: review_params, crew_member: { first_name: "A", last_name: "B" } }
       assert_response :forbidden, "#{action} should be forbidden to a viewer"
     end
@@ -459,6 +459,35 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "Example Safety Training LLC", @item.issuer_raw
   end
 
+  test "Save edits that change the code a person recorded Not found for: it needs a check again, and is checked" do
+    @item.update!(proposed_verification_code: "A128")
+    @item.record_authenticity!(status: :not_found, method: "person", by: users(:admin))
+    sign_in_as users(:manager)
+
+    patch import_review_path(@item), params: { review: review_params(verification_code: "A12B") }
+
+    assert_includes flash[:notice], "A person recorded “Not found by issuer”, but the verification code changed afterwards, so it is " \
+      "no longer confirmed fake. Check it with the issuer again."
+    @item.reload
+    assert_equal [ "A12B", "needs_check", "details_changed" ], [ @item.proposed_verification_code, @item.authenticity_status,
+      @item.authenticity_method ]
+    assert_enqueued_with job: Verification::CheckJob, args: [ @item ]
+
+    patch import_review_path(@item), params: { review: review_params(verification_code: "A12B", certificate_number: "FA-2") }
+    assert_not_includes flash[:notice], "no longer confirmed fake", "only the save that reset it says so"
+  end
+
+  test "Save edits that leave a confirmed fake item's details alone keep it confirmed fake" do
+    @item.update!(proposed_verification_code: "A128")
+    @item.record_authenticity!(status: :not_found, method: "person", by: users(:admin))
+    sign_in_as users(:manager)
+
+    patch import_review_path(@item), params: { review: review_params(verification_code: "A128", certificate_number: "FA-3") }
+
+    assert @item.reload.authenticity_confirmed_fake?
+    assert_no_match(/no longer confirmed fake/, flash[:notice])
+  end
+
   test "a pick saved by hand shows as picked by hand, and the matcher's own proposal keeps its verdict" do
     @item.update!(matched_crew_member: @juan, person_match: :suggested, type_match: :suggested,
       person_suggestions: [ { "id" => @juan.id, "name" => "Juan Ortiz", "similarity" => 0.7 } ])
@@ -660,6 +689,19 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_select "select[name=?] option[value=?][selected]", "review[crew_member_id]", member.id.to_s
   end
 
+  test "create crew member over a person's Doesn't match says it needs a check again, and checks it" do
+    @item.update!(matched_crew_member: @juan, person_match: :matched)
+    @item.record_authenticity!(status: :mismatch, method: "person", by: users(:admin))
+    sign_in_as users(:manager)
+
+    post create_crew_member_import_review_path(@item), params: { crew_member: { first_name: "Jaun", last_name: "Ortis" }, confirm_duplicate: "1" }
+
+    assert_equal "Added Jaun Ortis to the crew and picked them for this certificate. A person recorded “Doesn't match issuer”, but the " \
+      "person changed afterwards, so it is no longer confirmed fake. Check it with the issuer again.", flash[:notice]
+    assert_equal [ "needs_check", "details_changed" ], [ @item.reload.authenticity_status, @item.authenticity_method ]
+    assert_enqueued_with job: Verification::CheckJob, args: [ @item ]
+  end
+
   test "an item matched to someone warns before creating a second person, and needs a deliberate confirm" do
     @item.update!(holder_name_raw: "Juan Ortiz", matched_crew_member: @juan, person_match: :matched)
     sign_in_as users(:manager)
@@ -784,11 +826,27 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     certificate = @item.reload.certificate
     assert_redirected_to import_reviews_path
     assert_match(/Merged 2 files into one First Aid\/CPR\/AED certificate for Juan Ortiz/, flash[:notice])
+    assert_no_match(/fake/, flash[:notice])
     assert_equal certificate, back.reload.certificate
     assert @item.accepted?
     assert back.accepted?
     assert_equal files.map(&:id).sort, certificate.files.map(&:blob_id).sort
     assert_not @item.file.attached? || back.file.attached?, "the certificate holds both files now"
+  end
+
+  test "merging with a back a person confirmed fake says the certificate counts as not valid" do
+    @juan.certificates.where(certificate_type: @first_aid).destroy_all
+    @item.update!(matched_crew_member: @juan, person_match: :matched, proposed_certificate_number: "FA-77001")
+    back = new_item(original_filename: "back.jpg", page_range: nil, matched_crew_member: @juan, person_match: :matched,
+      matched_certificate_type: @first_aid, type_match: :matched, proposed_certificate_number: "FA-77001")
+    back.record_authenticity!(status: :not_found, method: "person", by: users(:admin))
+    sign_in_as users(:manager)
+
+    post merge_import_review_path(@item), params: { review: review_params, other_ids: [ back.id ] }
+
+    assert_match(/certificate for Juan Ortiz\. It is confirmed fake, so it counts as not valid in compliance and is left out of packets\./,
+      flash[:notice])
+    assert @item.reload.certificate.authenticity_confirmed_fake?
   end
 
   test "merge with nothing left to merge re-renders" do
@@ -802,6 +860,398 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_select "#error_explanation", /nothing left to merge/
   end
 
+  # --- issuer and verification (Phase 3b) ---
+
+  test "show offers the issuer picker with suggestions first, and the verification fields" do
+    summit = CertificateIssuer.create!(name: "Summit Safety Training", code: "SUMMIT", position: 1)
+    ridge = CertificateIssuer.create!(name: "Ridgeline CPR", code: "RIDGELINE", position: 2)
+    @item.update!(matched_certificate_issuer: ridge, issuer_match: :suggested,
+      issuer_suggestions: [ { "id" => ridge.id, "name" => "Ridgeline CPR", "similarity" => 0.58 } ],
+      proposed_verification_code: "RC-4410", proposed_verification_url: "https://ridgelinecpr.com/v/RC-4410",
+      issuer_raw: "Ridgeline CPR Training")
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+
+    assert_select "form#review_form [data-controller=issuer-picker]" do
+      assert_select "[data-match=suggested]", "Suggested"
+      assert_select "select[name=?]", "review[certificate_issuer_id]" do
+        assert_select "optgroup[label=Suggested] option[value=?][selected]", ridge.id.to_s, text: "Ridgeline CPR · 58% match"
+        assert_select "optgroup[label=All] option[value=?]", summit.id.to_s, text: "Summit Safety Training"
+        assert_select "option[value=other]", "Other…"
+      end
+      assert_select "input[name=?]", "review[other_issuer_name]"
+    end
+    assert_select "form#review_form input[name=?][value=?]", "review[verification_code]", "RC-4410"
+    assert_select "form#review_form input[name=?][value=?]", "review[verification_url]", "https://ridgelinecpr.com/v/RC-4410"
+    assert_select "form#review_form label[for=review_issued_by]", "Issuer as printed"
+    assert_select "#authenticity #authenticity_issuer", "Ridgeline CPR"
+  end
+
+  test "accept passes the issuer, code and link to the certificate" do
+    summit = CertificateIssuer.create!(name: "Summit Safety Training", code: "SUMMIT")
+    sign_in_as users(:manager)
+
+    post accept_import_review_path(@item), params: { review: review_params(certificate_issuer_id: summit.id,
+      verification_code: "SUM-1001", verification_url: "https://verify.summitsafety.org/c/SUM-1001") }
+
+    certificate = @item.reload.certificate
+    assert_equal summit, certificate.certificate_issuer
+    assert_equal "SUM-1001", certificate.verification_code
+    assert_equal "https://verify.summitsafety.org/c/SUM-1001", certificate.verification_url
+    assert_enqueued_with(job: Verification::CheckJob, args: [ certificate ]) # the reviewer changed them
+  end
+
+  test "accept with Other... creates the issuer for the certificate" do
+    sign_in_as users(:manager)
+
+    assert_difference -> { CertificateIssuer.count } => 1, -> { Certificate.count } => 1 do
+      post accept_import_review_path(@item), params: { review: review_params(certificate_issuer_id: "other",
+        other_issuer_name: "Granite Peak Safety") }
+    end
+
+    issuer = CertificateIssuer.find_by!(name: "Granite Peak Safety")
+    assert issuer.verified_by_unknown?
+    assert_equal issuer, @item.reload.certificate.certificate_issuer
+  end
+
+  test "accept with Other... and no name re-renders with Other... still chosen" do
+    sign_in_as users(:manager)
+
+    assert_no_difference [ "Certificate.count", "CertificateIssuer.count" ] do
+      post accept_import_review_path(@item), params: { review: review_params(certificate_issuer_id: "other", other_issuer_name: "") }
+    end
+
+    assert_response :unprocessable_entity
+    assert_select "#error_explanation", /Type the new issuer's name for Other…/
+    assert_select "select[name=?] option[value=other][selected]", "review[certificate_issuer_id]"
+    assert @item.reload.needs_review?
+  end
+
+  test "an accept that fails keeps Other... and the typed name on the form" do
+    sign_in_as users(:manager)
+
+    post accept_import_review_path(@item), params: { review: review_params(crew_member_id: "", certificate_issuer_id: "other",
+      other_issuer_name: "Granite Peak Safety", verification_url: "ftp nonsense") }
+    assert_response :unprocessable_entity
+    assert_select "#error_explanation", /Verification link must be a web address/
+    assert_nil CertificateIssuer.find_by(name: "Granite Peak Safety"), "nothing is created while the form has problems"
+
+    post accept_import_review_path(@item), params: { review: review_params(crew_member_id: "", certificate_issuer_id: "other",
+      other_issuer_name: "Granite Peak Safety") }
+    assert_response :unprocessable_entity
+    assert_select "#error_explanation", /Crew member must exist/
+    assert_select "select[name=?] option[value=other][selected]", "review[certificate_issuer_id]"
+    assert_select "input[name=?][value=?]", "review[other_issuer_name]", "Granite Peak Safety"
+  end
+
+  test "merge passes the issuer, code and link too" do
+    summit = CertificateIssuer.create!(name: "Summit Safety Training", code: "SUMMIT")
+    @item.update!(matched_crew_member: @juan, person_match: :matched, proposed_certificate_number: "FA-77001")
+    back = new_item(original_filename: "back.jpg", page_range: nil, matched_crew_member: @juan, person_match: :matched,
+      matched_certificate_type: @first_aid, type_match: :matched, proposed_certificate_number: "FA-77001")
+    back.file.attach(blob("certificate.jpg"))
+    sign_in_as users(:manager)
+
+    post merge_import_review_path(@item), params: { review: review_params(certificate_issuer_id: summit.id, verification_code: "SUM-9"),
+      other_ids: [ back.id ] }
+
+    certificate = @item.reload.certificate
+    assert_equal [ summit, "SUM-9" ], [ certificate.certificate_issuer, certificate.verification_code ]
+  end
+
+  test "save edits stores the issuer, code and link on the item and checks it again" do
+    summit = CertificateIssuer.create!(name: "Summit Safety Training", code: "SUMMIT")
+    sign_in_as users(:manager)
+
+    patch import_review_path(@item), params: { review: review_params(certificate_issuer_id: summit.id,
+      verification_code: "SUM-1001", verification_url: "verify.summitsafety.org/c/SUM-1001") }
+
+    assert_redirected_to import_review_path(@item)
+    @item.reload
+    assert_equal summit, @item.matched_certificate_issuer
+    assert @item.issuer_matched?, "an issuer picked by hand counts as matched"
+    assert_equal "SUM-1001", @item.proposed_verification_code
+    assert_equal "https://verify.summitsafety.org/c/SUM-1001", @item.proposed_verification_url
+    assert_enqueued_with(job: Verification::CheckJob, args: [ @item ])
+    clear_enqueued_jobs
+
+    patch import_review_path(@item), params: { review: review_params(certificate_issuer_id: summit.id,
+      verification_code: "SUM-1001", verification_url: "https://verify.summitsafety.org/c/SUM-1001", certificate_number: "FA-2") }
+    assert_no_enqueued_jobs only: Verification::CheckJob
+
+    patch import_review_path(@item), params: { review: review_params(certificate_issuer_id: "") }
+    @item.reload
+    assert_nil @item.matched_certificate_issuer
+    assert @item.issuer_unmatched?
+    assert_nil @item.proposed_verification_code
+  end
+
+  test "save edits confirms a suggested issuer left as it was, so its automatic check runs before accepting" do
+    CertificateIssuer.seed_defaults!
+    aha = CertificateIssuer.find_by_code("AHA")
+    @item.update!(matched_certificate_issuer: aha, issuer_match: :suggested, proposed_verification_code: "212345678901",
+      holder_name_raw: "Juan Ortiz")
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+    assert_select "#authenticity_issuer_unconfirmed", /Suggested, not confirmed\. Save it with the form above/
+
+    patch import_review_path(@item), params: { review: review_params(certificate_issuer_id: aha.id, verification_code: "212345678901") }
+
+    assert @item.reload.issuer_matched?, "saving the form confirms the issuer it shows"
+    assert_enqueued_with(job: Verification::CheckJob, args: [ @item ])
+    get import_review_path(@item)
+    assert_select "#authenticity_issuer_unconfirmed", count: 0
+
+    page = file_fixture("verification/aha_ecards_found.html").read
+    transport = ->(*) { Verification::HttpClient::Response.new(status: 200, body: page) }
+    Verification::HttpClient.with(transport: transport, cache: ActiveSupport::Cache::MemoryStore.new) do
+      Verification::Config.with(auto_checks: true) { perform_enqueued_jobs(only: Verification::CheckJob) }
+    end
+    assert_equal [ "verified", "automatic:aha_ecards" ], [ @item.reload.authenticity_status, @item.authenticity_method ]
+  end
+
+  test "save edits that correct the person or a date check the item again" do
+    @item.update!(matched_crew_member: @juan, person_match: :matched)
+    sign_in_as users(:manager)
+
+    patch import_review_path(@item), params: { review: review_params(completed_on: (Date.current - 3).iso8601) }
+    assert_enqueued_with(job: Verification::CheckJob, args: [ @item ])
+    clear_enqueued_jobs
+
+    patch import_review_path(@item), params: { review: review_params(completed_on: (Date.current - 3).iso8601,
+      crew_member_id: crew_members(:maria_garcia).id) }
+    assert_enqueued_with(job: Verification::CheckJob, args: [ @item ])
+  end
+
+  # --- the authenticity panel on the review screen (Phase 3b) ---
+
+  test "the panel's buttons belong to the review form, so they save the edits typed there first" do
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+
+    assert_select "form#review_form #authenticity", count: 0
+    assert_select "#authenticity" do
+      assert_select "textarea[name=?][form=review_form]", "authenticity[note]"
+      buttons = css_select("button[name='authenticity[status]'][form=review_form]")
+      assert_equal Authenticity::PERSON_STATUSES.sort, buttons.map { it["value"] }.sort
+      assert(buttons.all? { it["formaction"] == check_import_review_path(@item) && it["formmethod"] == "post" && it.key?("formnovalidate") })
+      assert_select "button#authenticity_recheck[form=review_form][formaction=?][formnovalidate]:not([name])", check_import_review_path(@item)
+      assert_select "#authenticity_recheck_hint", /save your edits above first, so the issuer, code and link you typed are what get checked/
+    end
+  end
+
+  test "Check again from a review page shown before someone recorded a result saves the edits but leaves that result" do
+    sign_in_as users(:manager)
+    get import_review_path(@item)
+    shown_at = css_select("input[name='authenticity[shown_at]'][form=review_form]").sole["value"]
+    travel 30.seconds
+    ImportItem.find(@item.id).record_authenticity!(status: :mismatch, method: "person", note: "Other name", by: users(:admin))
+    travel 15.seconds
+
+    post check_import_review_path(@item), params: { review: review_params(certificate_number: "FA-77002"),
+      authenticity: { note: "", shown_at: shown_at } }
+
+    assert_redirected_to import_review_path(@item, anchor: "authenticity")
+    assert_equal "Saved your edits. Someone recorded “Doesn't match issuer” after this page was opened, so it wasn't checked again. " \
+      "Reload the page to see it.", flash[:notice]
+    assert_no_enqueued_jobs only: Verification::CheckJob
+    assert_equal [ "FA-77002", "mismatch", "person" ],
+      [ @item.reload.proposed_certificate_number, @item.authenticity_status, @item.authenticity_method ]
+  end
+
+  test "Check again saves the typed code and link, then checks them, even over a person's result" do
+    @item.update!(proposed_verification_code: "OLD-1")
+    @item.record_authenticity!(status: :not_found, method: "person", note: "Checked the wrong code.", by: users(:admin))
+    sign_in_as users(:manager)
+    freeze_time with_usec: true # pressed after the person's result was recorded
+
+    post check_import_review_path(@item), params: { review: review_params(verification_code: "FA-77001",
+      verification_url: "https://verify.summitsafety.org/c/FA-77001"), authenticity: { note: "" } }
+
+    assert_redirected_to import_review_path(@item, anchor: "authenticity")
+    assert_match(/Saved your edits and checking again with them/, flash[:notice])
+    @item.reload
+    assert_equal [ "FA-77001", "https://verify.summitsafety.org/c/FA-77001" ], [ @item.proposed_verification_code, @item.proposed_verification_url ]
+    assert_enqueued_with(job: Verification::CheckJob, args: [ @item, { force: true, requested_at: Time.current } ])
+    assert_enqueued_jobs 1, only: Verification::CheckJob
+
+    assert_equal [ "needs_check", "details_changed" ], [ @item.authenticity_status, @item.authenticity_method ],
+      "the person's Not found was about OLD-1"
+    perform_enqueued_jobs(only: Verification::CheckJob)
+    assert_equal [ "needs_check", "details_changed" ], [ @item.reload.authenticity_status, @item.authenticity_method ],
+      "the saved code was checked, and the rules alone leave the reset for a person (Verification::Run, rule 7)"
+    assert_match(/\AA person recorded “Not found by issuer”, but the verification code and verification link changed afterwards/,
+      @item.authenticity_note)
+  end
+
+  test "a result button saves the edits, then records the person's result with the note" do
+    sign_in_as users(:manager)
+
+    post check_import_review_path(@item), params: { review: review_params(verification_code: "FA-77001"),
+      authenticity: { status: "verified", note: "Issuer's page shows the same name." } }
+
+    assert_redirected_to import_review_path(@item, anchor: "authenticity")
+    assert_match(/Saved your edits and recorded “Verified”/, flash[:notice])
+    @item.reload
+    assert_equal "FA-77001", @item.proposed_verification_code
+    assert_equal [ "verified", "person", users(:manager), "Issuer's page shows the same name." ],
+      [ @item.authenticity_status, @item.authenticity_method, @item.authenticity_checked_by, @item.authenticity_note ]
+    assert_no_enqueued_jobs only: Verification::CheckJob
+  end
+
+  test "a person's Not found or Doesn't match on the review screen is confirmed fake, and the notice says what that means" do
+    sign_in_as users(:manager)
+
+    post check_import_review_path(@item), params: { review: review_params, authenticity: { status: "not_found", note: "No such card." } }
+
+    assert_redirected_to import_review_path(@item, anchor: "authenticity")
+    assert_equal "Saved your edits and recorded “Not found by issuer”. It is now confirmed fake: once accepted, it counts as not " \
+      "valid in compliance and is left out of packets. Automatic checks won't change it unless someone runs Check again.", flash[:notice]
+    assert @item.reload.authenticity_confirmed_fake?
+
+    post check_import_review_path(@item), params: { review: review_params, authenticity: { status: "cannot_verify" } }
+    assert_no_match(/fake/, flash[:notice])
+  end
+
+  test "accepting an item a person confirmed fake says the certificate counts as not valid" do
+    @juan.certificates.where(certificate_type: @first_aid).destroy_all
+    @item.record_authenticity!(status: :mismatch, method: "person", note: "Different name on the issuer's page.", by: users(:admin))
+    sign_in_as users(:manager)
+
+    post accept_import_review_path(@item), params: { review: review_params }
+
+    certificate = @item.reload.certificate
+    assert_equal "Accepted First Aid/CPR/AED for Juan Ortiz. It is confirmed fake, so it counts as not valid in compliance and is " \
+      "left out of packets. Nothing else is waiting for review.", flash[:notice]
+    assert certificate.authenticity_confirmed_fake?
+    assert_equal "fake", certificate.compliance_status
+  end
+
+  test "accepting a confirmed fake item when a genuine one is on file keeps the genuine one current" do
+    genuine = certificates(:juan_first_aid)
+    @item.record_authenticity!(status: :not_found, method: "person", note: "No such certificate.", by: users(:admin))
+    sign_in_as users(:manager)
+
+    post accept_import_review_path(@item), params: { review: review_params }
+
+    certificate = @item.reload.certificate
+    assert_equal "Accepted First Aid/CPR/AED for Juan Ortiz. It is confirmed fake, so it is kept as history: another First Aid/CPR/AED " \
+      "certificate on file is the current one. Nothing else is waiting for review.", flash[:notice]
+    assert certificate.superseded?
+    assert_equal genuine, @juan.current_certificate_for(@first_aid)
+  end
+
+  test "accepting an item only flagged for review says nothing about fakes; it counts by its dates" do
+    @item.record_authenticity!(status: :not_found, method: "automatic:aha_ecards", note: "No certificate with this code.")
+    sign_in_as users(:manager)
+
+    post accept_import_review_path(@item), params: { review: review_params }
+
+    certificate = @item.reload.certificate
+    assert_equal "Accepted First Aid/CPR/AED for Juan Ortiz. Nothing else is waiting for review.", flash[:notice]
+    assert certificate.authenticity_flagged_for_review?
+    assert_equal Compliance.status_for_expiry(certificate.expires_on), certificate.compliance_status
+  end
+
+  test "the panel's buttons save nothing and record nothing when the form has problems" do
+    sign_in_as users(:manager)
+
+    post check_import_review_path(@item), params: { review: review_params(completed_on: (Date.current + 5).iso8601, verification_code: "NEW-1"),
+      authenticity: { status: "verified" } }
+    assert_response :unprocessable_entity
+    assert_select "#error_explanation", /future/
+
+    post check_import_review_path(@item), params: { review: review_params(verification_code: "NEW-1"), authenticity: { status: "suspicious" } }
+    assert_response :unprocessable_entity
+    assert_select "#error_explanation", /Choose one of the result buttons/
+
+    @item.reload
+    assert_nil @item.proposed_verification_code
+    assert @item.authenticity_unchecked?
+    assert_no_enqueued_jobs only: Verification::CheckJob
+  end
+
+  test "the review form's verification code, link and note are filtered from the logs" do
+    sign_in_as users(:manager)
+
+    post check_import_review_path(@item), params: { review: review_params(verification_code: "FA-77001",
+      verification_url: "https://verify.360training.com/q?s_fname=Pat&s_lname=Example"),
+      authenticity: { status: "verified", note: "Pat Example, issued 03/14/2025" } }
+
+    filtered = request.filtered_parameters
+    assert_equal "[FILTERED]", filtered.dig("review", "verification_code")
+    assert_equal "[FILTERED]", filtered.dig("review", "verification_url")
+    assert_equal "[FILTERED]", filtered.dig("review", "certificate_number")
+    assert_equal "[FILTERED]", filtered.dig("authenticity", "note")
+    assert_equal "verified", filtered.dig("authenticity", "status")
+  end
+
+  test "merging a front without a code and a back with one keeps the back's issuer, code and link, and its check" do
+    CertificateIssuer.seed_defaults!
+    aha = CertificateIssuer.find_by_code("AHA")
+    @item.update!(matched_crew_member: @juan, person_match: :matched, proposed_certificate_number: "FA-77001")
+    back = new_item(original_filename: "back.jpg", page_range: nil, matched_crew_member: @juan, person_match: :matched,
+      matched_certificate_type: @first_aid, type_match: :matched, proposed_certificate_number: "FA-77001",
+      proposed_completed_on: @item.proposed_completed_on, matched_certificate_issuer: aha, issuer_match: :matched,
+      proposed_verification_code: "212345678901", proposed_verification_url: "https://ecards.heart.org/student/myecards")
+    back.record_authenticity!(status: :not_found, method: "automatic:aha_ecards", note: "American Heart Association has no certificate with this code.")
+    back.file.attach(blob("certificate.jpg"))
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+    assert_select "select[name=?] option[selected]", "review[certificate_issuer_id]", count: 0
+    # The form, as the browser sends it: the front's own (blank) issuer, code and link.
+    post merge_import_review_path(@item), params: { review: review_params(certificate_issuer_id: "", verification_code: "",
+      verification_url: ""), other_ids: [ back.id ] }
+
+    certificate = @item.reload.certificate
+    assert_equal [ aha, "212345678901", "https://ecards.heart.org/student/myecards" ],
+      [ certificate.certificate_issuer, certificate.verification_code, certificate.verification_url ]
+    assert certificate.authenticity_not_found?, "the issuer's answer is kept"
+    assert_no_enqueued_jobs only: Verification::CheckJob # nothing to check again: no re-check can clear the flag
+    assert_no_match(/fake/, flash[:notice], "an automatic check's not found is only flagged for review")
+  end
+
+  test "accept with Other... and a name already on the list as an alias uses that issuer and says so" do
+    CertificateIssuer.seed_defaults!
+    sign_in_as users(:manager)
+
+    assert_no_difference -> { CertificateIssuer.count } do
+      post accept_import_review_path(@item), params: { review: review_params(certificate_issuer_id: "other", other_issuer_name: "red cross") }
+    end
+
+    assert_equal "American Red Cross", @item.reload.certificate.certificate_issuer.name
+    assert_match "“red cross” is on the issuer list as American Red Cross, so that was used.", flash[:notice]
+  end
+
+  test "save edits with Other... creates the issuer and picks it" do
+    sign_in_as users(:manager)
+
+    assert_difference -> { CertificateIssuer.count }, 1 do
+      patch import_review_path(@item), params: { review: review_params(certificate_issuer_id: "other", other_issuer_name: "Granite Peak Safety") }
+    end
+
+    assert_equal "Granite Peak Safety", @item.reload.matched_certificate_issuer.name
+    assert @item.issuer_matched?
+    assert_match "Granite Peak Safety was added to the issuer list; an admin can fill in how it verifies.", flash[:notice]
+    get import_review_path(@item)
+    assert_select "select[name=?] option[selected]", "review[certificate_issuer_id]", "Granite Peak Safety"
+  end
+
+  test "save edits with date problems creates no issuer" do
+    sign_in_as users(:manager)
+
+    assert_no_difference -> { CertificateIssuer.count } do
+      patch import_review_path(@item), params: { review: review_params(completed_on: (Date.current + 5).iso8601,
+        certificate_issuer_id: "other", other_issuer_name: "Granite Peak Safety") }
+    end
+    assert_response :unprocessable_entity
+    assert_select "input[name=?][value=?]", "review[other_issuer_name]", "Granite Peak Safety"
+  end
+
   # --- read again ---
 
   test "the review screen offers Read again, asking first, when Imports::Reread allows it" do
@@ -809,13 +1259,24 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
 
     allowing_reread(true) { get import_review_path(@item) }
     assert_select "#review_reread form[action=?][method=post]", reread_import_review_path(@item) do |forms|
-      assert_match(/uses part of today's free AI allocation\. What it read before, and any edits or rejection, are cleared\./,
+      assert_match(/uses part of today's free AI allocation\. What it read before, and any edits or rejection, are cleared\.\z/,
         forms.first["data-turbo-confirm"])
       assert_select "button", "Read again"
     end
 
     allowing_reread(false) { get import_review_path(@item) }
     assert_select "#review_reread", count: 0
+  end
+
+  test "Read again's question says a person's Not found stays" do
+    @item.record_authenticity!(status: :not_found, method: "person", by: users(:admin))
+    sign_in_as users(:manager)
+
+    allowing_reread(true) { get import_review_path(@item) }
+    assert_select "#review_reread form" do |forms|
+      assert_match(/are cleared\. The “Not found by issuer” a person recorded stays, so it is still confirmed fake\.\z/,
+        forms.first["data-turbo-confirm"])
+    end
   end
 
   test "Read again hands the item to Imports::Reread and opens its batch" do

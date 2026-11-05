@@ -44,6 +44,49 @@ class Imports::Eval::RunnerTest < ActiveSupport::TestCase
     end
   end
 
+  test "issuer, verification code and link are reported on their own, not against the bar" do
+    CertificateIssuer.create!(name: "American Red Cross", code: "REDCROSS", aliases: [ "Red Cross" ], domains: [ "redcross.org" ])
+    with_samples_dir do |dir|
+      page = ImportSamples.certificate_text(issuer: "American Red Cross") + "\nVerification code: RC-77\nVerify at: redcross.org/confirm"
+      expected = expected_for([ {} ])
+      expected["certificates"].first.merge!("issuer" => "American Red Cross", "certificate_issuer_code" => "REDCROSS",
+        "verification_code" => "RC-77", "verification_url" => "https://www.redcross.org/confirm/")
+      write_sample(dir, "red_cross", page, expected:)
+      write_sample(dir, "older_answer", {}) # no verification keys: not scored on them
+
+      report = Imports::Eval::Runner.new(dir: dir, provider: "fake").call
+      text = report.to_s
+
+      Imports::Eval::Scorer::VERIFICATION_FIELDS.each { |field| assert_equal [ 1, 1 ], report.field_accuracy.fetch(field), field }
+      assert report.meets_bar?
+      assert_match "Verification fields (reported on their own, not part of the bar):", text
+      assert_match(/issuer\s+1\/1\s+100\.0%\s+\(reported, not part of the bar\)/, text)
+      assert_match(/vlink\s+1\/1\s+100\.0%/, text)
+      assert_match(/^older_answer\.pdf\s+1\/1(\s+1\/1){5}\s+-\s+-\s+-/, text)
+    end
+  end
+
+  test "a sample that errors counts as wrong only on the verification fields its answer has" do
+    with_samples_dir do |dir|
+      dir.join("broken.pdf").binwrite("not a pdf")
+      dir.join("broken.expected.json").write(JSON.generate("certificates" => [ { "pages" => [ 1 ], "verification_code" => "RC-1" }, { "pages" => [ 2 ] } ]))
+
+      report = Imports::Eval::Runner.new(dir: dir, provider: "fake").call
+
+      assert_equal [ [ 0, 2 ], [ 0, 1 ], [ 0, 0 ] ], report.field_accuracy.values_at("holder_name", "verification_code", "verification_url")
+    end
+  end
+
+  test "with no verification answers at all, the report says so" do
+    with_samples_dir do |dir|
+      write_sample(dir, "ortiz_osha30", {})
+
+      text = Imports::Eval::Runner.new(dir: dir, provider: "fake").call.to_s
+
+      assert_match(/vcode\s+-\s+-\s+\(no answer file has verification_code yet\)/, text)
+    end
+  end
+
   test "a quota error stops the run and keeps the rows done so far" do
     with_samples_dir do |dir|
       %w[a b c].each { |name| write_sample(dir, name, {}) }

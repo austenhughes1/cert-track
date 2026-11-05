@@ -125,7 +125,7 @@
   <% if @show_history %>
     <div id="history" class="mt-6">
       <h3 class="mb-2 text-base font-semibold text-gray-700">History</h3>
-      <p class="mb-2 text-sm text-gray-500">Older certificates replaced by a newer one of the same type. They are kept for the record and don't count toward compliance.</p>
+      <p class="mb-2 text-sm text-gray-500">Older certificates replaced by a newer one of the same type, and confirmed fake ones a genuine one on file replaced. They are kept for the record and don't count toward compliance.</p>
       <% if @superseded_certificates.empty? %>
         <p class="text-sm text-gray-500">No older certificates.</p>
       <% else %>

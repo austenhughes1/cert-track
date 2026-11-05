@@ -5,9 +5,12 @@ module Imports
   #   certificate = Imports::Merge.new(item, others:, user: Current.user, attributes: {}).call
   #
   # The certificate is built from item exactly as Imports::Accept does (attributes override
-  # its fields) and carries every item's file, item's first. Every item becomes accepted and
-  # points at it. All items must be in the review queue. Raises ActiveRecord::RecordInvalid
-  # (NotReviewable for a status problem, or when there is nothing to merge).
+  # its fields) and carries every item's file, item's first. The issuer, verification code and
+  # link may come from another item when item has none, and neither a person's confirmed fake
+  # nor a flagged item's authenticity check is ever hidden (Imports::Accept). Every item becomes
+  # accepted and points at it. All items must be in the review queue. Raises
+  # ActiveRecord::RecordInvalid (NotReviewable for a status problem, or when there is nothing to
+  # merge).
   class Merge
     def initialize(item, others:, user:, attributes: {})
       @item = item

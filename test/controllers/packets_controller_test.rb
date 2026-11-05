@@ -34,6 +34,63 @@ class PacketsControllerTest < ActionDispatch::IntegrationTest
     assert_select "#packet_builds", text: /No builds yet/
   end
 
+  test "says which certificates a build leaves out: only those a person confirmed fake" do
+    sign_in_as users(:viewer)
+    get project_packet_path(@project)
+    assert_select "#packet_excluded", count: 0
+    certificates_before = css_select("#packet_certificate_count").text.to_i
+    files_before = css_select("#packet_file_count").text.to_i
+    gaps_before = css_select("#packet_gap_count").text.to_i
+
+    certificates(:li_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:mismatch],
+      authenticity_method: Authenticity::PERSON_METHOD)
+    get project_packet_path(@project)
+
+    assert_select "#packet_excluded", text: /1 certificate confirmed fake will be left out and listed in index\.pdf:.*Li Chen \(FLAGGER\)/m
+    assert_select "#packet_certificate_count", text: (certificates_before - 1).to_s
+    assert_select "#packet_gap_count", text: (gaps_before + 1).to_s
+    assert_select "body", text: /flagged for review go in like any other/
+    assert_select "#packet_excluded", text: /review/, count: 0
+
+    # The same result from an automatic check only flags it for review: it still goes in.
+    certificates(:li_flagger).update_columns(authenticity_method: "automatic:aha_ecards")
+    get project_packet_path(@project)
+
+    assert_select "#packet_excluded", count: 0
+    assert_select "#packet_certificate_count", text: certificates_before.to_s
+    assert_select "#packet_file_count", text: files_before.to_s
+    assert_select "#packet_gap_count", text: gaps_before.to_s
+  end
+
+  test "certificates only flagged for review are all packaged" do
+    sign_in_as users(:viewer)
+    get project_packet_path(@project)
+    certificates_before = css_select("#packet_certificate_count").text.to_i
+
+    Certificate.current.update_all(authenticity_status: Certificate.authenticity_statuses[:suspicious],
+      authenticity_method: Authenticity::PERSON_METHOD) # a person can't record suspicious; still not fake
+    get project_packet_path(@project)
+
+    assert_select "#packet_certificate_count", text: certificates_before.to_s
+    assert_select "#packet_excluded", count: 0
+    assert_select "#packet_empty", count: 0
+  end
+
+  test "when every certificate is confirmed fake, the page says so rather than that no one holds one" do
+    sign_in_as users(:viewer)
+    get project_packet_path(@project)
+    assert_operator css_select("#packet_certificate_count").text.to_i, :>, 0
+    assert_select "#packet_empty", count: 0
+
+    Certificate.current.update_all(authenticity_status: Certificate.authenticity_statuses[:not_found],
+      authenticity_method: Authenticity::PERSON_METHOD)
+    get project_packet_path(@project)
+
+    assert_select "#packet_certificate_count", text: "0"
+    assert_select "#packet_empty", text: /Nothing to package: every current certificate is confirmed fake and left out; index\.pdf lists them\./
+    assert_select "#packet_empty", text: /no one on this project holds/, count: 0
+  end
+
   test "viewer can build a packet; the page polls while building" do
     sign_in_as users(:viewer)
 

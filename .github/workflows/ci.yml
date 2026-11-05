@@ -99,8 +99,8 @@ jobs:
 
     steps:
       # libvips42t64 is 8.15 on Ubuntu 24.04 (Rails 8.1 needs >= 8.13); the libde265 plugin lets libheif decode HEIC.
-      # poppler-utils and tesseract back text extraction. postgresql-client-17 comes from PGDG because backup
-      # tests run pg_dump/psql against the 17 server and the runner image only ships PostgreSQL 16.
+      # poppler-utils and tesseract back text extraction, zbar-tools (zbarimg) QR codes. postgresql-client-17 comes
+      # from PGDG because backup tests run pg_dump/psql against the 17 server and the runner image only ships PostgreSQL 16.
       - name: Install packages
         run: |
           if [ ! -x /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh ]; then
@@ -110,7 +110,7 @@ jobs:
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install --no-install-recommends -y \
             libpq-dev libvips42t64 libheif1 libheif-plugin-libde265 \
-            poppler-utils tesseract-ocr tesseract-ocr-eng postgresql-client-17
+            poppler-utils tesseract-ocr tesseract-ocr-eng zbar-tools postgresql-client-17
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
       - name: Checkout code
@@ -128,6 +128,8 @@ jobs:
           psql --version
           pdftotext -v 2>&1 | head -n 1
           tesseract --version 2>&1 | head -n 1
+          # Fails the job when zbarimg is missing: the QR tests would otherwise just skip.
+          echo -n "zbarimg "; zbarimg --version
           bundle exec ruby -e '
             require "vips"
             abort "libvips #{Vips.version_string} is older than 8.13" unless Vips.at_least_libvips?(8, 13)
@@ -180,7 +182,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             libpq-dev libvips42t64 libheif1 libheif-plugin-libde265 \
-            poppler-utils tesseract-ocr tesseract-ocr-eng
+            poppler-utils tesseract-ocr tesseract-ocr-eng zbar-tools
+          echo -n "zbarimg "; zbarimg --version
 
       - name: Set up Ruby
         if: steps.system_tests.outputs.present == 'true'

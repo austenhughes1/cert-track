@@ -1,0 +1,178 @@
+# Default certificate issuers and how each one is verified (docs/PLAN.md, Phase 3b; research Nov 4, 2026).
+# db/seeds.rb and the CreateCertificateIssuers migration load this file; an issuer that already exists
+# (same code) is left as the owner edited it. Admins edit issuers at /certificate_issuers.
+#
+# verification_method: unknown | qr_or_code | code_lookup | contact | no_registry
+# link_template: a direct verification link, {code} is replaced by the certificate's verification code
+# automatic_check: a Verification::Checkers key (the issuer's site allows automated lookups), or omitted
+#   for an assisted check. Only the verification code is sent, and only to the issuer's own domains.
+# domains: registrable domains this issuer's QR codes and printed links use (also the automatic-check
+#   allowlist, and the reference for spotting lookalike QR hosts)
+
+- code: REDCROSS
+  name: American Red Cross
+  aliases: [Red Cross, The American National Red Cross, redcross.org]
+  domains: [redcross.org]
+  verification_method: qr_or_code
+  lookup_url: https://www.redcross.org/take-a-class/digital-certificate
+  link_template: "https://www.redcross.org/take-a-class/qrcode?certnumber={code}"
+  verification_notes: >-
+    Scan the QR code or enter the certificate ID on Find My Certificate. The page shows the holder,
+    course, dates and Active/Expired. Red Cross's terms forbid automated lookups, so a person checks.
+
+- code: 360TRAINING
+  name: 360training
+  aliases: [360training.com, 360 Training, 360training.com Inc., OSHA Campus, OSHAcampus, OSHA.com]
+  domains: [360training.com]
+  verification_method: qr_or_code
+  lookup_url: https://verify.360training.com/
+  automatic_check: qr_details_360training
+  verification_notes: >-
+    The QR link opens verify.360training.com and carries the holder's name, course and issue date,
+    which CertTrack compares with the certificate. Typed lookups need the last name and certificate
+    number. The verification site disallows robots, so the lookup itself is done by a person.
+
+- code: NOF
+  name: National OSHA Foundation
+  aliases: [nationaloshafoundation.com, National OSHA Foundation Inc.]
+  domains: [nationaloshafoundation.com]
+  verification_method: qr_or_code
+  lookup_url: https://www.nationaloshafoundation.com/certificate-verification/
+  link_template: "https://www.nationaloshafoundation.com/certificate-verification/?certificate_id={code}"
+  automatic_check: national_osha_foundation
+  verification_notes: >-
+    A 360training brand. The QR link or certificate ID shows the holder, course and completion date
+    (no expiry). Its site has returned error pages for unknown IDs, so an error means "check by hand".
+
+- code: AHA
+  name: American Heart Association
+  aliases: [AHA, American Heart Association eCard, heart.org]
+  domains: [heart.org]
+  verification_method: code_lookup
+  lookup_url: https://ecards.heart.org/student/myecards
+  automatic_check: aha_ecards
+  verification_notes: >-
+    Enter the eCard code on the Employer tab (up to 20 at a time). It shows the student name, status
+    and renewal date, but only once the student has claimed the eCard.
+
+- code: NCPRF
+  name: National CPR Foundation
+  aliases: [nationalcprfoundation.com, NCPRF]
+  domains: [nationalcprfoundation.com]
+  verification_method: code_lookup
+  lookup_url: https://nationalcprfoundation.com/verify/
+  automatic_check: national_cpr_foundation
+  verification_notes: E-Verify & Download by certificate ID; meant for employers.
+
+- code: CLICKSAFETY
+  name: ClickSafety
+  aliases: [ClickSafety.com, Click Safety, Ascend Learning]
+  domains: [clicksafety.com]
+  verification_method: code_lookup
+  lookup_url: https://www.clicksafety.com/events-resources/certificate-lookup
+  verification_notes: >-
+    Certificate Lookup by serial number. ClickSafety's terms forbid automated access, so a person
+    checks. Plastic OSHA cards have a QR code on the back.
+
+- code: USFOTIEC
+  name: USF OSHA Training Institute Education Center
+  aliases: [University of South Florida OSHA Training Institute Education Center, USF OTI Education Center, USF OSHA]
+  domains: [usfosha.com, usfotiec.org, usf.edu]
+  verification_method: qr_or_code
+  lookup_url: https://verify.usfotiec.org/
+  verification_notes: Credential Verification at verify.usfotiec.org; email verification is the fallback.
+
+- code: OTIEC
+  name: OTI Education Center (OSHA Card Portal)
+  aliases: [OSHA Training Institute Education Center, OTI Education Center]
+  domains: [oshacardportal.com]
+  verification_method: qr_or_code
+  lookup_url: https://www.oshacardportal.com/portalapp/verify/
+  link_template: "https://www.oshacardportal.com/portalapp/verify/{code}"
+  automatic_check: osha_card_portal
+  verification_notes: >-
+    OSHA runs no national registry. Cards processed through the OSHA Card Portal have a QR code that
+    shows VALID or NOT VALID. Other training centers verify by their own page, phone or email.
+
+- code: SAFETYLMS
+  name: Safety LMS
+  aliases: [SafetyLMS]
+  domains: [safetylms.com]
+  verification_method: code_lookup
+  lookup_url: https://www.safetylms.com/Home/Verify
+  verification_notes: Verify by certificate number. Its terms forbid automated lookups.
+
+- code: COMTRAIN
+  name: ComTrain
+  aliases: [ComTrain USA, ComTrain LLC]
+  domains: [comtrainusa.com]
+  verification_method: code_lookup
+  lookup_url: https://www.comtrainusa.com/Home/Verify
+  verification_notes: Verify by certificate number (same platform as Safety LMS). Its terms forbid automated lookups.
+
+- code: NCCCO
+  name: NCCCO
+  aliases: [National Commission for the Certification of Crane Operators, CCO Certification]
+  domains: [nccco.org, verifycco.org, ccocert.org]
+  verification_method: qr_or_code
+  lookup_url: https://www.verifycco.org/certsearch
+  link_template: "https://www.verifycco.org/cert/{code}"
+  verification_notes: Verify CCO Online, or the card's QR code. The lookup needs a CAPTCHA.
+
+- code: ATSSA
+  name: ATSSA
+  aliases: [American Traffic Safety Services Association]
+  domains: [atssa.com]
+  verification_method: code_lookup
+  lookup_url: https://www.atssa.com/resources-tools/flagger-verification-search/
+  verification_notes: Flagger Verification Search by card serial number.
+
+- code: NSC
+  name: National Safety Council
+  aliases: [NSC]
+  domains: [nsc.org]
+  verification_method: contact
+  verification_notes: >-
+    No public lookup for flagger cards. First Aid certificates carry a Security Control Number;
+    contact NSC at 1-800-621-7615 or FACerts@nsc.org.
+
+- code: FOA
+  name: Fiber Optic Association
+  aliases: [The Fiber Optic Association, FOA CFOT]
+  domains: [thefoa.org, badgecert.com, bcert.me]
+  verification_method: qr_or_code
+  verification_notes: Each certified tech has an online credential page (BadgeCert); the certificate's QR code links to it.
+
+- code: NWSA
+  name: National Wireless Safety Alliance
+  aliases: [NWSA]
+  domains: [nws-a.org, useclarus.com]
+  verification_method: code_lookup
+  lookup_url: https://nwsa.useclarus.com/view/verify/
+  verification_notes: Verify Certificants on the NWSA portal.
+
+- code: IPAF
+  name: IPAF
+  aliases: [International Powered Access Federation, IPAF PAL Card]
+  domains: [ipaf.org]
+  verification_method: code_lookup
+  lookup_url: https://www.ipaf.org/checkpal
+  verification_notes: Check a PAL card by licence number and date of birth. Use only pages on www.ipaf.org.
+
+- code: EMPLOYER
+  name: Employer (in-house training)
+  aliases: [In-house, Employer, Company training]
+  domains: []
+  verification_method: no_registry
+  verification_notes: >-
+    Employer-issued training (forklift, aerial lift, competent person, confined space, fall protection)
+    has no outside registry; the employer's own training record is the proof.
+
+- code: STATEDMV
+  name: State DMV
+  aliases: [Department of Motor Vehicles, DMV]
+  domains: []
+  verification_method: no_registry
+  verification_notes: >-
+    A CDL has no free public check. Employers request the driving record from the state with the
+    driver's consent.

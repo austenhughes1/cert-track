@@ -32,6 +32,9 @@ end
 
 %w[Foreman Operator Laborer Climber Driver].each { |name| CrewRole.find_or_create_by!(name: name) }
 
+# Certificate issuers and how each is verified (config/certificate_issuers.yml, Phase 3b).
+CertificateIssuer.seed_defaults!
+
 return unless Rails.env.development?
 
 # --- Development only: sign-in accounts and a small demo dataset ---

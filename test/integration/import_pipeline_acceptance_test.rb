@@ -177,6 +177,37 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
     assert_summary_email(batch, accepted: 0, needs_review: 3, duplicates: 0, rejected: 0, failed: 0)
   end
 
+  # Phase 3b (docs/PLAN.md, step 6b): the QR code is read locally (zbarimg) from the uploaded PDF,
+  # and the split gives it to the certificate on its page, which then matches its issuer by domain.
+  test "Phase 3b: a QR code on page 2 of a two-certificate PDF goes to page 2's certificate and names its issuer" do
+    skip "zbarimg (zbar-tools) is not installed" unless Certificates::QrReader.available?
+    CertificateIssuer.seed_defaults!
+    qr_page = CombinePDF.parse(file_fixture("qr/two_pages_qr_on_2.pdf").binread).pages.fetch(1) # Juan A. Ortiz, Red Cross QR
+    pdf = CombinePDF.parse(ImportSamples.pdf({ holder: "Li Chen", name: "Flagger Certification" }))
+    pdf << qr_page
+    entry = ->(page, holder, code, issuer) {
+      { "pages" => [ page ], "holder_name" => holder, "certificate_type_code" => code, "certificate_name_as_printed" => nil,
+        "issuer" => issuer, "certificate_issuer_code" => nil, "certificate_number" => nil, "verification_code" => nil,
+        "verification_url" => nil, "completed_on" => "2025-03-14", "expires_on" => nil, "confidence" => 0.9, "notes" => nil }
+    }
+    # Page 2 has too little text for OCR, so it goes to the vision model in a call of its own.
+    Ai::FakeProvider.reply_next!({ "certificates" => [ entry.(1, "Li Chen", "FLAGGER", "Example Safety Training LLC") ], "non_certificate_pages" => [] })
+    Ai::FakeProvider.reply_next!({ "certificates" => [ entry.(2, "Juan A. Ortiz", "FIRSTAID", "American Red Cross") ], "non_certificate_pages" => [] })
+
+    batch = upload(pdf.to_pdf.b, filename: "two cards.pdf")
+    run_jobs
+
+    first, second = batch.reload.import_items.order(:id).to_a
+    assert_equal [ "1", "2" ], [ first.page_range, second.page_range ]
+    assert_equal [ [], [ { "page" => 1, "text" => "https://www.redcross.org/take-a-class/qrcode?certnumber=TEST123" } ] ],
+      [ first.barcodes, second.barcodes ]
+    assert_equal [ nil, "unmatched" ], [ first.matched_certificate_issuer, first.issuer_match ]
+    assert_equal [ "REDCROSS", "matched", "TEST123", "https://www.redcross.org/take-a-class/qrcode?certnumber=TEST123" ],
+      [ second.matched_certificate_issuer.code, second.issuer_match, second.proposed_verification_code, second.proposed_verification_url ]
+    assert second.authenticity_needs_check?, "Red Cross is checked by a person"
+    assert_not first.authenticity_flagged?
+  end
+
   private
     # Uploads through the real form, then runs every job the way Solid Queue would (no
     # signed-in user). Returns the batch.

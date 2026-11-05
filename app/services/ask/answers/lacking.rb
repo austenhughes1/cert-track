@@ -1,9 +1,11 @@
 module Ask
   module Answers
     # "Who doesn't have Flagger?" Active crew without a current, unexpired certificate of the
-    # type (nothing on file, or the last one expired), whether or not a project requires it
-    # (that is Answers::Gaps). "on 2417" narrows it to that project's crew.
-    #   2 active crew members don't hold a current Flagger certificate: Mari Garcia (none on file) and ...
+    # type (nothing on file, the last one expired, or it is confirmed fake), whether or not a
+    # project requires it (that is Answers::Gaps). One only flagged for review still counts, so
+    # its holder isn't listed. "on 2417" narrows it to that project's crew.
+    #   2 active crew members don't hold a current Flagger certificate: Mari Garcia (none on file) and
+    #   Juan Ortiz (confirmed fake: not found by issuer).
     #   Everyone on the active crew holds a current Flagger certificate.
     class Lacking < Base
       HOLDING = %w[valid expiring lapses_on_project].freeze
@@ -47,7 +49,11 @@ module Ask
         end
 
         def item_text(item)
-          state = item.certificate ? "expired #{date(item.certificate.expires_on)}" : "none on file"
+          state = case item.status
+          when "fake" then confirmed_fake(item.certificate)
+          when "expired" then with_authenticity("expired #{date(item.certificate.expires_on)}", item.certificate)
+          else "none on file"
+          end
           "#{item.crew_member.display_name} (#{state})"
         end
     end

@@ -1,6 +1,8 @@
 require "test_helper"
 
 class ProjectsControllerTest < ActionDispatch::IntegrationTest
+  GAPS_LIST = "Missing, expired and confirmed fake certificates".freeze
+
   setup do
     @tower = projects(:tower_2417)
     @closed = projects(:closed_2390)
@@ -164,8 +166,66 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
 
     get project_path(@tower)
 
-    assert_select "ul[aria-label=?] li", "Missing and expired certificates", 5 # 3 missing + 2 expired
-    assert_select "ul[aria-label=?] li", "Missing and expired certificates", text: /Garcia, Maria\s+· Flagger/
+    assert_select "ul[aria-label=?] li", GAPS_LIST, 5 # 3 missing + 2 expired
+    assert_select "ul[aria-label=?] li", GAPS_LIST, text: /Garcia, Maria\s+· Flagger/
+  end
+
+  test "show counts and lists a certificate a person confirmed fake as a gap" do
+    sign_in_as users(:viewer)
+    certificates(:li_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:mismatch],
+      authenticity_method: Authenticity::PERSON_METHOD)
+
+    get project_path(@tower)
+
+    assert_select "a[href=?]", project_compliance_path(@tower), text: "6 gaps"
+    assert_select "[data-status=fake]", text: /1 confirmed fake/
+    assert_select "ul[aria-label=?] li", GAPS_LIST, 6
+    assert_select "ul[aria-label=?] li", GAPS_LIST, text: /Chen, Li\s+· Flagger\s+Confirmed fake/
+    assert_select "##{dom_id(project_assignments(:tower_li_chen))} [data-status=fake]", text: "Confirmed fake"
+  end
+
+  test "show keeps counting a certificate an automatic check flagged, marking it for review in the gap list" do
+    sign_in_as users(:viewer)
+    certificates(:li_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:mismatch],
+      authenticity_method: "automatic:qr_details360training")
+    certificates(:li_first_aid).update_columns(authenticity_status: Certificate.authenticity_statuses[:not_found],
+      authenticity_method: "automatic:aha_ecards") # expired anyway
+
+    get project_path(@tower)
+
+    assert_select "a[href=?]", project_compliance_path(@tower), text: "5 gaps"
+    assert_select "[data-status=fake]", count: 0
+    assert_select "ul[aria-label=?] li", GAPS_LIST, 5
+    assert_select "ul[aria-label=?] li", GAPS_LIST, text: /Chen, Li\s+· First Aid/ do
+      assert_select "[data-status=expired]"
+      assert_select "[data-authenticity-review=not_found]"
+    end
+    assert_select "ul[aria-label=?] li", GAPS_LIST, text: /Flagger.*Review/m, count: 0
+  end
+
+  test "index counts confirmed fake first" do
+    sign_in_as users(:viewer)
+    certificates(:juan_osha30).update_columns(authenticity_status: Certificate.authenticity_statuses[:not_found],
+      authenticity_method: Authenticity::PERSON_METHOD)
+
+    get projects_path
+
+    assert_select "##{dom_id(@tower)} [data-status]" do |badges|
+      assert_equal "fake", badges.first["data-status"]
+      assert_match(/1 confirmed fake/, badges.first.text)
+    end
+    assert_select "##{dom_id(@tower)} [data-status=valid]", text: /6 valid/
+  end
+
+  test "index counts a certificate only flagged for review by its dates" do
+    sign_in_as users(:viewer)
+    certificates(:juan_osha30).update_columns(authenticity_status: Certificate.authenticity_statuses[:not_found],
+      authenticity_method: "automatic:aha_ecards")
+
+    get projects_path
+
+    assert_select "##{dom_id(@tower)} [data-status=fake]", count: 0
+    assert_select "##{dom_id(@tower)} [data-status=valid]", text: /7 valid/
   end
 
   test "show has empty states for a new project" do

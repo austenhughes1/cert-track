@@ -44,6 +44,45 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     assert_select "a#tile_review_queue", count: 0
   end
 
+  test "verification tiles count current certificates of active crew that are confirmed fake, flagged for review or need a check" do
+    certificates(:li_flagger).record_authenticity!(status: :mismatch, method: "person", by: users(:admin))
+    certificates(:juan_climber).record_authenticity!(status: :not_found, method: "person", by: users(:manager))
+    certificates(:juan_flagger).record_authenticity!(status: :not_found, method: "automatic:aha_ecards")
+    certificates(:maria_osha30).record_authenticity!(status: :mismatch, method: "automatic:aha_ecards")
+    certificates(:juan_first_aid).record_authenticity!(status: :suspicious, method: "rules")
+    certificates(:dave_flagger).record_authenticity!(status: :needs_check, method: "rules")
+    certificates(:juan_flagger_old).record_authenticity!(status: :not_found, method: "person", by: users(:admin)) # superseded
+    certificates(:sam_flagger).record_authenticity!(status: :mismatch, method: "person", by: users(:admin)) # inactive member
+    certificates(:juan_osha30).record_authenticity!(status: :verified, method: "rules")
+    sign_in_as users(:viewer)
+
+    get root_path
+
+    assert_select "a#tile_verification_fake.bg-red-100[href=?]", verification_path(status: "fake") do
+      assert_select "[data-count]", "2"
+      assert_select "p", "Confirmed fake"
+      assert_select "p", "a person checked with the issuer; they count as not valid and are left out of packets"
+    end
+    assert_select "a#tile_verification_flagged.bg-red-50[href=?]", verification_path(status: "flagged") do
+      assert_select "[data-count]", "3"
+      assert_select "p", "Flagged for review"
+      assert_select "p", "an automatic check or QR code found a problem; they still count until someone checks"
+    end
+    assert_select "a#tile_verification_needs_check[href=?]", verification_path(status: "needs_check") do
+      assert_select "[data-count]", "1"
+      assert_select "p", "Needs a check"
+    end
+    assert_select "#verification_tiles", text: /failed verification/i, count: 0
+  end
+
+  test "verification tiles are grey at zero" do
+    sign_in_as users(:viewer)
+
+    get root_path
+
+    %w[fake flagged needs_check].each { assert_select "a#tile_verification_#{it}.bg-white [data-count]", "0" }
+  end
+
   test "next expirations lists current certificates of active crew, soonest first" do
     sign_in_as users(:viewer)
     get root_path
@@ -113,9 +152,40 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
       assert_select "a[href=?]", project_path(tower), text: "2417 · Tower 2417 Upgrade"
       assert_select "a[href=?]", project_compliance_path(tower), text: "Matrix"
       TOWER_TOTALS.each { |status, count| assert_select "td[data-status=#{status}]", count.to_s }
+      assert_select "td[data-status=fake]", "0"
       assert_select "td", "4" # crew
     end
     assert_select "#dashboard_project_#{projects(:closed_2390).id}", count: 0
+  end
+
+  test "a project's certificate a person confirmed fake is counted in its own column" do
+    tower = projects(:tower_2417)
+    certificates(:juan_osha30).record_authenticity!(status: :not_found, method: "person", by: users(:admin))
+    sign_in_as users(:viewer)
+    get root_path
+
+    assert_select "#active_projects th[title=?]", "Confirmed fake", "Fake"
+    assert_select "#active_projects tr#dashboard_project_#{tower.id}" do
+      assert_select "td[data-status=fake]", "1"
+      assert_select "td[data-status=valid]", (TOWER_TOTALS.fetch("valid") - 1).to_s
+    end
+  end
+
+  test "a project's certificate only flagged for review still counts by its dates" do
+    tower = projects(:tower_2417)
+    certificates(:juan_osha30).record_authenticity!(status: :not_found, method: "automatic:aha_ecards")
+    certificates(:juan_flagger).record_authenticity!(status: :mismatch, method: "automatic:aha_ecards")
+    certificates(:juan_climber).update_columns(authenticity_status: Certificate.authenticity_statuses[:suspicious],
+      authenticity_method: "person") # a person can't record suspicious; it still isn't fake
+    sign_in_as users(:viewer)
+    get root_path
+
+    assert_select "#active_projects tr#dashboard_project_#{tower.id}" do
+      TOWER_TOTALS.each { |status, count| assert_select "td[data-status=#{status}]", count.to_s }
+      assert_select "td[data-status=fake]", "0"
+    end
+    assert_select "a#tile_verification_flagged [data-count]", "3"
+    assert_select "a#tile_verification_fake [data-count]", "0"
   end
 
   test "empty states when nothing is active or due" do

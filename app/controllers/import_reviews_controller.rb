@@ -4,11 +4,22 @@
 # services (which also run the batch's check_completion!); after each the reviewer moves on
 # to the next item. "Read again" (Imports::Reread) also takes rejected and failed items, from
 # the batch page. Editors only: the queue shows personal data from the cards.
+# Phase 3b: the issuer picker ("Other..." adds an issuer, IssuerChoice) and the verification code
+# and link are part of the proposal. The authenticity panel's buttons belong to the review form and
+# post to check, which saves the edits first, so the check uses what the reviewer typed.
 class ImportReviewsController < ApplicationController
+  include IssuerChoice
+
   require_role :editor
 
   INDEX_LIMIT = 200
-  REVIEW_FIELDS = %i[crew_member_id certificate_type_id completed_on expires_on certificate_number issued_by].freeze
+  REVIEW_FIELDS = %i[crew_member_id certificate_type_id completed_on expires_on certificate_number issued_by
+    certificate_issuer_id other_issuer_name verification_code verification_url].freeze
+  # Saved edits to these re-run the item's authenticity check (Verification::Run compares them).
+  VERIFICATION_ATTRIBUTES = %w[matched_certificate_issuer_id issuer_match proposed_verification_code proposed_verification_url
+    matched_crew_member_id proposed_completed_on proposed_expires_on proposed_expires_on_source].freeze
+  # Left out of an accept or merge while they are still the item's own proposal (accept_attributes).
+  VERIFICATION_FIELDS = %i[certificate_issuer_id verification_code verification_url].freeze
   CREW_MEMBER_FIELDS = %i[first_name last_name employer crew_role_id].freeze
 
   # The reviewer's version of the proposal (form scope :review).
@@ -33,20 +44,50 @@ class ImportReviewsController < ApplicationController
   # Saves edits to the proposal without accepting; the item stays in the queue.
   def update
     @fields = fields_from_params
-    member = CrewMember.find_by(id: @fields.crew_member_id.presence)
-    type = CertificateType.find_by(id: @fields.certificate_type_id.presence)
-    dates = Imports::DateRules.new(completed_on: @fields.completed_on, expires_on: @fields.expires_on, certificate_type: type).call
-    return render_review_errors(dates.errors) if dates.errors?
+    problems = save_edits
+    return render_review_errors(problems) if problems.any?
 
-    @item.update!(proposal_attributes(member, type, dates))
-    redirect_to import_review_path(@item), notice: "Saved your edits. #{item_label} is still waiting for review.", status: :see_other
+    check_item_later
+    redirect_to import_review_path(@item), status: :see_other,
+      notice: [ "Saved your edits. #{item_label} is still waiting for review.", reset_fake_sentence(@item), issuer_sentence ].compact.join(" ")
+  end
+
+  # The authenticity panel's buttons: saves the form's edits (as update does), then records a
+  # person's result (authenticity[status], with authenticity[note]) or, without a status, runs
+  # "Check again" (Verification::CheckJob with force), so the issuer, code and link checked are the
+  # ones on screen. Check again replaces a person's result only if it was on the page shown
+  # (authenticity[shown_at], AuthenticityChecksController.recheck_requested_at).
+  def check
+    @fields = fields_from_params
+    status = params.dig(:authenticity, :status).to_s.presence
+    return render_review_errors([ AuthenticityChecksController::CHOOSE_RESULT ]) if status && Authenticity::PERSON_STATUSES.exclude?(status)
+
+    problems = save_edits
+    return render_review_errors(problems) if problems.any?
+
+    requested_at = AuthenticityChecksController.recheck_requested_at(params.dig(:authenticity, :shown_at))
+    if status
+      note = params.dig(:authenticity, :note).to_s.strip.first(AuthenticityChecksController::NOTE_LIMIT)
+      @item.record_authenticity!(status: status, method: Authenticity::PERSON_METHOD, note: note, by: Current.user)
+      notice = [ "Saved your edits and recorded “#{@item.authenticity_label}”.", AuthenticityChecksController.fake_hint(@item),
+        AuthenticityChecksController::RECORDED_HINT ].compact.join(" ")
+    elsif (newer = AuthenticityChecksController.newer_result_sentence(@item, requested_at))
+      notice = "Saved your edits. #{newer}"
+    else
+      Verification::CheckJob.perform_later(@item, force: true, requested_at: requested_at)
+      notice = "Saved your edits and checking again with them. #{AuthenticityChecksController::CHECKING_HINT}"
+    end
+    redirect_to import_review_path(@item, anchor: "authenticity"), status: :see_other, notice: [ notice, issuer_sentence ].compact.join(" ")
   end
 
   def accept
     @fields = fields_from_params
+    return render_review_errors(issuer_problems) if issuer_problems.any?
+
     next_id = next_item_id
-    certificate = Imports::Accept.new(@item, user: Current.user, attributes: @fields.to_h).call
-    redirect_to_next next_id, notice: "Accepted #{certificate.certificate_type.name} for #{certificate.crew_member.display_name}."
+    certificate = Imports::Accept.new(@item, user: Current.user, attributes: accept_attributes).call
+    redirect_to_next next_id, notice: [ "Accepted #{certificate.certificate_type.name} for #{certificate.crew_member.display_name}.",
+      fake_sentence(certificate), issuer_sentence ].compact.join(" ")
   rescue Imports::Accept::NotReviewable => error
     redirect_to_next nil, alert: error.record.errors.full_messages.to_sentence
   rescue ActiveRecord::RecordInvalid => error
@@ -77,8 +118,9 @@ class ImportReviewsController < ApplicationController
     end
 
     crew_member = Imports::CreateCrewMember.new(@item, user: Current.user, attributes: crew_member_params).call
+    check_item_later # the holder compared is someone else now
     redirect_to import_review_path(@item), status: :see_other,
-      notice: "Added #{crew_member.display_name} to the crew and picked them for this certificate."
+      notice: [ "Added #{crew_member.display_name} to the crew and picked them for this certificate.", reset_fake_sentence(@item) ].compact.join(" ")
   rescue Imports::Accept::NotReviewable => error
     redirect_to_next nil, alert: error.record.errors.full_messages.to_sentence
   rescue ActiveRecord::RecordInvalid => error
@@ -88,15 +130,18 @@ class ImportReviewsController < ApplicationController
   # Front and back photos of one card: one certificate holding every item's file.
   def merge
     @fields = fields_from_params
+    return render_review_errors(issuer_problems) if issuer_problems.any?
+
     others = merge_others
     if others.empty?
       return render_review_errors([ "The matching items were reviewed in the meantime, so there is nothing left to merge." ])
     end
 
     next_id = next_item_id(also_leaving: others.map(&:id))
-    certificate = Imports::Merge.new(@item, others: others, user: Current.user, attributes: @fields.to_h).call
-    redirect_to_next next_id, notice: "Merged #{helpers.pluralize(others.size + 1, "file")} into one " \
-                                      "#{certificate.certificate_type.name} certificate for #{certificate.crew_member.display_name}."
+    certificate = Imports::Merge.new(@item, others: others, user: Current.user, attributes: accept_attributes).call
+    redirect_to_next next_id, notice: [ "Merged #{helpers.pluralize(others.size + 1, "file")} into one " \
+      "#{certificate.certificate_type.name} certificate for #{certificate.crew_member.display_name}.", fake_sentence(certificate),
+      issuer_sentence ].compact.join(" ")
   rescue ActiveRecord::RecordInvalid => error # includes Imports::Accept::NotReviewable for a partner reviewed meanwhile
     render_review_errors(error.record.errors.full_messages)
   end
@@ -114,7 +159,8 @@ class ImportReviewsController < ApplicationController
 
   private
     def set_item
-      @item = ImportItem.includes(:matched_crew_member, :matched_certificate_type).with_attached_file.find(params.expect(:id))
+      @item = ImportItem.includes(:matched_crew_member, :matched_certificate_type, :matched_certificate_issuer, :authenticity_checked_by)
+        .with_attached_file.find(params.expect(:id))
     end
 
     # Someone else may have reviewed it since the link was rendered.
@@ -188,6 +234,7 @@ class ImportReviewsController < ApplicationController
       @merge_candidates = Imports::MergeCandidates.for(@item).to_a
       @crew_members = CrewMember.active.ordered.to_a
       @certificate_types = CertificateType.active.ordered.to_a
+      @certificate_issuers = CertificateIssuer.active.ordered.to_a
       @crew_roles = CrewRole.ordered.to_a
       @employers = CrewMember.employer_names
       @crew_member_attributes ||= Imports::CreateCrewMember.suggested_attributes(@item)
@@ -216,14 +263,84 @@ class ImportReviewsController < ApplicationController
         completed_on: @item.proposed_completed_on&.iso8601,
         expires_on: (@item.proposed_expires_on.iso8601 if given),
         certificate_number: @item.proposed_certificate_number,
-        issued_by: @item.issuer_raw
+        issued_by: @item.issuer_raw,
+        certificate_issuer_id: @item.matched_certificate_issuer_id,
+        verification_code: @item.proposed_verification_code,
+        verification_url: @item.proposed_verification_url
       )
     end
 
     # Every field is passed on to Imports::Accept / Merge: a blank one clears the proposal
     # (a blank expiry is derived from the type), an untouched printed expiry stays printed.
     def fields_from_params
-      Fields.new(**params.expect(review: REVIEW_FIELDS).to_h.symbolize_keys)
+      Fields.new(**params.expect(review: REVIEW_FIELDS).to_h.symbolize_keys).tap do |fields|
+        fields.other_issuer_name = fields.other_issuer_name.to_s.squish.presence
+      end
+    end
+
+    def issuer_problems
+      @issuer_problems ||= issuer_choice_problems(issuer_id: @fields.certificate_issuer_id, other_name: @fields.other_issuer_name,
+        verification_url: @fields.verification_url.to_s.strip)
+    end
+
+    # Saves the form's edits to the proposal (update and check). Returns the problems that kept it
+    # from saving; nothing is saved then, and no issuer is added.
+    def save_edits
+      member = CrewMember.find_by(id: @fields.crew_member_id.presence)
+      type = CertificateType.find_by(id: @fields.certificate_type_id.presence)
+      dates = Imports::DateRules.new(completed_on: @fields.completed_on, expires_on: @fields.expires_on, certificate_type: type).call
+      problems = dates.errors + issuer_problems
+      return problems if problems.any?
+
+      with_chosen_issuer(@fields.certificate_issuer_id, @fields.other_issuer_name) do |issuer|
+        @chosen_issuer = issuer
+        @item.update!(proposal_attributes(member, type, dates, issuer))
+      end
+      []
+    end
+
+    # The fields for Imports::Accept / Merge, with the issuer picker's choice resolved to an id.
+    # The issuer, code and link are left out while they are still the item's own proposal, so
+    # Imports::Accept takes them from the items: in a merge, from the first that has them (the
+    # back of a card often carries the QR code), rather than this item's blanks. An issuer added
+    # with "Other..." stays if the accept then fails (the form offers the same name again, which
+    # finds it): Accept enqueues jobs, so it isn't wrapped in a transaction.
+    def accept_attributes
+      @chosen_issuer = chosen_issuer(@fields.certificate_issuer_id, @fields.other_issuer_name)
+      attributes = @fields.to_h.except(:other_issuer_name).merge(certificate_issuer_id: @chosen_issuer&.id)
+      proposal = fields_from_item
+      attributes.except(*VERIFICATION_FIELDS.select { |field| unchanged_verification_field?(field, attributes[field], proposal[field]) })
+    end
+
+    def unchanged_verification_field?(field, value, proposed)
+      case field
+      when :certificate_issuer_id then value.presence&.to_i == proposed
+      when :verification_code then value.to_s.squish.presence == proposed
+      when :verification_url then Certificate.normalize_verification_url(value) == proposed
+      end
+    end
+
+    # An accepted item keeps the check a person recorded on it (Imports::Accept), so a confirmed
+    # fake one becomes a certificate that counts as not valid, or history when a genuine one of
+    # its type is on file (Certificate's currency rule).
+    def fake_sentence(certificate)
+      return reset_fake_sentence(certificate) unless certificate.authenticity_confirmed_fake?
+      if certificate.superseded?
+        return "It is confirmed fake, so it is kept as history: another #{certificate.certificate_type.name} certificate on file is the current one."
+      end
+
+      "It is confirmed fake, so it counts as not valid in compliance and is left out of packets."
+    end
+
+    # A person's Not found or Doesn't match that this save turned back into needs_check, since its
+    # details changed (Authenticity), says so.
+    def reset_fake_sentence(record)
+      record.authenticity_note if record.authenticity_reset_by_last_save?
+    end
+
+    # What the notice says about an issuer chosen with "Other..." (IssuerChoice#other_issuer_sentence).
+    def issuer_sentence
+      other_issuer_sentence(@chosen_issuer, @fields.other_issuer_name) if other_issuer_chosen?(@fields.certificate_issuer_id, @fields.other_issuer_name)
     end
 
     # Saved edits. The matcher's proposed person keeps its verdict (matched or suggested). A
@@ -232,13 +349,17 @@ class ImportReviewsController < ApplicationController
     # person a name the AI may have misread; clearing the person saves :unmatched. A type
     # picked by hand counts as matched (types learn nothing from a review). The pipeline's
     # date problems (error_message) are cleared: the dates saved here passed Imports::DateRules.
-    def proposal_attributes(member, type, dates)
+    # The issuer saved here counts as matched, like a type, even when it is the suggestion the
+    # form showed: saving it confirms it, so Verification::Run trusts it with an automatic check.
+    def proposal_attributes(member, type, dates, issuer)
       attributes = {
         proposed_completed_on: dates.completed_on,
         proposed_expires_on: dates.expires_on,
         proposed_expires_on_source: saved_expiry_source(dates),
         proposed_certificate_number: @fields.certificate_number,
         issuer_raw: @fields.issued_by.to_s.squish.presence,
+        proposed_verification_code: @fields.verification_code,
+        proposed_verification_url: @fields.verification_url,
         error_message: nil
       }
       if member&.id != @item.matched_crew_member_id
@@ -247,7 +368,16 @@ class ImportReviewsController < ApplicationController
       if type&.id != @item.matched_certificate_type_id
         attributes.merge!(matched_certificate_type: type, type_match: type ? :matched : :unmatched)
       end
+      if issuer&.id != @item.matched_certificate_issuer_id || (issuer && !@item.issuer_matched?)
+        attributes.merge!(matched_certificate_issuer: issuer, issuer_match: issuer ? :matched : :unmatched)
+      end
       attributes
+    end
+
+    # A saved change to what the check compares (the issuer or its confirmation, code, link, person
+    # or dates) checks the item again (network checks in the job).
+    def check_item_later
+      Verification::CheckJob.perform_later(@item) if VERIFICATION_ATTRIBUTES.any? { @item.saved_change_to_attribute?(it) }
     end
 
     # DateRules calls any expiry it is given printed. It stays printed only when it is the

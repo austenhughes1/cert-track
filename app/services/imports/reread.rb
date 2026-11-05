@@ -23,14 +23,25 @@ module Imports
   #
   # The item's AI results and review are cleared (extraction, proposals, matches,
   # suggestions, confidence, error and rejection reason, skip, parking, attempts, reviewer,
-  # page range) and it goes back to pending with Imports::ExtractTextJob, which reuses
-  # extracted_text when it is still there (else OCR runs again). A PDF item's text is cleared
-  # too (it has a page range): Imports::Splitter cuts the text down to the pages the AI found
-  # even when it has to keep the whole file (combine_pdf couldn't cut it), and the AI would
-  # then never see the other pages again. ai_units_used keeps counting: the new read adds to
+  # page range; Phase 3b: issuer match, verification code and link, and the authenticity
+  # check, a person's Verified or Can't be verified too, since it was of the old reading) and
+  # it goes back to pending with
+  # Imports::ExtractTextJob, which reuses extracted_text when it is still there (else OCR runs
+  # again). A PDF item's text is cleared too (it has a page range), and its QR codes with it:
+  # Imports::Splitter cuts both down to the pages the AI found even when it has to keep the
+  # whole file (combine_pdf couldn't cut it), and the AI would then never see the other pages
+  # again. ai_units_used keeps counting: the new read adds to
   # it. No other item, certificate or duplicate link is touched. The batch goes back to
   # processing and finishes again through check_completion!, but no second summary email is
   # sent (summary_sent_at was set the first time).
+  #
+  # A person's Not found or Doesn't match (confirmed fake) stays: it is the only way a
+  # certificate is ever left out (owner, Nov 4, 2026), so reading the same file again must not
+  # undo it. It keeps the digests of the details it was about (Authenticity): when the new
+  # reading gives the same ones, the pipeline's check leaves it alone (Verification::Run, rule
+  # 6); when they differ, nobody checked those, so Imports::ProcessExtractionJob turns it back
+  # into needs a check. Either way Imports::Decider keeps the item for review, where the panel
+  # shows it until someone checks it again.
   #
   # The item's row is locked while it is checked and reset, so a double click enqueues once.
   # A context is only for showing the button: call always checks everything again.
@@ -38,12 +49,19 @@ module Imports
     class NotAllowed < StandardError; end
 
     REREADABLE_STATUSES = %w[needs_review rejected failed].freeze
+    # Kept for a person's confirmed fake (see the class comment).
+    AUTHENTICITY_RESET = {
+      authenticity_status: :unchecked, authenticity_checked_at: nil, authenticity_checked_by_id: nil,
+      authenticity_method: nil, authenticity_note: nil, authenticity_details: {}
+    }.freeze
     RESET_ATTRIBUTES = {
       status: :pending, extraction: nil, provider: nil, page_range: nil, confidence: nil,
       holder_name_raw: nil, certificate_name_raw: nil, issuer_raw: nil, proposed_certificate_number: nil,
       proposed_completed_on: nil, proposed_expires_on: nil, proposed_expires_on_source: nil,
       matched_crew_member_id: nil, person_match: :unmatched, person_suggestions: [],
       matched_certificate_type_id: nil, type_match: :unmatched, type_suggestions: [],
+      matched_certificate_issuer_id: nil, issuer_match: :unmatched, issuer_suggestions: [],
+      proposed_verification_code: nil, proposed_verification_url: nil, **AUTHENTICITY_RESET,
       error_message: nil, rejection_reason: nil, skipped_at: nil, next_attempt_at: nil, attempts: 0,
       reviewed_by_id: nil, reviewed_at: nil
     }.freeze
@@ -174,14 +192,16 @@ module Imports
 
     private
       # Imports::Splitter gives every PDF item it reads a page range, and may have cut its text
-      # down to those pages: the file is read again so the AI sees every page.
+      # and QR codes down to those pages: the file is read again so the AI sees every page.
+      # A person's confirmed fake stays (see the class comment).
       def reset_attributes
-        @item.page_range.present? ? RESET_ATTRIBUTES.merge(extracted_text: nil) : RESET_ATTRIBUTES
+        attributes = @item.page_range.present? ? RESET_ATTRIBUTES.merge(extracted_text: nil, barcodes: nil) : RESET_ATTRIBUTES
+        @item.authenticity_confirmed_fake? ? attributes.except(*AUTHENTICITY_RESET.keys) : attributes
       end
 
       # Reloads the item under a row lock: a second click waits here, then sees it pending.
       def lock_item!
-        @item.lock!
+        @item.reload(lock: true)
       rescue ActiveRecord::RecordNotFound
         raise NotAllowed, "This item no longer exists."
       end

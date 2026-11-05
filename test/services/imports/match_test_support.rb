@@ -2,7 +2,7 @@ require "combine_pdf"
 
 # Builders for the matching, review and ProcessExtractionJob tests: synthetic certificate
 # PDFs (combine_pdf text boxes, one certificate per page), model-contract certificate
-# hashes and import items with a file attached. Every name and number is made up.
+# hashes, import items with a file attached, and issuers. Every name and number is made up.
 module ImportsMatchTestSupport
   # The SYNTHETIC CERTIFICATE TEXT format, as lines.
   def certificate_lines(name:, holder:, number: "C-0001", completed: "2025-03-14", expires: nil, issuer: "Example Safety Training LLC")
@@ -30,9 +30,11 @@ module ImportsMatchTestSupport
   # A certificate entry from the model output contract (string keys).
   def certificate_entry(pages: [ 1 ], holder: "Juan A. Ortiz", code: "OSHA30",
     name: "OSHA 30-Hour Construction Industry Outreach Training", number: "30-1234567",
-    completed: (Date.current - 30).iso8601, expires: nil, confidence: 0.95, issuer: "Example Safety Training LLC")
+    completed: (Date.current - 30).iso8601, expires: nil, confidence: 0.95, issuer: "Example Safety Training LLC",
+    issuer_code: nil, verification_code: nil, verification_url: nil)
     { "pages" => pages, "holder_name" => holder, "certificate_type_code" => code,
-      "certificate_name_as_printed" => name, "issuer" => issuer, "certificate_number" => number,
+      "certificate_name_as_printed" => name, "issuer" => issuer, "certificate_issuer_code" => issuer_code,
+      "certificate_number" => number, "verification_code" => verification_code, "verification_url" => verification_url,
       "completed_on" => completed, "expires_on" => expires, "confidence" => confidence, "notes" => nil }
   end
 
@@ -88,5 +90,29 @@ module ImportsMatchTestSupport
 
   def with_auto_accept(enabled = true, &block)
     Imports::Config.with(auto_accept_enabled: enabled, &block)
+  end
+
+  # The default issuers (config/certificate_issuers.yml), as db/seeds.rb adds them.
+  def issuer(code)
+    CertificateIssuer.find_by_code(code) || (CertificateIssuer.seed_defaults! && CertificateIssuer.find_by_code!(code))
+  end
+
+  # Verification::Run.new inside the block records each call ([item id, options]) in the yielded
+  # array; with status:, the run records that status instead of applying the real rules.
+  def with_verification_run(status: nil)
+    calls = []
+    real_new = Verification::Run.method(:new)
+    Verification::Run.define_singleton_method(:new) do |record, **options|
+      calls << [ record.id, options ]
+      next real_new.call(record, **options) unless status
+
+      Object.new.tap do |run|
+        run.define_singleton_method(:call) { record.record_authenticity!(status:, method: "rules", note: "Set by the test.") }
+        run.define_singleton_method(:automatic_check_deferred?) { false }
+      end
+    end
+    yield calls
+  ensure
+    Verification::Run.singleton_class.remove_method(:new)
   end
 end

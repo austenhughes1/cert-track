@@ -61,6 +61,8 @@ env:
     AI_PROVIDER: workers_ai
     AI_DAILY_NEURON_BUDGET: 9000
     AUTO_ACCEPT_ENABLED: "false"
+    # Automatic issuer lookups (Phase 3b): only a certificate's verification code goes to its issuer's own site.
+    VERIFICATION_AUTO_CHECKS: "true"
     # Sized for 2 OCPU (2 Ampere cores) / 12 GB: one Puma worker per core (3 threads each, see
     # config/puma.rb). JOB_CONCURRENCY is processes per Solid Queue worker (config/queue.yml): one
     # for imports (2 threads) and one for everything else (2 threads), so an import backlog never

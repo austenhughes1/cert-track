@@ -28,7 +28,10 @@ Next to each file, write the correct answer as `<same name>.expected.json`: `ort
       "certificate_type_code": "OSHA30",
       "certificate_name_as_printed": "OSHA 30-Hour Construction Industry Outreach Training",
       "issuer": "Example Safety Training LLC",
+      "certificate_issuer_code": null,
       "certificate_number": "30-1234567",
+      "verification_code": "30-1234567",
+      "verification_url": "examplesafety.com/verify",
       "completed_on": "2025-03-14",
       "expires_on": null,
       "confidence": 1,
@@ -51,9 +54,17 @@ How to fill it in:
 - **`non_certificate_pages`**: pages that aren't certificates, such as cover sheets, course outlines and blank backs.
 - `certificate_name_as_printed`, `issuer`, `confidence` and `notes` aren't scored. Fill them in or leave them `null`.
 
+Three more fields describe how the certificate is verified (Phase 3b). They are scored and reported on their own, and don't count toward the 90% bar:
+
+- **`certificate_issuer_code`**: the code of the issuer from your issuer list, or `null` if the issuer isn't on it. Upper or lower case doesn't matter. The model gets the active issuers from your **development** database, like the master list. To list them, run `bin/rails runner 'CertificateIssuer.active.ordered.each { |i| puts "#{i.code}  #{i.name}" }'`.
+- **`verification_code`**: the code printed for checking the certificate on the issuer's site, such as a certificate ID or eCard code, or `null`. It is often the same as `certificate_number`. Spaces and case don't matter.
+- **`verification_url`**: a verification address printed on the certificate, as printed, or `null`. Write only what is printed: a QR code doesn't count, because the pipeline reads QR codes itself and the model never sees them. `https://`, `www.`, upper-case letters in the site name, a trailing `/` and the order of `?a=1&b=2` don't matter.
+
+Answer files written before these fields existed still work: a certificate without one of these keys isn't scored on it, and its column shows `-`. Write `null` when you've checked and the certificate has none, so it is scored.
+
 Write the answers from the files themselves, not from a model's output, or the score will flatter that model.
 
-An answer file that still contains `FILL IN` (the placeholder in blank templates) isn't scored yet. The run lists it under "skipped", so you can score the samples you've finished while the rest wait.
+An answer file that still contains `FILL IN` (the placeholder in blank templates) anywhere, including in the three verification fields, isn't scored yet. The run lists it under "skipped", so you can score the samples you've finished while the rest wait. When you add the verification fields to an answer you've already finished, write the values or `null`, never `FILL IN`, or the whole file drops out of the run.
 
 ## 2. Set up Workers AI in your shell
 
@@ -101,24 +112,30 @@ Other options:
 - Llama 4 Scout is also a text candidate (`[workers_ai,@cf/meta/llama-4-scout-17b-16e-instruct]`). One model for both text and images keeps the setup simple. To try a model that isn't in `config/ai_models.yml`, add its rates from the [pricing page](https://developers.cloudflare.com/workers-ai/platform/pricing/) first. Otherwise the run reports deliberately high default rates. That file also notes the models ruled out on Nov 4, 2026 (Gemma 3 retired, Qwen 3 never answers, plain Llama 3.1 8B refuses schemas).
 - `bin/rails "certtrack:eval_extraction[anthropic]"` scores Claude Haiku 5.5 (it needs `ANTHROPIC_API_KEY` and the owner's go-ahead), and `[ollama,<model>]` scores a local Ollama model.
 
-**Budget.** Each run uses part of the same 10,000 free daily neurons as production imports. Usage is printed at the end. For 25 samples, a rough guide is 2,500 neurons for the 70B model, 500 for the 8B model, 2,000 for Mistral Small, 700 for Gemma 4, and 1,500 to 2,500 for a vision-only run. Spread the runs over two UTC days, or do them before go-live. If the allocation runs out, the run stops, prints what it scored so far, and tells you to re-run after 00:05 UTC. The budget is checked before every AI call, and one file can take several: one per 24,000 characters of readable text, plus one per unreadable page (four per call for Llama 4 Scout). A file estimated to need more than the whole daily budget is refused before its first call, with a message to split it.
+**Budget.** Each run uses part of the same 10,000 free daily neurons as production imports. Usage is printed at the end. For 25 samples, a rough guide is 2,500 neurons for the 70B model, 500 for the 8B model, 2,000 for Mistral Small, 700 for Gemma 4, and 1,500 to 2,500 for a vision-only run. Since Phase 3b every call also carries the issuer list and its rules, about 600 more input tokens with the 18 default issuers: about 16 neurons a call on the 70B model, 3 on the 8B and 6 on Gemma 4. Spread the runs over two UTC days, or do them before go-live. If the allocation runs out, the run stops, prints what it scored so far, and tells you to re-run after 00:05 UTC. The budget is checked before every AI call, and one file can take several: one per 24,000 characters of readable text, plus one per unreadable page (four per call for Llama 4 Scout). A file estimated to need more than the whole daily budget is refused before its first call, with a message to split it.
 
 ## 4. Read the results
 
 ```text
-sample                             certs   type      holder    completed expires   number     neurons   notes
-garcia_osha30.pdf                  1/1     1/1       1/1       1/1       0/1       1/1              98   expires: want "2027-05-01", got nil
+sample                             certs   type      holder    completed expires   number    issuer    vcode     vlink      neurons   notes
+garcia_osha30.pdf                  1/1     1/1       1/1       1/1       0/1       1/1       1/1       1/1       -               98   expires: want "2027-05-01", got nil
 ...
 Field accuracy (the bar is 90% on type, holder, completed and expires):
   type          24/25   96.0%  meets the bar
   ...
+Verification fields (reported on their own, not part of the bar):
+  issuer        20/22   90.9%  (reported, not part of the bar)
+  vcode         15/18   83.3%  (reported, not part of the bar)
+  vlink           -       -    (no answer file has verification_url yet)
+
 Certificates: 25 expected, 25 found, 1 extra. Non-certificate pages: 3/4 identified. Errors: 0.
 Usage: 26 requests, 51,200 input tokens, 6,100 output tokens, 2,610 neurons, 95 s
 Verdict: below the 90% bar on expires.
 ```
 
-- Each row compares one file with its answer. `certs` is the number found out of the number expected, plus extras the model invented. The notes show the first few wrong fields.
-- An expected certificate the model missed, or a file that errored, counts as wrong on every field.
+- Each row compares one file with its answer. `certs` is the number found out of the number expected, plus extras the model invented. The notes show the first few wrong fields, the bar's fields first.
+- `issuer`, `vcode` and `vlink` are the issuer code, verification code and verification address. They score the model's reply only: in the pipeline, a QR code on the certificate also names the issuer and gives the link, so imports do better than these columns on cards with a QR code.
+- An expected certificate the model missed, or a file that errored, counts as wrong on every field its answer has.
 - Look at the wrong fields before blaming the model. A typo in an answer file or an unreadable scan can look like a model error.
 
 ## 5. Record the scores and choose
@@ -128,14 +145,14 @@ Add a results table under Phase 3 in `docs/PLAN.md`:
 ```markdown
 **Extraction spike results** (25 samples, Nov 2026)
 
-| Model | Type | Holder | Completed | Expires | Neurons per run | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| @cf/meta/llama-3.3-70b-instruct-fp8-fast | 96% | 92% | 92% | 88% | 2,610 | misses printed expiry on wallet cards |
-| @cf/meta/llama-3.1-8b-instruct-fp8-fast | ... | | | | | |
-| @cf/meta/llama-4-scout-17b-16e-instruct (vision only) | ... | | | | | |
+| Model | Type | Holder | Completed | Expires | Issuer | Code | Link | Neurons per run | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| @cf/meta/llama-3.3-70b-instruct-fp8-fast | 96% | 92% | 92% | 88% | 91% | 83% | - | 2,610 | misses printed expiry on wallet cards |
+| @cf/meta/llama-3.1-8b-instruct-fp8-fast | ... | | | | | | | | |
+| @cf/meta/llama-4-scout-17b-16e-instruct (vision only) | ... | | | | | | | | |
 ```
 
-Then pick the text model with the best score. When two are close, take the one that uses fewer neurons: it drains a backlog faster. Pick the vision model the same way.
+Then pick the text model with the best score on the four bar fields. When two are close, take the one that uses fewer neurons: it drains a backlog faster, and break a remaining tie on the issuer and verification columns. Pick the vision model the same way.
 
 1. Set both models in `config/deploy.yml` by uncommenting `EXTRACTION_MODEL` and `EXTRACTION_VISION_MODEL`. Check that both have rates in `config/ai_models.yml`, then commit and run `bin/kamal deploy`.
 2. If no model reaches 90%, keep `AUTO_ACCEPT_ENABLED: "false"` so every import goes through the review queue. Or switch to the Anthropic fallback (DEPLOY.md section 12). That choice is the owner's.

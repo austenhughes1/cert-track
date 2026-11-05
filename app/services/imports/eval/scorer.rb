@@ -14,10 +14,17 @@ module Imports
     #   holder_name            equal after NameNormalizer ("ORTIZ, JUAN A." == "Juan Ortiz")
     #   completed_on, expires_on  the same YYYY-MM-DD, or both null
     #   certificate_number     letters and digits only, case-insensitive (informational)
+    # Verification fields (Phase 3b), reported on their own and not part of the 90% bar. An
+    # expected certificate without the key (an answer file written before Phase 3b) doesn't
+    # score that field:
+    #   certificate_issuer_code  exact code, case-insensitive
+    #   verification_code        spaces and case ignored
+    #   verification_url         scheme, "www.", host case, a trailing slash and query order ignored
     class Scorer
       SCORED_FIELDS = %w[certificate_type_code holder_name completed_on expires_on].freeze
       INFO_FIELDS = %w[certificate_number].freeze
-      FIELDS = (SCORED_FIELDS + INFO_FIELDS).freeze
+      VERIFICATION_FIELDS = %w[certificate_issuer_code verification_code verification_url].freeze
+      FIELDS = (SCORED_FIELDS + INFO_FIELDS + VERIFICATION_FIELDS).freeze
 
       Score = Data.define(:fields, :expected_count, :matched, :missing, :extra, :pages, :mismatches) do
         def correct?(field)
@@ -44,6 +51,8 @@ module Imports
           unpaired.delete(got) if got
           missing += 1 unless got
           FIELDS.each do |field|
+            next unless self.class.scores?(want, field)
+
             same = got ? same?(field, want[field], got[field]) : false
             fields[field] = [ fields[field][0] + (same ? 1 : 0), fields[field][1] + 1 ]
             mismatches << { "field" => field, "expected" => want[field], "actual" => got&.dig(field) } unless same
@@ -52,6 +61,12 @@ module Imports
 
         Score.new(fields: fields, expected_count: @expected.size, matched: @expected.size - missing, missing: missing,
           extra: unpaired.size, pages: [ (@expected_pages & @actual_pages).size, @expected_pages.size ], mismatches: mismatches)
+      end
+
+      # Whether an expected certificate is scored on field: always, except a verification field
+      # its answer leaves out.
+      def self.scores?(expected_certificate, field)
+        VERIFICATION_FIELDS.exclude?(field) || expected_certificate.key?(field)
       end
 
       private
@@ -83,9 +98,23 @@ module Imports
           case field
           when "holder_name" then NameNormalizer.normalize(text).presence
           when "certificate_number" then text.upcase.gsub(/[^A-Z0-9]/, "").presence
-          when "certificate_type_code" then text.upcase
+          when "certificate_type_code", "certificate_issuer_code" then text.upcase
+          when "verification_code" then text.gsub(/\s+/, "").upcase
+          when "verification_url" then url(text)
           else text
           end
+        end
+
+        # "redcross.org/confirm?a=1&b=2" for "HTTPS://www.RedCross.org/confirm/?b=2&a=1".
+        def url(text)
+          text = text.gsub(/\s+/, "")
+          uri = URI.parse(text.match?(%r{\A[a-z][a-z0-9+.-]*://}i) ? text : "https://#{text}")
+          host = uri.host.to_s.downcase.delete_prefix("www.")
+          port = ":#{uri.port}" if uri.port && uri.port != uri.default_port
+          query = "?#{uri.query.split("&").sort.join("&")}" if uri.query.present?
+          "#{host}#{port}#{uri.path.to_s.delete_suffix("/")}#{query}"
+        rescue URI::InvalidURIError
+          text.downcase
         end
     end
   end

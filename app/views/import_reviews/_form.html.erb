@@ -1,9 +1,10 @@
-<%# locals: (item:, fields:, crew_members:, certificate_types:, merge_candidates:) %>
+<%# locals: (item:, fields:, crew_members:, certificate_types:, certificate_issuers:, merge_candidates:) %>
 <%# The proposal, editable. Accept (POST accept) turns it into a certificate; "Save edits"
     sends the same fields as PATCH to update; Merge (POST merge) makes one certificate from
     this item and its front/back partners. The form carries the session's CSRF token, not a
     per-form one, since a per-form token would only be good for Accept's URL. The
-    review-expiry controller keeps the expiry hint in step with the type and completion date. %>
+    review-expiry controller keeps the expiry hint in step with the type and completion date.
+    The issuer picker's "Other…" adds an issuer when the form is accepted or saved. %>
 <% input_class = "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
 <% hint_class = "mt-1 text-xs text-gray-500" %>
 
@@ -89,9 +90,31 @@
         <%= form.label :certificate_number, "Certificate or card number", class: "block text-sm font-medium text-gray-700" %>
         <%= form.text_field :certificate_number, autocomplete: "off", class: "#{input_class} font-mono" %>
       </div>
+      <%# The issuer's name as the AI read it; the picker below is the issuer. %>
+      <% if fields.issued_by.present? || item.issuer_raw.present? %>
+        <div>
+          <%= form.label :issued_by, "Issuer as printed", class: "block text-sm font-medium text-gray-700" %>
+          <%= form.text_field :issued_by, autocomplete: "off", class: input_class %>
+        </div>
+      <% end %>
+    </div>
+
+    <%= render "shared/issuer_picker", form: form, issuers: certificate_issuers, selected: fields.certificate_issuer_id,
+          current: item.matched_certificate_issuer, other_name: fields.other_issuer_name,
+          suggestions: item.issuer_suggestions, badge: import_match_badge(item.issuer_match), input_class: input_class %>
+
+    <div class="grid gap-4 sm:grid-cols-2">
       <div>
-        <%= form.label :issued_by, "Issued by", class: "block text-sm font-medium text-gray-700" %>
-        <%= form.text_field :issued_by, autocomplete: "off", placeholder: "Trainer or provider", class: input_class %>
+        <%= form.label :verification_code, "Verification code", class: "block text-sm font-medium text-gray-700" %>
+        <%= form.text_field :verification_code, autocomplete: "off", spellcheck: false, class: "#{input_class} font-mono",
+              aria: { describedby: "review_verification_code_hint" } %>
+        <p id="review_verification_code_hint" class="<%= hint_class %>">What goes into the issuer's lookup page.</p>
+      </div>
+      <div>
+        <%= form.label :verification_url, "Verification link", class: "block text-sm font-medium text-gray-700" %>
+        <%= form.text_field :verification_url, autocomplete: "off", spellcheck: false, inputmode: "url", placeholder: "https://",
+              class: input_class, aria: { describedby: "review_verification_url_hint" } %>
+        <p id="review_verification_url_hint" class="<%= hint_class %>">From the QR code or printed address.</p>
       </div>
     </div>
 

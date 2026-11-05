@@ -1,0 +1,112 @@
+<%# locals: (certificate_issuer:) %>
+<% input_class = "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
+<% method_options = CertificateIssuer.verification_methods.keys.map { |method| [ certificate_issuer_method_label(method), method ] } %>
+<%= form_with model: certificate_issuer, class: "space-y-5" do |form| %>
+  <% if certificate_issuer.errors.any? %>
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" id="error_explanation">
+      <p class="font-medium"><%= pluralize(certificate_issuer.errors.count, "problem") %> to fix:</p>
+      <ul class="mt-1 list-disc space-y-1 pl-5">
+        <% certificate_issuer.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="grid gap-5 sm:grid-cols-3">
+    <div class="sm:col-span-2">
+      <%= form.label :name, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :name, required: true, autofocus: certificate_issuer.new_record?, autocomplete: "off",
+            placeholder: "American Red Cross", class: input_class %>
+    </div>
+
+    <div>
+      <%= form.label :code, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :code, required: true, autocomplete: "off", autocapitalize: "characters", spellcheck: false,
+            placeholder: "REDCROSS", aria: { describedby: "code_hint" }, class: "#{input_class} font-mono uppercase" %>
+      <p id="code_hint" class="mt-1 text-xs text-gray-500">Letters, digits, - and _. Saved in capitals. The AI names issuers by code.</p>
+    </div>
+  </div>
+
+  <div class="grid gap-5 sm:grid-cols-3">
+    <div class="sm:col-span-2">
+      <%= form.label :verification_method, "How it verifies", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.select :verification_method, method_options, {}, class: "#{input_class} bg-white" %>
+    </div>
+
+    <div>
+      <%= form.label :position, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.number_field :position, step: 1, aria: { describedby: "position_hint" }, class: input_class %>
+      <p id="position_hint" class="mt-1 text-xs text-gray-500">Lower numbers come first in issuer pickers. Blank sorts after, by name.</p>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :domains, "Website domains", class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_field :domains, value: certificate_issuer.domains.join(", "), autocomplete: "off", spellcheck: false,
+          placeholder: "redcross.org", aria: { describedby: "domains_hint" }, class: "#{input_class} font-mono" %>
+    <p id="domains_hint" class="mt-1 text-xs text-gray-500">
+      Separate with commas. The domains its QR codes and printed links use: a QR code on one of them identifies this issuer,
+      and a QR code on a lookalike of one is flagged as suspicious. Automatic checks only ever contact these domains.
+    </p>
+  </div>
+
+  <div class="grid gap-5 sm:grid-cols-2">
+    <div>
+      <%= form.label :lookup_url, "Lookup page", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :lookup_url, autocomplete: "off", spellcheck: false, inputmode: "url", placeholder: "https://",
+            aria: { describedby: "lookup_url_hint" }, class: input_class %>
+      <p id="lookup_url_hint" class="mt-1 text-xs text-gray-500">The page a person opens to check a code by hand. https:// only.</p>
+    </div>
+    <div>
+      <%= form.label :link_template, "Direct link template", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :link_template, autocomplete: "off", spellcheck: false, inputmode: "url",
+            placeholder: "https://example.org/verify?id={code}", aria: { describedby: "link_template_hint" }, class: "#{input_class} font-mono" %>
+      <p id="link_template_hint" class="mt-1 text-xs text-gray-500">
+        Optional. A link to one certificate's page, with <code>{code}</code> where its verification code goes.
+      </p>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :automatic_check, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.select :automatic_check, certificate_issuer_check_options, { include_blank: "None: a person checks" },
+          aria: { describedby: "automatic_check_hint" }, class: "#{input_class} bg-white" %>
+    <p id="automatic_check_hint" class="mt-1 text-xs text-gray-500">
+      Only for issuers whose website allows automated lookups. A lookup sends only the verification code, and only to
+      the domains above.
+    </p>
+  </div>
+
+  <div>
+    <%= form.label :aliases, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_area :aliases, value: certificate_issuer.aliases.join("\n"), rows: 3, spellcheck: false,
+          placeholder: "Red Cross\nThe American National Red Cross", aria: { describedby: "aliases_hint" }, class: input_class %>
+    <p id="aliases_hint" class="mt-1 text-xs text-gray-500">
+      One per line: the names as printed on certificates. Imports match an issuer by its name or any alias.
+    </p>
+  </div>
+
+  <div>
+    <%= form.label :verification_notes, "How to verify", class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_area :verification_notes, rows: 3, aria: { describedby: "verification_notes_hint" }, class: input_class %>
+    <p id="verification_notes_hint" class="mt-1 text-xs text-gray-500">
+      Shown to reviewers when a certificate has no direct link: what to enter, a phone number or email, the site's terms.
+    </p>
+  </div>
+
+  <div class="flex items-start gap-2">
+    <%= form.check_box :active, class: "mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" %>
+    <div>
+      <%= form.label :active, class: "text-sm font-medium text-gray-700" %>
+      <p class="text-xs text-gray-500">Inactive issuers stay on existing certificates but aren't offered in issuer pickers or matched by imports.</p>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-3 border-t border-gray-100 pt-5">
+    <%= form.submit certificate_issuer.new_record? ? "Add issuer" : "Save changes",
+          class: "cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+    <%= link_to "Cancel", certificate_issuers_path(status: ("all" if certificate_issuer.persisted? && !certificate_issuer.active_was)),
+          class: "text-sm text-gray-600 hover:underline" %>
+  </div>
+<% end %>

@@ -4,7 +4,7 @@ Weekly summary for <%= email_date(@today) %>
 <% if @expiring.empty? && @gaps.empty? -%>
 All clear. Nothing has expired or expires in the next 30 days, and everyone on an active project holds every certificate it requires.
 <% else -%>
-<%= pluralize(@expiring.size - @expired_count, "certificate") %> expiring within 30 days, <%= @expired_count %> already expired, and <%= pluralize(@gaps.size, "gap") %> (missing or expired requirements) on active projects.
+<%= pluralize(@expiring.size - @expired_count, "certificate") %> expiring within 30 days, <%= @expired_count %> already expired, and <%= pluralize(@gaps.size, "gap") %> (missing, expired or confirmed fake) on active projects.
 
 EXPIRED OR EXPIRING WITHIN 30 DAYS
 <% if @expiring.empty? -%>

@@ -70,7 +70,7 @@ class ExpiryMailer < ApplicationMailer
       crew_member_url(crew_member) if crew_member.persisted?
     end
 
-    # "Missing", or "Expired Oct 28, 2026"
+    # "Missing", "Confirmed fake", or "Expired Oct 28, 2026"
     def gap_status_text(gap)
       expires_on = gap.certificate&.expires_on
       gap.status.to_s == "expired" && expires_on ? "Expired #{email_date(expires_on)}" : Compliance.label(gap.status)

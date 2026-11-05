@@ -14,7 +14,8 @@
   <p class="mt-1 text-sm text-gray-500">
     <%= @project.display_name %>. A zip of every file on each current certificate this project requires of its active crew,
     named <span class="font-mono text-xs">Last_First - CODE - exp YYYY-MM-DD</span>, plus an <span class="font-mono text-xs">index.pdf</span>
-    listing each certificate and every missing or expired one.
+    listing each certificate and every missing or expired one. Certificates confirmed fake (a person checked them with the
+    issuer) are left out of the zip and listed in the index; ones only flagged for review go in like any other.
   </p>
 </div>
 
@@ -103,9 +104,19 @@
       <dd class="text-xl font-semibold tabular-nums <%= "text-red-700" if @builder.report.gaps.any? %>" id="packet_gap_count"><%= @builder.report.gaps.size %></dd>
     </div>
   </dl>
+  <% if (excluded = @builder.excluded_cells).any? %>
+    <p class="mt-2 text-sm text-red-700" id="packet_excluded">
+      <%= pluralize(excluded.size, "certificate") %> confirmed fake will be left out and listed in index.pdf:
+      <%= excluded.map { |row, cell| "#{row.crew_member.display_name} (#{cell.certificate_type.code})" }.to_sentence %>.
+    </p>
+  <% end %>
   <% if @builder.certificate_cells.empty? %>
-    <p class="mt-2 text-sm text-gray-500">
-      Nothing to package yet: no one on this project holds a current certificate for a required type.
+    <p class="mt-2 text-sm text-gray-500" id="packet_empty">
+      <% if excluded.any? %>
+        Nothing to package: every current certificate is confirmed fake and left out; index.pdf lists them.
+      <% else %>
+        Nothing to package yet: no one on this project holds a current certificate for a required type.
+      <% end %>
       The packet will still contain index.pdf with the gaps.
     </p>
   <% end %>

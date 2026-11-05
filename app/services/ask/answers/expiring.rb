@@ -3,7 +3,10 @@ module Ask
     # "What expires in the next 60 days?" Current certificates of active crew whose expiry
     # falls in the window (default: the next 30 days), soonest first. Narrowed by a person
     # (inactive allowed: they asked), a type, or a project ("on 2417": the certificates its
-    # crew need there, from Compliance::ProjectReport).
+    # crew need there, from Compliance::ProjectReport). One whose authenticity is flagged (confirmed
+    # fake, or only flagged for review) is listed, and says so:
+    #   2 certificates expire in the next 30 days (by Dec 4, 2026): Juan Ortiz's Flagger on Nov 16, 2026
+    #   (flagged for review: not found by issuer) and Dave Miller's CDL Class A on Nov 29, 2026.
     class Expiring < Base
       def call
         entries, total = project ? project_entries : certificate_entries
@@ -58,7 +61,7 @@ module Ask
           who = certificate.crew_member.display_name unless person
           what = certificate.certificate_type.name unless certificate_type
           subject = who && what ? "#{possessive(who)} #{what}" : (who || what)
-          "#{subject} on #{date(certificate.expires_on)}"
+          "#{subject} on #{date(certificate.expires_on)}#{authenticity_note(certificate)}"
         end
     end
   end

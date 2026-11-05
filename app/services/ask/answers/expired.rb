@@ -4,7 +4,8 @@ module Ask
     # already passed, most recently expired first. A past window ("last month", "recently",
     # "in the last 60 days") keeps only those that expired in it. Narrowed by a person
     # (inactive allowed: they asked), a type, or a project ("on 2417": the certificates its
-    # crew need there, from Compliance::ProjectReport).
+    # crew need there, from Compliance::ProjectReport). One whose authenticity is flagged (confirmed
+    # fake, or only flagged for review) says so.
     #   2 certificates have expired: Mari Garcia's First Aid/CPR/AED on Oct 29, 2026 and ...
     #   1 certificate expired in the last month (since Oct 3, 2026): Mari Garcia's ...
     class Expired < Base
@@ -69,7 +70,7 @@ module Ask
           who = certificate.crew_member.display_name unless person
           what = certificate.certificate_type.name unless certificate_type
           subject = who && what ? "#{possessive(who)} #{what}" : (who || what)
-          "#{subject} on #{date(certificate.expires_on)}"
+          "#{subject} on #{date(certificate.expires_on)}#{authenticity_note(certificate)}"
         end
     end
   end

@@ -1,7 +1,7 @@
 <%# locals: (report:, editor:) %>
-<%# Missing and expired cells as a to-do list under the matrix. %>
+<%# Missing, expired and confirmed fake cells as a to-do list under the matrix. %>
 <section class="mt-6" aria-labelledby="gaps_heading" id="compliance_gaps">
-  <h2 id="gaps_heading" class="mb-2 text-lg font-semibold">Gaps <span class="text-sm font-normal text-gray-500">(missing or expired)</span></h2>
+  <h2 id="gaps_heading" class="mb-2 text-lg font-semibold">Gaps <span class="text-sm font-normal text-gray-500">(missing, expired or confirmed fake)</span></h2>
 
   <% if report.gaps.empty? %>
     <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-6 text-center text-sm text-gray-500">
@@ -25,13 +25,13 @@
                 <%= link_to gap.crew_member.sort_name, crew_member_path(gap.crew_member), class: "font-medium text-gray-900 hover:text-blue-700 hover:underline" %>
               </td>
               <td class="px-4 py-2 text-gray-700"><span class="font-medium"><%= gap.certificate_type.code %></span> · <%= gap.certificate_type.name %></td>
-              <td class="whitespace-nowrap px-4 py-2"><%= compliance_badge(gap.status, gap.certificate&.expires_on) %></td>
+              <td class="whitespace-nowrap px-4 py-2"><%= compliance_badge(gap.status, gap.certificate&.expires_on, certificate: gap.certificate) %></td>
               <td class="whitespace-nowrap px-4 py-2 text-right">
                 <% if gap.certificate %>
                   <%= link_to "View certificate", crew_member_certificate_path(gap.crew_member, gap.certificate), class: "text-blue-700 hover:underline" %>
                 <% end %>
                 <% if editor %>
-                  <%= link_to gap.certificate ? "Add renewal" : "Add certificate",
+                  <%= link_to gap.status == ComplianceHelper::FAKE ? "Add replacement" : (gap.certificate ? "Add renewal" : "Add certificate"),
                         new_crew_member_certificate_path(gap.crew_member, certificate_type_id: gap.certificate_type.id),
                         class: "ml-3 text-blue-700 hover:underline" %>
                 <% end %>

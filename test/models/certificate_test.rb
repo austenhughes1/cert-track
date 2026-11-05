@@ -295,6 +295,64 @@ class CertificateTest < ActiveSupport::TestCase
     end
   end
 
+  test "a newer certificate a person confirmed fake ranks below the genuine one, which stays current" do
+    genuine = create_cert(completed_on: Date.new(2025, 1, 10))
+    fake = create_cert(completed_on: Date.new(2026, 6, 1))
+    assert fake.current?
+
+    fake.record_authenticity!(status: :not_found, method: "person", by: users(:manager))
+    assert fake.superseded?
+    assert_equal genuine, current_for(@member, @flagger)
+    assert_equal "valid", genuine.reload.compliance_status
+
+    fake.record_authenticity!(status: :verified, method: "person", by: users(:manager))
+    assert fake.current?, "no longer fake: the newest is current again"
+    assert genuine.reload.superseded?
+  end
+
+  test "an automatic not found or mismatch never changes which certificate is current" do
+    older = create_cert(completed_on: Date.new(2025, 1, 10))
+    newer = create_cert(completed_on: Date.new(2026, 6, 1))
+
+    newer.record_authenticity!(status: :not_found, method: "automatic:aha_ecards")
+    older.reload.record_authenticity!(status: :mismatch, method: "rules")
+    assert newer.reload.current?
+    assert older.reload.superseded?
+
+    newer.update_columns(authenticity_status: "suspicious", authenticity_method: "person")
+    Certificate.reconcile_current!(@member.id, @flagger.id)
+    assert newer.reload.current?, "a suspicious result is never fake, even marked person"
+  end
+
+  test "a genuine replacement completed before a fake one's made-up date becomes current" do
+    fake = create_cert(completed_on: Date.new(2026, 6, 1))
+    fake.record_authenticity!(status: :mismatch, method: "person", by: users(:manager))
+    assert fake.current?, "the only one: current, so its cell reads Confirmed fake"
+
+    replacement = create_cert(completed_on: Date.new(2025, 3, 1))
+    assert replacement.current?
+    assert fake.reload.superseded?
+  end
+
+  test "when every certificate is confirmed fake the latest is current" do
+    older = create_cert(completed_on: Date.new(2025, 1, 10))
+    newer = create_cert(completed_on: Date.new(2026, 6, 1))
+    [ older, newer ].each { it.reload.record_authenticity!(status: :not_found, method: "person", by: users(:manager)) }
+
+    assert newer.reload.current?
+    assert older.reload.superseded?
+  end
+
+  test "reconcile_current! ranks confirmed fake ones last" do
+    genuine = create_cert(completed_on: Date.new(2025, 1, 10))
+    fake = create_cert(completed_on: Date.new(2026, 6, 1))
+    fake.update_columns(authenticity_status: "not_found", authenticity_method: "person")
+
+    Certificate.reconcile_current!(@member.id, @flagger.id)
+    assert genuine.reload.current?
+    assert fake.reload.superseded?
+  end
+
   test "reconcile_current! repairs a group" do
     a = create_cert(completed_on: Date.new(2022, 1, 10))
     b = create_cert(completed_on: Date.new(2025, 1, 10))
@@ -303,6 +361,40 @@ class CertificateTest < ActiveSupport::TestCase
     Certificate.reconcile_current!(@member.id, @flagger.id)
     assert b.reload.current?
     assert a.reload.superseded?
+  end
+
+  test "a save from a copy loaded before its group changed still leaves exactly one current, read back into the copy" do
+    a = create_cert(completed_on: Date.new(2025, 1, 10))
+    stale = Certificate.find(a.id) # current when loaded
+    b = create_cert(completed_on: Date.new(2025, 6, 1))
+    assert a.reload.superseded?, "b is newer"
+
+    stale.update!(completed_on: Date.new(2026, 1, 10)) # now the newest, but the copy still says current
+
+    assert a.reload.current?
+    assert b.reload.superseded?
+    assert stale.current?
+    assert_not stale.changed?, "the flag read back is not a pending change"
+
+    late = Certificate.find(b.id) # superseded when loaded
+    a.update!(completed_on: Date.new(2024, 1, 10))
+    assert b.reload.current?
+    late.update!(notes: "Checked", completed_on: Date.new(2025, 6, 2))
+    assert_equal [ b.id ], Certificate.current.where(crew_member: @member, certificate_type: @flagger).pluck(:id)
+    assert late.current?, "read back: the copy said superseded"
+  end
+
+  test "destroying a certificate locks its crew member before its row, as Verification::Run does" do
+    certificate = create_cert(completed_on: Date.new(2025, 1, 10))
+    statements = []
+    subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") { |*, payload| statements << payload[:sql] }
+    Certificate.find(certificate.id).destroy!
+    ActiveSupport::Notifications.unsubscribe(subscriber)
+
+    member_lock = statements.index { it.match?(/FROM "crew_members".*FOR UPDATE/m) }
+    delete = statements.index { it.match?(/\ADELETE FROM "certificates"/) }
+    assert member_lock && delete, statements.join("\n")
+    assert_operator member_lock, :<, delete
   end
 
   test "destroying a certificate keeps the import item and deletes notifications" do
@@ -351,6 +443,20 @@ class CertificateTest < ActiveSupport::TestCase
     assert_equal(-1, cert.days_until_expiry(today: Date.new(2026, 11, 13)))
     assert_nil Certificate.new.days_until_expiry
     assert_equal "expiring", cert.compliance_status(today: Date.new(2026, 11, 2))
+  end
+
+  test "compliance_status: an automatic not found keeps the date status; a person's not found is fake" do
+    cert = certificates(:juan_flagger) # expiring
+    cert.record_authenticity!(status: :not_found, method: "automatic:national_cpr_foundation")
+    assert cert.authenticity_flagged_for_review?
+    assert_equal "expiring", cert.compliance_status
+
+    cert.record_authenticity!(status: :not_found, method: "person", by: users(:manager))
+    assert_equal "fake", cert.compliance_status
+    assert_equal "fake", cert.compliance_status(today: cert.expires_on + 1), "fake, whatever its dates"
+
+    cert.record_authenticity!(status: :verified, method: "person", by: users(:manager))
+    assert_equal "expiring", cert.compliance_status
   end
 
   test "enums use prefixes" do

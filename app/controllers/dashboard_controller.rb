@@ -1,5 +1,6 @@
-# "/": compliance totals across active projects, the import review queue, the next
-# certificates to expire and the active-project list. Every role can see it.
+# "/": compliance totals across active projects, the import review queue, certificates that are
+# confirmed fake, flagged for review or need a check (Phase 3b), the next certificates to expire
+# and the active-project list. Every role can see it.
 class DashboardController < ApplicationController
   UPCOMING_LIMIT = 20
 
@@ -13,11 +14,18 @@ class DashboardController < ApplicationController
     @overview = Compliance::Overview.new(Project.active.ordered, today: @today)
     @reports = @overview.reports # in the given (name) order
     @review_count = ImportItem.needs_review.count
+    @verification_counts = verification_counts
     @upcoming = upcoming_expirations
     @needed_on = projects_needing(@upcoming)
   end
 
   private
+    # { "fake" => n, "flagged" => n, "needs_check" => n }: current certificates of active crew (the
+    # verification list's), in one grouped query.
+    def verification_counts
+      Certificate.current.joins(:crew_member).merge(CrewMember.active).authenticity_review_counts
+    end
+
     # Current certificates of active crew that haven't expired yet, soonest first.
     def upcoming_expirations
       Certificate.current

@@ -36,7 +36,7 @@
                   <span class="ml-1 font-mono text-xs text-gray-400"><%= item.certificate_type.code %></span>
                 </td>
               <% end %>
-              <td class="whitespace-nowrap px-4 py-2"><%= compliance_badge(item.status, item.expires_on) %></td>
+              <td class="whitespace-nowrap px-4 py-2"><%= compliance_badge(item.status, item.expires_on, certificate: item.certificate) %></td>
               <td class="whitespace-nowrap px-4 py-2 tabular-nums text-gray-600">
                 <% if item.expires_on %>
                   <%= ask_relative_expiry(item.expires_on, today: today) %>

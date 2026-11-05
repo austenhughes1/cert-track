@@ -39,7 +39,37 @@ class Compliance::OverviewTest < ActiveSupport::TestCase
     overview = Compliance::Overview.new(Project.active, today: @today)
 
     # tower: 3 missing, 2 expired, 2 expiring, 1 lapses, 7 valid; depot: juan missing, dave expiring.
-    assert_equal({ "missing" => 4, "expired" => 2, "expiring" => 3, "lapses_on_project" => 1, "valid" => 7 }, overview.totals)
+    assert_equal({ "missing" => 4, "fake" => 0, "expired" => 2, "expiring" => 3, "lapses_on_project" => 1, "valid" => 7 }, overview.totals)
+  end
+
+  test "a certificate a person confirmed fake counts as fake in totals, worst statuses, filters and gaps" do
+    create_depot
+    certificates(:dave_cdl_a).record_authenticity!(status: :not_found, method: "person", by: users(:manager)) # required on both
+    certificates(:juan_osha30).record_authenticity!(status: :mismatch, method: "person", by: users(:manager))
+    overview = Compliance::Overview.new(Project.active.ordered, today: @today)
+
+    # tower: dave's CDL and juan's OSHA 30 fake; depot: dave's CDL fake, juan missing.
+    assert_equal({ "missing" => 4, "fake" => 3, "expired" => 2, "expiring" => 1, "lapses_on_project" => 1, "valid" => 6 }, overview.totals)
+    assert_equal "fake", overview.worst_status_by_crew_member[crew_members(:dave_miller).id]
+    assert_equal "fake", overview.worst_status_by_crew_member[crew_members(:juan_ortiz).id]
+    assert_equal [ crew_members(:juan_ortiz), crew_members(:dave_miller) ].map(&:id).to_set, overview.crew_member_ids_with(:fake)
+    assert_equal [ [ "DEPOT", "Miller", "CDLA" ], [ "2417", "Miller", "CDLA" ], [ "2417", "Ortiz", "OSHA30" ] ],
+      overview.gaps.select { |gap| gap.status == "fake" }.map { |gap| [ gap.project.code, gap.crew_member.last_name, gap.certificate_type.code ] }
+    assert_equal 9, overview.gaps.size
+  end
+
+  test "a certificate only flagged for review counts by its dates everywhere" do
+    create_depot
+    certificates(:dave_cdl_a).record_authenticity!(status: :not_found, method: "automatic:national_cpr_foundation")
+    certificates(:juan_osha30).record_authenticity!(status: :suspicious, method: "qr_link")
+    overview = Compliance::Overview.new(Project.active.ordered, today: @today)
+
+    assert_equal({ "missing" => 4, "fake" => 0, "expired" => 2, "expiring" => 3, "lapses_on_project" => 1, "valid" => 7 }, overview.totals)
+    assert_equal "missing", overview.worst_status_by_crew_member[crew_members(:dave_miller).id]
+    assert_empty overview.crew_member_ids_with(:fake)
+    assert_includes overview.crew_member_ids_with(:expiring), crew_members(:dave_miller).id
+    assert_equal 6, overview.gaps.size
+    assert_not_includes overview.gaps.map(&:certificate), certificates(:dave_cdl_a)
   end
 
   test "only active projects when given Project.active" do

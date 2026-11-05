@@ -29,6 +29,7 @@ class AuthorizationAuditTest < ActionDispatch::IntegrationTest
     "crew_members" => %i[crew_members juan_ortiz],
     "certificates" => %i[certificates juan_osha30], # belongs to juan_ortiz, the :crew_member_id below
     "certificate_types" => %i[certificate_types osha30],
+    "certificate_issuers" => %i[certificate_issuers retired_example],
     "projects" => %i[projects tower_2417],
     "project_assignments" => %i[project_assignments tower_juan], # on tower_2417, the :project_id below
     "imports" => %i[import_batches march_batch], # /imports/:id is an ImportBatch

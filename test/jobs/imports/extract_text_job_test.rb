@@ -3,6 +3,7 @@ require_relative "../../support/scanned_pdf"
 
 class Imports::ExtractTextJobTest < ActiveJob::TestCase
   ORTIZ = ScannedPdf.certificate_text
+  REDCROSS_LINK = "https://www.redcross.org/take-a-class/qrcode?certnumber=TEST123".freeze
 
   setup do
     @dir = Dir.mktmpdir("extract-text-job-test")
@@ -21,6 +22,50 @@ class Imports::ExtractTextJobTest < ActiveJob::TestCase
     assert item.extracted_text.start_with?("=== page 1 ===\nCERTIFICATE OF COMPLETION")
     assert_includes item.extracted_text, "=== page 2 ===\nCOURSE OUTLINE"
     assert_nil item.error_message
+    assert_equal [], item.barcodes, "no QR codes on it"
+    assert_enqueued_with job: Imports::AiExtractJob, args: [ item ]
+  end
+
+  test "stores the QR codes with the page numbers of the file" do
+    skip_unless_zbarimg
+    pdf = item_with(file_fixture("qr/two_pages_qr_on_2.pdf").to_s)
+    photo = item_with(file_fixture("qr/redcross_qr.png").to_s, content_type: "image/png")
+
+    Imports::ExtractTextJob.perform_now(pdf)
+    Imports::ExtractTextJob.perform_now(photo)
+
+    assert_equal [ { "page" => 2, "text" => REDCROSS_LINK } ], pdf.reload.barcodes
+    assert_includes pdf.extracted_text, "=== page 2 ===\nSAMPLE CERTIFICATE"
+    assert_equal [ { "page" => 1, "text" => REDCROSS_LINK } ], photo.reload.barcodes
+    assert_enqueued_jobs 2, only: Imports::AiExtractJob
+  end
+
+  test "stored QR codes are kept, and stored text with none stored is read for QR codes only" do
+    skip_unless_zbarimg
+    kept = item_with(file_fixture("qr/redcross_qr.png").to_s, content_type: "image/png")
+    kept.update!(extracted_text: "=== page 1 ===\nAMERICAN RED CROSS", barcodes: [ { "page" => 1, "text" => "https://example.com/kept" } ])
+    text_only = item_with(file_fixture("qr/redcross_qr.png").to_s, content_type: "image/png")
+    text_only.update!(extracted_text: "=== page 1 ===\nAMERICAN RED CROSS")
+
+    Imports::ExtractTextJob.perform_now(kept)
+    Imports::ExtractTextJob.perform_now(text_only)
+
+    assert_equal [ { "page" => 1, "text" => "https://example.com/kept" } ], kept.reload.barcodes
+    assert_equal [ { "page" => 1, "text" => REDCROSS_LINK } ], text_only.reload.barcodes
+    assert_equal "=== page 1 ===\nAMERICAN RED CROSS", text_only.extracted_text
+    assert_enqueued_jobs 2, only: Imports::AiExtractJob
+  end
+
+  test "stored text whose file has gone missing from storage goes on without QR codes" do
+    item = item_with(file_fixture("qr/redcross_qr.png").to_s, content_type: "image/png")
+    item.update!(extracted_text: "=== page 1 ===\nAMERICAN RED CROSS")
+    item.file.blob.service.delete(item.file.blob.key)
+
+    Imports::ExtractTextJob.perform_now(item)
+
+    item.reload
+    assert item.extracting?
+    assert_nil item.barcodes, "not read"
     assert_enqueued_with job: Imports::AiExtractJob, args: [ item ]
   end
 
@@ -151,6 +196,10 @@ class Imports::ExtractTextJobTest < ActiveJob::TestCase
   private
     def file(name)
       File.join(@dir, name)
+    end
+
+    def skip_unless_zbarimg
+      skip "zbarimg is not installed (apt install zbar-tools); CI has it" unless Certificates::QrReader.available?
     end
 
     def item_with(path, content_type: "application/pdf", status: :pending)

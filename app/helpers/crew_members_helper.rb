@@ -2,6 +2,7 @@ module CrewMembersHelper
   ACTIVE_FILTER_OPTIONS = [ [ "Active", "" ], [ "Inactive", "inactive" ], [ "Active and inactive", "all" ] ].freeze
 
   STATUS_FILTER_LABELS = {
+    "fake" => "Has confirmed fake",
     "expired" => "Has expired",
     "missing" => "Has missing",
     "expiring" => "Has expiring (30 days)",

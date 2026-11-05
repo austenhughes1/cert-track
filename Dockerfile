@@ -18,6 +18,8 @@ WORKDIR /rails
 # Install base packages. Beyond the Rails defaults, CertTrack needs at runtime:
 # - libvips42t64 with libheif1 + libheif-plugin-libde265: image variants, including HEIC phone photos
 # - poppler-utils (pdftotext, pdftoppm) and tesseract-ocr(-eng): local text extraction for imports
+# - zbar-tools (zbarimg, about 5 MB; the ImageMagick core it reads images with comes with libvips): reads
+#   certificates' QR codes locally (Certificates::QrReader, QR only)
 # - postgresql-client-17 from the PGDG repo: pg_dump/psql pinned to the postgres:17 accessory's major
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y ca-certificates curl && \
@@ -30,7 +32,7 @@ RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y \
       libjemalloc2 \
       libvips42t64 libheif1 libheif-plugin-libde265 \
-      poppler-utils tesseract-ocr tesseract-ocr-eng \
+      poppler-utils tesseract-ocr tesseract-ocr-eng zbar-tools \
       postgresql-client-17 && \
     ln -s /usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2 /usr/local/lib/libjemalloc.so && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives

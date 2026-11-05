@@ -13,6 +13,9 @@
       <%= nav_link.call "Crew", crew_members_path, controller_path.in?(%w[crew_members certificates crew_roles]) %>
       <%= nav_link.call "Projects", projects_path, controller_path.start_with?("project") || controller_path.in?(%w[compliance packets]) %>
       <%= nav_link.call "Master list", certificate_types_path, controller_path == "certificate_types" %>
+      <% if can?(:admin) %>
+        <%= nav_link.call "Issuers", certificate_issuers_path, controller_path == "certificate_issuers" %>
+      <% end %>
       <% if can?(:editor) %>
         <%= nav_link.call "Imports", imports_path, controller_path.in?(%w[imports import_reviews]) %>
       <% end %>

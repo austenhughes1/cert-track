@@ -6,6 +6,10 @@ class Ai::FakeProviderTest < ActiveSupport::TestCase
     [ "OSHA10", "OSHA 10 Construction", [ "OSHA 10 Hour" ] ],
     [ "FLAGGER", "Flagger", [ "Flagger Certification" ] ]
   ].freeze
+  ISSUER_LIST = [
+    [ "REDCROSS", "American Red Cross", [ "Red Cross", "The American National Red Cross" ] ],
+    [ "AHA", "American Heart Association", [ "AHA" ] ]
+  ].freeze
 
   CARD = <<~TEXT.freeze
     CERTIFICATE OF COMPLETION
@@ -25,7 +29,8 @@ class Ai::FakeProviderTest < ActiveSupport::TestCase
       "certificates" => [ {
         "holder_name" => "Juan A. Ortiz", "certificate_type_code" => "OSHA30",
         "certificate_name_as_printed" => "OSHA 30-Hour Construction Industry Outreach Training",
-        "issuer" => "Example Safety Training LLC", "certificate_number" => "30-1234567",
+        "issuer" => "Example Safety Training LLC", "certificate_issuer_code" => nil, "certificate_number" => "30-1234567",
+        "verification_code" => nil, "verification_url" => nil,
         "completed_on" => "2025-03-14", "expires_on" => nil, "confidence" => 0.95,
         "notes" => "No expiration printed", "pages" => [ 1 ]
       } ],
@@ -77,6 +82,19 @@ class Ai::FakeProviderTest < ActiveSupport::TestCase
 
     assert_equal [ 0.6, 0.6 ], data["certificates"].map { |certificate| certificate["confidence"] }
     assert_nil data["certificates"].last["completed_on"]
+  end
+
+  test "reads the issuer code from the issuer list and the printed verification code and link" do
+    card = CARD.sub("Example Safety Training LLC", "The American National Red Cross") +
+      "Verification code: RC-123456\nVerify at: redcross.org/confirm\n"
+    other = CARD.sub("Example Safety Training LLC", "Ahab Safety Training") # "AHA" inside a word is not the AHA
+
+    data = complete([ [ 1, card ], [ 2, other ] ], issuer_list: ISSUER_LIST)
+
+    first, second = data["certificates"]
+    assert_equal [ "REDCROSS", "RC-123456", "redcross.org/confirm" ], first.values_at("certificate_issuer_code", "verification_code", "verification_url")
+    assert_equal "OSHA30", first["certificate_type_code"], "the new lines are not the certificate name"
+    assert_equal [ nil, nil, nil ], second.values_at("certificate_issuer_code", "verification_code", "verification_url")
   end
 
   test "reports token usage as text length / 4" do
@@ -141,12 +159,12 @@ class Ai::FakeProviderTest < ActiveSupport::TestCase
   end
 
   private
-    def prompt_for(pages)
-      Imports::Extraction::Prompt.new(master_list: MASTER_LIST, pages: pages, page_count: pages.size)
+    def prompt_for(pages, issuer_list: [])
+      Imports::Extraction::Prompt.new(master_list: MASTER_LIST, pages: pages, page_count: pages.size, issuer_list: issuer_list)
     end
 
-    def complete(pages)
-      prompt = prompt_for(pages)
+    def complete(pages, issuer_list: [])
+      prompt = prompt_for(pages, issuer_list:)
       JSON.parse(Ai::FakeProvider.new.complete(system: prompt.system, prompt: prompt.user).content)
     end
 end

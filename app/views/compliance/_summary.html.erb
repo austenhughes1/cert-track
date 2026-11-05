@@ -22,5 +22,7 @@
   </dl>
   <p class="w-full text-xs text-gray-500">
     Dates are expiry dates. Expiring means within <%= Compliance::EXPIRING_WINDOW %> days; lapses on project means it expires before the project ends.
+    Confirmed fake means a person checked it with the issuer and it wasn't found or didn't match; it counts as not valid and is left out of packets.
+    A <span class="<%= ComplianceHelper::REVIEW_MARKER_CLASSES %>">Review</span> mark means an automatic check or QR code found a problem; the certificate still counts by its dates until someone checks it with the issuer.
   </p>
 </div>

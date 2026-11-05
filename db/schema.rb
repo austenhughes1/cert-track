@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_04_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_04_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -54,6 +54,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_04_120000) do
     t.index ["day", "provider"], name: "index_ai_usage_days_on_day_and_provider", unique: true
   end
 
+  create_table "certificate_issuers", force: :cascade do |t|
+    t.citext "name", null: false
+    t.string "code", null: false
+    t.string "aliases", default: [], null: false, array: true
+    t.string "domains", default: [], null: false, array: true
+    t.integer "verification_method", default: 0, null: false
+    t.string "lookup_url"
+    t.string "link_template"
+    t.string "automatic_check"
+    t.text "verification_notes"
+    t.boolean "active", default: true, null: false
+    t.integer "position"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["code"], name: "index_certificate_issuers_on_code", unique: true
+    t.index ["domains"], name: "index_certificate_issuers_on_domains", using: :gin
+    t.index ["name"], name: "index_certificate_issuers_on_name", unique: true
+  end
+
   create_table "certificate_types", force: :cascade do |t|
     t.citext "name", null: false
     t.string "code", null: false
@@ -86,6 +105,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_04_120000) do
     t.text "notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "certificate_issuer_id"
+    t.text "verification_code"
+    t.text "verification_url"
+    t.integer "authenticity_status", default: 0, null: false
+    t.datetime "authenticity_checked_at"
+    t.bigint "authenticity_checked_by_id"
+    t.string "authenticity_method"
+    t.text "authenticity_note"
+    t.jsonb "authenticity_details", default: {}, null: false
+    t.index ["authenticity_checked_by_id"], name: "index_certificates_on_authenticity_checked_by_id"
+    t.index ["authenticity_status"], name: "index_certificates_on_authenticity_status_current", where: "(superseded_at IS NULL)"
+    t.index ["certificate_issuer_id"], name: "index_certificates_on_certificate_issuer_id"
     t.index ["certificate_type_id"], name: "index_certificates_on_certificate_type_id"
     t.index ["crew_member_id", "certificate_type_id", "superseded_at"], name: "index_certificates_on_member_type_superseded"
     t.index ["crew_member_id", "certificate_type_id"], name: "index_certificates_one_current_per_member_type", unique: true, where: "(superseded_at IS NULL)"
@@ -190,9 +221,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_04_120000) do
     t.datetime "skipped_at"
     t.datetime "next_attempt_at"
     t.integer "attempts", default: 0, null: false
+    t.bigint "matched_certificate_issuer_id"
+    t.integer "issuer_match", default: 0, null: false
+    t.jsonb "issuer_suggestions", default: [], null: false
+    t.text "proposed_verification_code"
+    t.text "proposed_verification_url"
+    t.text "barcodes"
+    t.integer "authenticity_status", default: 0, null: false
+    t.datetime "authenticity_checked_at"
+    t.bigint "authenticity_checked_by_id"
+    t.string "authenticity_method"
+    t.text "authenticity_note"
+    t.jsonb "authenticity_details", default: {}, null: false
+    t.index ["authenticity_checked_by_id"], name: "index_import_items_on_authenticity_checked_by_id"
     t.index ["certificate_id"], name: "index_import_items_on_certificate_id"
     t.index ["duplicate_of_id"], name: "index_import_items_on_duplicate_of_id"
     t.index ["import_batch_id"], name: "index_import_items_on_import_batch_id"
+    t.index ["matched_certificate_issuer_id"], name: "index_import_items_on_matched_certificate_issuer_id"
     t.index ["matched_certificate_type_id"], name: "index_import_items_on_matched_certificate_type_id"
     t.index ["matched_crew_member_id"], name: "index_import_items_on_matched_crew_member_id"
     t.index ["reviewed_by_id"], name: "index_import_items_on_reviewed_by_id"
@@ -277,19 +322,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_04_120000) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "certificates", "certificate_issuers"
   add_foreign_key "certificates", "certificate_types", on_delete: :restrict
   add_foreign_key "certificates", "crew_members", on_delete: :restrict
   add_foreign_key "certificates", "import_items", on_delete: :restrict
+  add_foreign_key "certificates", "users", column: "authenticity_checked_by_id", on_delete: :nullify
   add_foreign_key "certificates", "users", column: "verified_by_id", on_delete: :restrict
   add_foreign_key "crew_members", "crew_roles", on_delete: :restrict
   add_foreign_key "expiry_notifications", "certificates", on_delete: :cascade
   add_foreign_key "import_batches", "users", column: "uploaded_by_id", on_delete: :restrict
+  add_foreign_key "import_items", "certificate_issuers", column: "matched_certificate_issuer_id"
   add_foreign_key "import_items", "certificate_types", column: "matched_certificate_type_id", on_delete: :restrict
   add_foreign_key "import_items", "certificates", on_delete: :restrict
   add_foreign_key "import_items", "crew_members", column: "matched_crew_member_id", on_delete: :restrict
   add_foreign_key "import_items", "import_batches", on_delete: :cascade
   add_foreign_key "import_items", "import_items", column: "duplicate_of_id", on_delete: :nullify
   add_foreign_key "import_items", "import_items", column: "source_item_id", on_delete: :cascade
+  add_foreign_key "import_items", "users", column: "authenticity_checked_by_id", on_delete: :nullify
   add_foreign_key "import_items", "users", column: "reviewed_by_id", on_delete: :restrict
   add_foreign_key "packet_builds", "projects", on_delete: :cascade
   add_foreign_key "packet_builds", "users", column: "built_by_id", on_delete: :nullify

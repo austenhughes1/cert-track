@@ -1,11 +1,12 @@
 <%# locals: (item:, button_class: "cursor-pointer font-medium text-blue-700 hover:underline") %>
 <%# "Read again" (ImportReviewsController#reread, Imports::Reread): the whole file goes back
     through the pipeline, which clears what was read and reviewed and uses part of today's free
-    AI allocation, so the button asks first. Show it only when can?(:editor) and
-    Imports::Reread.allowed?(item). %>
+    AI allocation, so the button asks first. A person's Not found or Doesn't match stays, and the
+    question says so. Show it only when can?(:editor) and Imports::Reread.allowed?(item). %>
 <% name = item.original_filename.presence || "item #{item.id}" %>
+<% kept = " The “#{item.authenticity_label}” a person recorded stays, so it is still confirmed fake." if item.authenticity_confirmed_fake? %>
 <%= button_to "Read again", reread_import_review_path(item), id: "reread_#{item.id}", class: button_class,
       aria: { label: "Read #{name} again" },
       form: { class: "inline", data: { turbo_confirm: "Read #{name} again? The AI reads the file from the start, which uses " \
                                                       "part of today's free AI allocation. What it read before, and any edits " \
-                                                      "or rejection, are cleared." } } %>
+                                                      "or rejection, are cleared.#{kept}" } } %>

@@ -92,6 +92,27 @@ class AskControllerTest < ActionDispatch::IntegrationTest
     assert_select "#ask_section_inactive", text: /Inactive/
   end
 
+  test "a certificate flagged for review is listed as current with a review marker; a confirmed fake one on its own" do
+    sign_in_as users(:viewer)
+    juan, li = crew_members(:juan_ortiz), crew_members(:li_chen)
+    certificates(:juan_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:not_found], authenticity_method: nil)
+    certificates(:li_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:mismatch],
+      authenticity_method: Authenticity::PERSON_METHOD)
+
+    get ask_path(q: "Who has flagger?")
+
+    assert_select "#ask_section_current tr[data-crew-member-id='#{juan.id}']" do
+      assert_select "[data-status=expiring]"
+      assert_select "[data-authenticity-review=not_found][title^='Flagged for review: Not found by issuer.']", text: /Review/
+    end
+    assert_select "#ask_section_fake h2", text: /Confirmed fake\s+\(1\)/
+    assert_select "#ask_section_fake tr[data-crew-member-id='#{li.id}']" do
+      assert_select "[data-status=fake][title=?]", "Confirmed fake: Doesn't match issuer", text: "Confirmed fake"
+      assert_select "[data-authenticity-review]", count: 0
+    end
+    assert_select "#ask_section_current tr[data-crew-member-id='#{li.id}']", count: 0
+  end
+
   test "who doesn't have a type lists the people without it, not the holders" do
     sign_in_as users(:viewer)
 

@@ -64,6 +64,39 @@ class Imports::Eval::ScorerTest < ActiveSupport::TestCase
     assert_equal 0, score.expected_count
   end
 
+  test "verification fields are scored only for answers that have them" do
+    old_answer = score(expected: [ card ], actual: [ card("certificate_issuer_code" => "REDCROSS", "verification_code" => "X") ])
+    Imports::Eval::Scorer::VERIFICATION_FIELDS.each { |field| assert_equal [ 0, 0 ], old_answer.fields[field], field }
+    assert_empty old_answer.mismatches
+
+    answer = card("certificate_issuer_code" => "REDCROSS", "verification_code" => nil, "verification_url" => nil)
+    new_answer = score(expected: [ answer ], actual: [ card("certificate_issuer_code" => "redcross") ])
+    assert_equal [ [ 1, 1 ], [ 1, 1 ], [ 1, 1 ] ], Imports::Eval::Scorer::VERIFICATION_FIELDS.map { |field| new_answer.fields[field] }
+  end
+
+  test "verification codes ignore spaces and case; links ignore scheme, www, host case, a trailing slash and query order" do
+    answer = card("verification_code" => "rc 12-34", "verification_url" => "redcross.org/take-a-class/qrcode?certnumber=1&b=2")
+    got = card("verification_code" => "RC12-34", "verification_url" => "HTTPS://www.RedCross.org/take-a-class/qrcode/?b=2&certnumber=1")
+
+    result = score(expected: [ answer ], actual: [ got ])
+
+    assert result.correct?("verification_code")
+    assert result.correct?("verification_url")
+  end
+
+  test "a different link path, code or issuer is wrong, and so is a missing certificate's" do
+    answer = card("certificate_issuer_code" => "REDCROSS", "verification_code" => "RC1", "verification_url" => "redcross.org/confirm")
+    got = card("certificate_issuer_code" => "AHA", "verification_code" => "RC2", "verification_url" => "redcross.org/Confirm")
+
+    result = score(expected: [ answer ], actual: [ got ])
+    assert_equal [ [ 0, 1 ] ] * 3, Imports::Eval::Scorer::VERIFICATION_FIELDS.map { |field| result.fields[field] }
+    assert_includes result.mismatches, { "field" => "certificate_issuer_code", "expected" => "REDCROSS", "actual" => "AHA" }
+
+    missing = score(expected: [ answer, card("pages" => [ 2 ]) ], actual: [])
+    assert_equal [ 0, 1 ], missing.fields["verification_url"], "the older-style second answer isn't scored on it"
+    assert_equal [ 0, 2 ], missing.fields["holder_name"]
+  end
+
   private
     def score(expected:, actual:)
       Imports::Eval::Scorer.new(expected: { "certificates" => expected }, actual: { "certificates" => actual }).call

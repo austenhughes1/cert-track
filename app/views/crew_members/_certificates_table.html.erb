@@ -34,8 +34,11 @@
                 <span class="text-xs text-gray-400" title="Completed date plus the type's validity">(computed)</span>
               <% end %>
             <% end %>
-            <% unless superseded %>
-              <span class="ml-1"><%= compliance_badge(Compliance.status_for(certificate, today: today)) %></span>
+            <% if !superseded %>
+              <span class="ml-1"><%= compliance_badge(Compliance.status_for(certificate, today: today), certificate: certificate) %></span>
+            <% elsif certificate.authenticity_confirmed_fake? %>
+              <%# Kept as history behind a genuine one (Certificate): still marked, so it isn't mistaken for an old card. %>
+              <span class="ml-1"><%= compliance_badge(Compliance.status_for(certificate), certificate: certificate) %></span>
             <% end %>
           </td>
           <% if superseded %>

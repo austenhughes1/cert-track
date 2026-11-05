@@ -39,7 +39,11 @@
 
 <% if @certificate.superseded? %>
   <div class="mb-6 rounded-md border border-gray-200 bg-gray-100 px-4 py-3 text-sm text-gray-700" role="status" id="superseded_notice">
-    Replaced on <%= format_date(@certificate.superseded_at) %> by a newer <%= type.name %> certificate.
+    <% if @certificate.authenticity_confirmed_fake? %>
+      Confirmed fake, so another <%= type.name %> certificate on file is the current one.
+    <% else %>
+      Replaced on <%= format_date(@certificate.superseded_at) %> by a newer <%= type.name %> certificate.
+    <% end %>
     It is kept for the record and doesn't count toward compliance.
     <% if current_replacement %>
       <%= link_to "View the current one", crew_member_certificate_path(@crew_member, current_replacement), class: "text-blue-700 hover:underline" %>.
@@ -52,12 +56,17 @@
   <dl class="grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
     <div>
       <dt class="<%= label_class %>">Status</dt>
+      <%# A confirmed fake one (current, or history behind a genuine one) has no days: they would read
+          as when it turns fake. A Review marker comes after the days, which describe the status pill. %>
       <dd class="mt-1" id="certificate_status">
-        <% if @certificate.current? %>
+        <% if @certificate.authenticity_confirmed_fake? %>
+          <%= compliance_badge(@certificate.compliance_status, certificate: @certificate) %>
+        <% elsif @certificate.current? %>
           <%= compliance_badge(@certificate.compliance_status) %>
           <% if (days = @certificate.days_until_expiry) %>
             <span class="ml-1 text-xs text-gray-500"><%= days.negative? ? "#{pluralize(-days, "day")} ago" : "in #{pluralize(days, "day")}" %></span>
           <% end %>
+          <%= flagged_for_review_marker(@certificate) %>
         <% else %>
           <span class="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">Replaced</span>
         <% end %>
@@ -79,8 +88,13 @@
       <dd class="mt-0.5 font-mono text-xs text-gray-900"><%= @certificate.certificate_number || dash %></dd>
     </div>
     <div>
-      <dt class="<%= label_class %>">Issued by</dt>
-      <dd class="mt-0.5 text-gray-900"><%= @certificate.issued_by || dash %></dd>
+      <dt class="<%= label_class %>">Issuer</dt>
+      <dd class="mt-0.5 text-gray-900" id="certificate_issuer">
+        <%= @certificate.certificate_issuer&.name || @certificate.issued_by || dash %>
+        <% if @certificate.certificate_issuer && @certificate.issued_by.present? && !@certificate.issued_by.casecmp?(@certificate.certificate_issuer.name) %>
+          <span class="block text-xs text-gray-500">Printed as <%= @certificate.issued_by %></span>
+        <% end %>
+      </dd>
     </div>
     <div>
       <dt class="<%= label_class %>">Issuing body</dt>
@@ -90,14 +104,18 @@
       <dt class="<%= label_class %>">Entered</dt>
       <dd class="mt-0.5 text-gray-900"><%= @certificate.source_import? ? "From a bulk import" : "By hand" %></dd>
     </div>
+    <%# verified_by/verified_at: who typed or reviewed the details. Not the issuer's check: that is
+        the Authenticity panel's, the only place "Verified" is used. %>
     <div>
-      <dt class="<%= label_class %>">Verified</dt>
-      <dd class="mt-0.5 text-gray-900" id="certificate_verified">
+      <dt class="<%= label_class %>">Entered or reviewed by</dt>
+      <dd class="mt-0.5 text-gray-900" id="certificate_reviewed_by">
         <% if @certificate.verified_at %>
-          <%= @certificate.verified_by&.display_name || "Unknown user" %>
+          <%= @certificate.verified_by&.display_name || "A former user" %>
           <span class="block text-xs text-gray-500"><%= format_date(@certificate.verified_at) %></span>
+        <% elsif @certificate.source_import? %>
+          <span class="text-gray-400">No one: accepted automatically</span>
         <% else %>
-          <span class="text-gray-400">Not verified</span>
+          <span class="text-gray-400">Not recorded</span>
         <% end %>
       </dd>
     </div>
@@ -109,6 +127,10 @@
     <% end %>
   </dl>
 </section>
+
+<div class="mb-8 max-w-3xl">
+  <%= render "shared/authenticity_panel", record: @certificate %>
+</div>
 
 <section id="files" class="mb-8" aria-labelledby="files_heading">
   <div class="mb-2 flex items-end justify-between gap-4">

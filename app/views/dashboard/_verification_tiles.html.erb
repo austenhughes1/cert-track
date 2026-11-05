@@ -1,0 +1,22 @@
+<%# Authenticity (Phase 3b). Locals: counts ({ "fake" => n, "flagged" => n, "needs_check" => n },
+    current certificates of active crew). Each tile opens the verification list filtered to it.
+    Only confirmed fake ones count as not valid; flagged for review ones still count by their dates. %>
+<% labels = VerificationController::FILTERS %>
+<% tiles = [
+  [ "fake", "a person checked with the issuer; they count as not valid and are left out of packets", "border-red-400 bg-red-100 text-red-900" ],
+  [ "flagged", "an automatic check or QR code found a problem; they still count until someone checks", "border-red-300 bg-red-50 text-red-800" ],
+  [ "needs_check", "current certificates to look up with the issuer", "border-amber-300 bg-amber-50 text-amber-800" ]
+] %>
+
+<div class="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-5" id="verification_tiles">
+  <% tiles.each do |status, hint, colors| %>
+    <% count = counts.fetch(status, 0) %>
+    <%= link_to verification_path(status: status), id: "tile_verification_#{status}",
+          class: class_names("block rounded-lg border p-4 shadow-sm hover:ring-2 hover:ring-blue-300",
+            colors => count.positive?, "border-gray-200 bg-white text-gray-500" => count.zero?) do %>
+      <p class="text-xs font-semibold uppercase tracking-wide"><%= labels.fetch(status) %></p>
+      <p class="mt-1 text-3xl font-semibold tabular-nums" data-count><%= count %></p>
+      <p class="mt-1 text-xs opacity-80"><%= hint %></p>
+    <% end %>
+  <% end %>
+</div>

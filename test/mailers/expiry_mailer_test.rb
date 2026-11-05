@@ -140,6 +140,44 @@ class ExpiryMailerTest < ActionMailer::TestCase
     assert_includes mail.text_part.body.to_s, "Mari Garcia, Flagger: Missing"
   end
 
+  test "weekly digest labels a gap a person confirmed fake" do
+    certificates(:li_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:not_found],
+      authenticity_method: Authenticity::PERSON_METHOD)
+    gaps = Compliance::ProjectReport.new(@tower).gaps
+    mail = ExpiryMailer.with(user: users(:admin), expiring: [], gaps: gaps).weekly_digest
+
+    assert_includes mail.text_part.body.to_s, "Li Chen, Flagger: Confirmed fake"
+    assert_includes mail.text_part.body.to_s, "6 gaps (missing, expired or confirmed fake)"
+    assert_includes mail.html_part.body.to_s, "Confirmed fake"
+    assert_includes mail.html_part.body.to_s, "(missing, expired or confirmed fake)"
+    assert_equal "CertTrack weekly: 6 gaps on active projects", mail.subject
+  end
+
+  test "weekly digest doesn't count a certificate only flagged for review as a gap" do
+    certificates(:li_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:not_found],
+      authenticity_method: "automatic:aha_ecards")
+    gaps = Compliance::ProjectReport.new(@tower).gaps
+    mail = ExpiryMailer.with(user: users(:admin), expiring: [], gaps: gaps).weekly_digest
+
+    assert_not_includes mail.text_part.body.to_s, "Li Chen, Flagger"
+    assert_includes mail.text_part.body.to_s, "5 gaps (missing, expired or confirmed fake)"
+    assert_equal "CertTrack weekly: 5 gaps on active projects", mail.subject
+  end
+
+  test "a certificate flagged for review or confirmed fake still gets its expiry reminders" do
+    certificate = certificates(:juan_flagger)
+    [ "automatic:aha_ecards", Authenticity::PERSON_METHOD ].each do |method|
+      certificate.update_columns(authenticity_status: Certificate.authenticity_statuses[:mismatch], authenticity_method: method)
+
+      mail = ExpiryMailer.with(user: users(:manager), items: [ juan_flagger_item ]).daily_digest
+      assert_includes mail.text_part.body.to_s, "Flagger, expires", method
+
+      notice = ExpiryMailer.with(crew_member: certificate.crew_member, certificate: certificate.reload, threshold: "d30").crew_notice
+      assert_equal [ "juan.ortiz@example.com" ], notice.to
+      assert_match(/\AYour Flagger certificate expires /, notice.subject)
+    end
+  end
+
   # --- crew_notice ---
 
   test "crew notice goes to the crew member about their own certificate only" do

@@ -2,13 +2,17 @@ require "combine_pdf"
 
 module Compliance
   # index.pdf for a compliance packet: a landscape table of the certificates in the zip
-  # (with their file names), then the missing and expired gaps. Standard PDF fonts only
-  # cover Latin-1 poorly, so all text is transliterated to ASCII.
+  # (with their file names), then the certificates left out of it and why (only when
+  # there are any: those a person confirmed fake with the issuer), then the missing and
+  # expired gaps. The packet goes to clients, so a confirmed fake one reads "Failed
+  # verification with the issuer" (CLIENT_LABELS) and review flags are never mentioned.
+  # Standard PDF fonts only cover Latin-1 poorly, so all text is transliterated to ASCII.
   #
-  #   Compliance::PacketIndexPdf.new(project:, generated_at: Time.current, rows:, gaps:, summary:).render # => PDF bytes
+  #   Compliance::PacketIndexPdf.new(project:, generated_at: Time.current, rows:, gaps:, excluded: [], summary:).render # => PDF bytes
   class PacketIndexPdf
     Row = Data.define(:person, :type, :number, :completed_on, :expires_on, :status, :file_names)
     Gap = Data.define(:person, :type, :status, :expires_on)
+    Excluded = Data.define(:person, :type, :expires_on, :reason) # reason: "Failed verification with the issuer"
 
     PAGE_SIZE = [ 0, 0, 792, 612 ].freeze # US Letter, landscape
     MARGIN = 36
@@ -21,6 +25,8 @@ module Compliance
     SHADE = [ 0.95, 0.95, 0.95 ].freeze
     HEADER_SHADE = [ 0.86, 0.88, 0.91 ].freeze
     GRAY = [ 0.4, 0.4, 0.4 ].freeze
+    # Client-facing wording for statuses whose Compliance label is internal.
+    CLIENT_LABELS = { "fake" => "Failed verification with the issuer" }.freeze
     PUNCTUATION = { "\u2013" => "-", "\u2014" => "-", "\u00b7" => "-", "\u2018" => "'", "\u2019" => "'",
                     "\u201c" => '"', "\u201d" => '"' }.freeze
 
@@ -30,11 +36,13 @@ module Compliance
       [ "Expires", 56, FONT_SIZE ], [ "Status", 76, FONT_SIZE ], [ "Files", 225, FONT_SIZE - 1 ]
     ].freeze
     GAP_COLUMNS = [ [ "Person", 200, FONT_SIZE ], [ "Type", 260, FONT_SIZE ], [ "Status", 130, FONT_SIZE ], [ "Expired on", 130, FONT_SIZE ] ].freeze
+    EXCLUDED_COLUMNS = [ [ "Person", 200, FONT_SIZE ], [ "Type", 260, FONT_SIZE ], [ "Expires", 130, FONT_SIZE ], [ "Reason", 130, FONT_SIZE ] ].freeze
 
-    def initialize(project:, rows:, gaps:, summary: nil, generated_at: Time.current)
+    def initialize(project:, rows:, gaps:, excluded: [], summary: nil, generated_at: Time.current)
       @project = project
       @rows = rows
       @gaps = gaps
+      @excluded = excluded
       @summary = summary
       @generated_at = generated_at
     end
@@ -44,9 +52,14 @@ module Compliance
       new_page
       draw_title
       draw_section("Certificates in this packet (#{@rows.size})", ROW_COLUMNS, @rows.map { |row| row_cells(row) },
-        empty: "No current certificates on file for the required types.")
+        empty: @excluded.any? ? "No certificates in this packet." : "No current certificates on file for the required types.")
+      if @excluded.any?
+        draw_section("Left out of this packet (#{@excluded.size})", EXCLUDED_COLUMNS,
+          @excluded.map { |excluded| excluded_cells(excluded) }, empty: nil)
+      end
+      # A left-out certificate is a gap too, so "everyone holds one" would be untrue then.
       draw_section("Missing and expired (#{@gaps.size})", GAP_COLUMNS, @gaps.map { |gap| gap_cells(gap) },
-        empty: "None. Everyone holds a current certificate for each required type.")
+        empty: @excluded.any? ? "None besides the certificates left out above." : "None. Everyone holds a current certificate for each required type.")
       draw_footers
       @pdf.to_pdf
     end
@@ -84,8 +97,16 @@ module Compliance
         "#{format_date(@project.starts_on) || "?"} to #{format_date(@project.ends_on) || "open"}"
       end
 
+      # Every status with its count, except a confirmed fake count of 0, which is left off.
       def summary_text
-        Compliance::SEVERITY.map { |status| "#{Compliance.label(status)}: #{@summary.fetch(status, 0)}" }.join("   ")
+        Compliance::SEVERITY.filter_map do |status|
+          count = @summary.fetch(status, 0)
+          "#{status_label(status)}: #{count}" unless count.zero? && CLIENT_LABELS.key?(status)
+        end.join("   ")
+      end
+
+      def status_label(status)
+        CLIENT_LABELS.fetch(status.to_s) { Compliance.label(status) }
       end
 
       def line(text, font: FONT, size: FONT_SIZE + 1, height: LINE_HEIGHT + 2, color: [ 0, 0, 0 ])
@@ -149,11 +170,15 @@ module Compliance
         end
 
         [ [ row.person ], [ row.type ], [ row.number.presence || "-" ], [ format_date(row.completed_on) || "-" ],
-          [ format_date(row.expires_on) || "Never" ], [ Compliance.label(row.status) ], files ]
+          [ format_date(row.expires_on) || "Never" ], [ status_label(row.status) ], files ]
       end
 
       def gap_cells(gap)
-        [ [ gap.person ], [ gap.type ], [ Compliance.label(gap.status) ], [ format_date(gap.expires_on) || "-" ] ]
+        [ [ gap.person ], [ gap.type ], [ status_label(gap.status) ], [ format_date(gap.expires_on) || "-" ] ]
+      end
+
+      def excluded_cells(excluded)
+        [ [ excluded.person ], [ excluded.type ], [ format_date(excluded.expires_on) || "Never" ], [ excluded.reason ] ]
       end
 
       def ensure_room(height)

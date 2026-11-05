@@ -1,0 +1,12 @@
+# One retired issuer, so pages that take an issuer id (test/integration/authorization_audit_test.rb)
+# have a row to use. It is inactive, has no domains and a code that isn't a default's, so it never
+# shows in the prompt, the pickers or a domain match, and CertificateIssuer.seed_defaults! still
+# adds all 18 defaults. This file also makes every test start without the defaults, as CI's
+# db:test:prepare leaves the table, even in a local test database that db:prepare seeded. Tests
+# that need the defaults call CertificateIssuer.seed_defaults!; others create their own.
+retired_example:
+  name: Retired Example Training Co
+  code: RETIREDEXAMPLE
+  verification_method: contact
+  active: false
+  position: 99

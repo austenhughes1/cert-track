@@ -12,7 +12,7 @@ class Imports::MergeTest < ActiveSupport::TestCase
 
     certificate = Imports::Merge.new(front, others: Imports::MergeCandidates.for(front), user: users(:manager)).call
 
-    assert_equal blobs, certificate.files.blobs.to_a
+    assert_equal blobs, certificate.files_attachments.order(:id).map(&:blob), "item's file first"
     assert_equal front, certificate.import_item
     [ front, back ].each do |item|
       item.reload
@@ -23,6 +23,42 @@ class Imports::MergeTest < ActiveSupport::TestCase
     end
     assert_equal [ front, back ].sort_by(&:id), certificate.import_items.order(:id).to_a
     assert_includes crew_members(:juan_ortiz).reload.name_aliases, "Jaun Ortis"
+  end
+
+  test "the issuer, code and link may come from the back, and a flagged back's check is not hidden" do
+    front = review_item(authenticity_status: :cannot_verify, authenticity_method: "rules")
+    back = review_item(original_filename: "back.jpg", matched_certificate_issuer: issuer("REDCROSS"), issuer_match: :matched,
+      proposed_verification_code: "TEST123", proposed_verification_url: "https://redcross-verify.com/c?certnumber=TEST123",
+      authenticity_status: :suspicious, authenticity_method: "qr_link", authenticity_note: "The QR code points to a lookalike site.")
+
+    certificate = Imports::Merge.new(front, others: [ back ], user: users(:manager)).call
+
+    assert_equal [ issuer("REDCROSS"), "TEST123", "https://redcross-verify.com/c?certnumber=TEST123" ],
+      [ certificate.certificate_issuer, certificate.verification_code, certificate.verification_url ]
+    assert_equal [ "suspicious", "The QR code points to a lookalike site." ], [ certificate.authenticity_status, certificate.authenticity_note ]
+  end
+
+  test "a merge never hides a person's confirmed fake, even behind an automatic flag" do
+    front = review_item(authenticity_status: :mismatch, authenticity_method: "automatic:national_osha_foundation")
+    back = review_item(original_filename: "back.jpg")
+    back.record_authenticity!(status: :not_found, method: "person", note: "Called the issuer: no such card", by: users(:admin))
+
+    certificate = Imports::Merge.new(front, others: [ back ], user: users(:manager)).call
+
+    assert_equal [ "not_found", "person", users(:admin) ],
+      [ certificate.authenticity_status, certificate.authenticity_method, certificate.authenticity_checked_by ]
+    assert certificate.authenticity_confirmed_fake?
+    assert_equal "fake", certificate.compliance_status
+  end
+
+  test "a merge keeps the more conclusive check, and the front's own fields when it has them" do
+    front = review_item(proposed_verification_code: "FRONT-1", authenticity_status: :needs_check, authenticity_method: "rules")
+    back = review_item(proposed_verification_code: "BACK-1", authenticity_status: :verified, authenticity_method: "automatic:aha_ecards")
+
+    certificate = Imports::Merge.new(front, others: [ back ], user: users(:manager)).call
+
+    assert_equal [ "FRONT-1", "verified", "automatic:aha_ecards" ],
+      [ certificate.verification_code, certificate.authenticity_status, certificate.authenticity_method ]
   end
 
   test "attributes apply to the merged certificate" do

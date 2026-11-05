@@ -57,14 +57,14 @@
     </div>
     <% if @report.gaps.any? %>
       <% shown_gaps = @report.gaps.first(8) %>
-      <ul class="mt-3 divide-y divide-gray-100 border-t border-gray-100 text-sm" aria-label="Missing and expired certificates">
+      <ul class="mt-3 divide-y divide-gray-100 border-t border-gray-100 text-sm" aria-label="Missing, expired and confirmed fake certificates">
         <% shown_gaps.each do |gap| %>
           <li class="flex items-center justify-between gap-3 py-1.5">
             <span>
               <%= link_to gap.crew_member.sort_name, crew_member_path(gap.crew_member), class: "font-medium text-blue-700 hover:underline" %>
               <span class="text-gray-500">· <%= gap.certificate_type.name %></span>
             </span>
-            <%= compliance_badge(gap.status, gap.certificate&.expires_on) %>
+            <span class="whitespace-nowrap"><%= compliance_badge(gap.status, gap.certificate&.expires_on, certificate: gap.certificate) %></span>
           </li>
         <% end %>
       </ul>

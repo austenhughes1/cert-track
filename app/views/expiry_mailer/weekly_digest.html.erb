@@ -10,7 +10,7 @@
 <% else %>
   <p style="margin:0 0 8px;color:#4b5563;">
     <%= pluralize(@expiring.size - @expired_count, "certificate") %> expiring within 30 days,
-    <%= @expired_count %> already expired, and <%= pluralize(@gaps.size, "gap") %> (missing or expired requirements) on active projects.
+    <%= @expired_count %> already expired, and <%= pluralize(@gaps.size, "gap") %> (missing, expired or confirmed fake) on active projects.
   </p>
 
   <h2 style="<%= section_style %>">Expired or expiring within 30 days</h2>

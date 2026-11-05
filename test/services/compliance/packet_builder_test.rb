@@ -44,6 +44,127 @@ class Compliance::PacketBuilderTest < ActiveSupport::TestCase
     assert_not_includes builder.certificate_cells.map { |_, cell| cell.certificate }, certificates(:juan_flagger_old)
   end
 
+  test "a certificate a person confirmed fake is left out of the zip and listed in the index as left out" do
+    attach certificates(:juan_osha30), "osha.pdf", pdf_bytes("juan osha")
+    attach certificates(:li_flagger), "front.pdf", pdf_bytes("li front")
+    certificates(:li_flagger).record_authenticity!(status: :not_found, method: "person", by: users(:manager))
+
+    assert_equal [ "Ortiz_Juan - OSHA30 - exp none.pdf" ], builder.entries.map(&:name)
+    assert_not_includes builder.certificate_cells.map { |_, cell| cell.certificate }, certificates(:li_flagger)
+    assert_equal [ certificates(:li_flagger) ], builder.excluded_cells.map { |_, cell| cell.certificate }
+    assert_equal [ [ "Chen, Li", "FLAGGER - Flagger", certificates(:li_flagger).expires_on, "Failed verification with the issuer" ] ],
+      builder.send(:index_excluded).map { |excluded| [ excluded.person, excluded.type, excluded.expires_on, excluded.reason ] }
+    assert_equal 5, builder.send(:index_gaps).size, "listed once, as left out, not again as a gap"
+    assert_not_includes builder.send(:index_rows).map(&:number), "FL-55501"
+
+    Dir.mktmpdir do |dir|
+      path = builder.write_zip(File.join(dir, "packet.zip"))
+
+      Zip::File.open(path) do |zip|
+        assert_equal [ "index.pdf", "Ortiz_Juan - OSHA30 - exp none.pdf" ], zip.entries.map(&:name)
+        text = pdf_strings(zip.read("index.pdf"))
+        assert_includes text, "Left out of this packet (1)"
+        assert_includes text, "Failed verification with the issuer"
+        assert_includes text, "Chen, Li"
+        assert_not_includes text, "FL-55501"
+        assert_includes text, "Missing and expired (5)"
+        assert(text.any? { |line| line.include?("Failed verification with the issuer: 1") })
+        assert_no_match(/fake|flagged|review/i, text.join(" "), "the client's index never says fake or flagged")
+      end
+    end
+  end
+
+  test "the index never claims everyone holds a current certificate when the only gap is a left-out one" do
+    project = Project.create!(name: "Gate One", code: "G1")
+    project.project_requirements.create!(certificate_type: certificate_types(:osha30))
+    project.project_assignments.create!(crew_member: crew_members(:juan_ortiz))
+    attach certificates(:juan_osha30), "osha.pdf", pdf_bytes("juan osha")
+    certificates(:juan_osha30).record_authenticity!(status: :not_found, method: "person", by: users(:manager))
+    builder = Compliance::PacketBuilder.new(project, today: @today)
+
+    assert_empty builder.entries
+    assert_equal [ certificates(:juan_osha30) ], builder.excluded_cells.map { |_, cell| cell.certificate }
+
+    text = pdf_strings(builder.index_pdf).join(" ")
+    assert_includes text, "Left out of this packet (1)"
+    assert_includes text, "Missing and expired (0)"
+    assert_not_includes text, "Everyone holds a current certificate"
+    assert_not_includes text, "No current certificates on file"
+    assert_no_match(/fake|flagged|review/i, text)
+  end
+
+  test "a genuine certificate stays current and in the zip when a newer one is confirmed fake" do
+    genuine = attach(certificates(:dave_flagger), "dave.pdf", pdf_bytes("dave genuine"))
+    fake = attach(Certificate.create!(crew_member: crew_members(:dave_miller), certificate_type: certificate_types(:flagger),
+      certificate_number: "FL-FAKE", completed_on: @today - 10), "fake.pdf", pdf_bytes("dave fake"))
+    assert_equal fake, builder.report.row_for(crew_members(:dave_miller).id).cell_for(certificate_types(:flagger).id).certificate
+
+    fake.record_authenticity!(status: :not_found, method: "person", by: users(:manager))
+    genuine.reload.record_authenticity!(status: :not_found, method: "automatic:national_cpr_foundation")
+    builder = Compliance::PacketBuilder.new(@project, today: @today)
+
+    cell = builder.report.row_for(crew_members(:dave_miller).id).cell_for(certificate_types(:flagger).id)
+    assert_equal [ genuine, "valid" ], [ cell.certificate, cell.status ], "a later automatic not found only flags it for review"
+    assert_empty builder.excluded_cells
+    Dir.mktmpdir do |dir|
+      Zip::File.open(builder.write_zip(File.join(dir, "packet.zip"))) do |zip|
+        assert_equal pdf_bytes("dave genuine"), zip.read("Miller_David - FLAGGER - exp #{genuine.expires_on.iso8601}.pdf")
+        assert_not_includes zip.entries.map(&:name).join(" "), "exp #{fake.expires_on.iso8601}"
+        assert_not_includes pdf_strings(zip.read("index.pdf")), "FL-FAKE"
+      end
+    end
+  end
+
+  test "a certificate only flagged for review goes in the zip like any other, and the index doesn't say so" do
+    attach certificates(:juan_osha30), "osha.pdf", pdf_bytes("juan osha")
+    attach certificates(:li_flagger), "front.pdf", pdf_bytes("li front")
+    attach certificates(:juan_flagger), "flagger.pdf", pdf_bytes("juan flagger")
+    attach certificates(:dave_flagger), "dave.pdf", pdf_bytes("dave flagger")
+    certificates(:li_flagger).record_authenticity!(status: :not_found, method: "automatic:national_cpr_foundation")
+    certificates(:juan_osha30).record_authenticity!(status: :mismatch, method: "qr_details:qr_details_360training")
+    certificates(:juan_flagger).record_authenticity!(status: :suspicious, method: "qr_link")
+    certificates(:dave_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:suspicious], authenticity_method: "person")
+    li_expiry = certificates(:li_flagger).expires_on.iso8601
+
+    assert_empty builder.excluded_cells
+    assert_equal [ "Chen_Li - FLAGGER - exp #{li_expiry}.pdf", "Miller_David - FLAGGER - exp #{certificates(:dave_flagger).expires_on.iso8601}.pdf",
+      "Ortiz_Juan - OSHA30 - exp none.pdf", "Ortiz_Juan - FLAGGER - exp #{certificates(:juan_flagger).expires_on.iso8601}.pdf" ],
+      builder.entries.map(&:name)
+    assert_includes builder.send(:index_rows).map { |row| [ row.number, row.status ] }, [ "FL-55501", "valid" ]
+
+    Dir.mktmpdir do |dir|
+      Zip::File.open(builder.write_zip(File.join(dir, "packet.zip"))) do |zip|
+        assert_equal pdf_bytes("li front"), zip.read("Chen_Li - FLAGGER - exp #{li_expiry}.pdf")
+        text = pdf_strings(zip.read("index.pdf"))
+        assert_includes text, "FL-55501"
+        assert_not(text.any? { |line| line.start_with?("Left out of this packet") })
+        assert_no_match(/fake|flagged|review|failed verification|not found|doesn.t match|suspicious/i, text.join(" "))
+      end
+    end
+  end
+
+  test "the build record counts a left-out certificate as a gap, not as a certificate in the zip" do
+    attach certificates(:li_flagger), "front.pdf", pdf_bytes("li front")
+    certificates(:li_flagger).record_authenticity!(status: :mismatch, method: "person", by: users(:manager))
+    certificates_in_zip = builder.certificate_cells.size
+
+    builder.attach!
+
+    build = @project.packet_builds.sole
+    assert_equal [ certificates_in_zip, 0, 6 ], [ build.certificate_count, build.file_count, build.gap_count ]
+    assert_equal 11, build.certificate_count
+  end
+
+  test "the build record counts a certificate flagged for review as one in the zip, not as a gap" do
+    attach certificates(:li_flagger), "front.pdf", pdf_bytes("li front")
+    certificates(:li_flagger).record_authenticity!(status: :suspicious, method: "qr_link")
+
+    builder.attach!
+
+    build = @project.packet_builds.sole
+    assert_equal [ 12, 1, 5 ], [ build.certificate_count, build.file_count, build.gap_count ]
+  end
+
   test "write_zip puts index.pdf first and copies each file byte for byte" do
     attach certificates(:juan_osha30), "osha.pdf", pdf_bytes("juan osha")
     attach certificates(:dave_cdl_a), "cdl.jpg", jpeg_bytes

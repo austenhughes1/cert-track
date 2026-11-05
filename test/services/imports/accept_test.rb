@@ -466,6 +466,206 @@ class Imports::AcceptTest < ActiveSupport::TestCase
     assert_equal files, ActiveStorage::Blob.all.to_a, "the certificate's files are the only ones stored"
   end
 
+  # --- Phase 3b: issuer, verification code and link, authenticity ---------------------------
+
+  # An item in the queue with an issuer match, a verification code and link, and a check.
+  def verified_item(**attrs)
+    review_item(matched_certificate_issuer: issuer("REDCROSS"), issuer_match: :matched,
+      proposed_verification_code: "TEST123", proposed_verification_url: "https://www.redcross.org/take-a-class/qrcode?certnumber=TEST123",
+      authenticity_status: :needs_check, authenticity_method: "rules", authenticity_note: "Open the issuer's page to check it.",
+      authenticity_details: { "issuer" => "REDCROSS" }, authenticity_checked_at: 1.hour.ago.round, **attrs)
+  end
+
+  test "copies the issuer, verification code and link, and the authenticity check" do
+    item = verified_item
+
+    certificate = nil
+    assert_no_enqueued_jobs(only: Verification::CheckJob) { certificate = accept(item) }
+
+    assert_equal [ issuer("REDCROSS"), "TEST123", "https://www.redcross.org/take-a-class/qrcode?certnumber=TEST123" ],
+      [ certificate.certificate_issuer, certificate.verification_code, certificate.verification_url ]
+    assert_equal item.authenticity_attributes, certificate.authenticity_attributes
+    assert_equal "Example Safety Training LLC", certificate.issued_by, "issued_by keeps the name as printed"
+  end
+
+  test "a flagged item can be accepted by a person: the certificate stays flagged for review and counts by its dates" do
+    item = verified_item(authenticity_status: :suspicious, authenticity_method: "qr_link",
+      authenticity_note: "The QR code points to a lookalike site.")
+
+    certificate = accept(item)
+
+    assert certificate.authenticity_suspicious?
+    assert certificate.authenticity_flagged_for_review?
+    assert_equal "The QR code points to a lookalike site.", certificate.authenticity_note
+    assert_equal Compliance.status_for_expiry(certificate.expires_on), certificate.compliance_status
+    assert_not_equal "fake", certificate.compliance_status
+  end
+
+  test "an item a person recorded as not found becomes a confirmed fake certificate" do
+    item = verified_item
+    item.record_authenticity!(status: :not_found, method: "person", note: "The issuer has no such card.", by: users(:admin))
+
+    certificate = nil
+    assert_no_enqueued_jobs(only: Verification::CheckJob) { certificate = accept(item) }
+
+    assert certificate.authenticity_confirmed_fake?
+    assert_equal [ "person", users(:admin) ], [ certificate.authenticity_method, certificate.authenticity_checked_by ]
+    assert_equal "fake", certificate.compliance_status
+  end
+
+  test "accepting with a code typed over the one a person recorded Not found for: needs a check, checked again" do
+    item = verified_item(proposed_verification_code: "A128", proposed_verification_url: nil)
+    item.record_authenticity!(status: :not_found, method: "person", note: "No such code.", by: users(:admin))
+
+    certificate = nil
+    assert_enqueued_jobs(1, only: Verification::CheckJob) { certificate = accept(item, attributes: { verification_code: "A12B" }) }
+
+    assert_enqueued_with(job: Verification::CheckJob, args: [ certificate ])
+    assert_equal [ "A12B", "needs_check", "details_changed", nil ],
+      [ certificate.verification_code, certificate.authenticity_status, certificate.authenticity_method, certificate.authenticity_checked_by ]
+    assert_equal "A person recorded “Not found by issuer”, but the verification code changed afterwards, so it is no longer " \
+      "confirmed fake. Check it with the issuer again.", certificate.authenticity_note
+    assert_equal({ "previous_status" => "not_found", "previous_checked_by_id" => users(:admin).id,
+      "previous_checked_at" => item.authenticity_checked_at.iso8601, "previous_note" => "No such code.", "changed" => [ "verification code" ] },
+      certificate.authenticity_details)
+    assert_not_equal "fake", certificate.compliance_status
+    assert item.reload.authenticity_confirmed_fake?, "the item keeps what the person recorded about it"
+  end
+
+  test "the certificate is compared with what the person checked, not with the item's details stored since" do
+    item = verified_item(proposed_verification_code: "AB-123", proposed_verification_url: nil)
+    item.record_authenticity!(status: :not_found, method: "person", by: users(:admin))
+    item.update!(status: :pending, proposed_verification_code: "ZZ999") # Read again, then another reading
+    item.update!(status: :needs_review)
+    assert item.authenticity_confirmed_fake?
+
+    certificate = accept(item)
+
+    assert_equal [ "ZZ999", "needs_check", [ "verification code" ] ],
+      [ certificate.verification_code, certificate.authenticity_status, certificate.authenticity_details["changed"] ],
+      "nobody looked ZZ999 up with the issuer"
+    assert_not_equal "fake", certificate.compliance_status
+  end
+
+  test "a Not found is about the issuer, code and link; a Doesn't match also about the person and dates" do
+    other_person = { crew_member_id: crew_members(:maria_garcia).id.to_s }
+    not_found = verified_item.tap { it.record_authenticity!(status: :not_found, method: "person", by: users(:admin)) }
+    mismatch = verified_item.tap { it.record_authenticity!(status: :mismatch, method: "person", by: users(:admin)) }
+
+    assert accept(not_found, attributes: other_person).authenticity_confirmed_fake?, "the code is made up, whoever holds it"
+    certificate = accept(mismatch, attributes: other_person)
+    assert_equal [ "needs_check", [ "person" ] ], [ certificate.authenticity_status, certificate.authenticity_details["changed"] ]
+
+    dated = verified_item(proposed_completed_on: nil).tap { it.record_authenticity!(status: :mismatch, method: "person", by: users(:admin)) }
+    assert accept(dated, attributes: { completed_on: (Date.current - 40).iso8601 }).authenticity_confirmed_fake?,
+      "a blank date wasn't compared, so filling it in changes nothing"
+  end
+
+  test "a person's recorded result carries over with who recorded it" do
+    item = verified_item
+    item.record_authenticity!(status: :verified, method: "person", note: "Checked on the Red Cross site.", by: users(:admin))
+
+    certificate = accept(item)
+
+    assert_equal [ "verified", "person", users(:admin) ],
+      [ certificate.authenticity_status, certificate.authenticity_method, certificate.authenticity_checked_by ]
+  end
+
+  test "the reviewer may change the issuer, code and link, and the certificate is checked again" do
+    item = verified_item
+    nof = issuer("NOF")
+
+    certificate = nil
+    assert_enqueued_jobs 1, only: Verification::CheckJob do
+      certificate = accept(item, attributes: { certificate_issuer_id: nof.id.to_s, verification_code: " NOF-9 ",
+        verification_url: "nationaloshafoundation.com/certificate-verification/?certificate_id=NOF-9" })
+    end
+
+    assert_equal [ nof, "NOF-9", "https://nationaloshafoundation.com/certificate-verification/?certificate_id=NOF-9" ],
+      [ certificate.certificate_issuer, certificate.verification_code, certificate.verification_url ]
+    assert_enqueued_with(job: Verification::CheckJob, args: [ certificate ])
+  end
+
+  test "each verification field changed on its own checks again, a blank one clears it, and the same values don't" do
+    changes = { verification_code: [ "OTHER", "OTHER" ], verification_url: [ "", nil ], certificate_issuer_id: [ "", nil ] }
+    changes.each do |field, (value, stored)|
+      certificate = nil
+      assert_enqueued_jobs(1, only: Verification::CheckJob) { certificate = accept(verified_item, attributes: { field => value }) }
+      actual = certificate.public_send(field)
+      stored.nil? ? assert_nil(actual, field) : assert_equal(stored, actual, field)
+    end
+
+    item = verified_item
+    unchanged = { certificate_issuer_id: item.matched_certificate_issuer_id.to_s, verification_code: "TEST123",
+      verification_url: "www.redcross.org/take-a-class/qrcode?certnumber=TEST123" }
+    assert_no_enqueued_jobs(only: Verification::CheckJob) { accept(item, attributes: unchanged) }
+  end
+
+  test "a person accepting takes the suggested issuer they were shown; auto-accept takes only a match" do
+    suggested = verified_item(issuer_match: :suggested)
+    assert_equal issuer("REDCROSS"), accept(suggested).certificate_issuer
+
+    auto = pdf_item([ certificate_lines(name: "OSHA 30 Hour", holder: "Juan A. Ortiz") ], extraction: nil,
+      matched_crew_member: crew_members(:juan_ortiz), matched_certificate_type: certificate_types(:osha30),
+      proposed_completed_on: Date.current - 30, matched_certificate_issuer: issuer("REDCROSS"), issuer_match: :suggested,
+      proposed_verification_code: "TEST123")
+    certificate = Imports::Accept.new(auto, user: nil, auto: true).call
+    assert_nil certificate.certificate_issuer
+    assert_equal "TEST123", certificate.verification_code
+  end
+
+  # The item's check didn't use a merely suggested issuer (Verification::Run trusts only a match),
+  # so the certificate that now has it is checked again; a matched one was already used.
+  test "accepting a suggested issuer checks the certificate again; a matched one doesn't" do
+    suggested = verified_item(issuer_match: :suggested)
+    certificate = nil
+    assert_enqueued_jobs(1, only: Verification::CheckJob) do
+      certificate = accept(suggested, attributes: { certificate_issuer_id: suggested.matched_certificate_issuer_id.to_s })
+    end
+    assert_enqueued_with(job: Verification::CheckJob, args: [ certificate ])
+    clear_enqueued_jobs
+
+    matched = verified_item
+    assert_no_enqueued_jobs(only: Verification::CheckJob) do
+      accept(matched, attributes: { certificate_issuer_id: matched.matched_certificate_issuer_id.to_s })
+    end
+  end
+
+  # The item's check compared the card with its printed name or matched member and its dates, so a
+  # certificate for someone else, or with corrected dates, is checked again (a borrowed real card
+  # mustn't keep "Verified").
+  test "another person, a corrected completion date or a different printed expiry checks the certificate again" do
+    changes = { crew_member_id: crew_members(:maria_garcia).id.to_s, completed_on: (Date.current - 20).iso8601,
+      expires_on: (Date.current + 400).iso8601 }
+    changes.each do |field, value|
+      certificate = nil
+      assert_enqueued_jobs(1, only: Verification::CheckJob) do
+        certificate = accept(verified_item(authenticity_status: :verified, authenticity_method: "automatic:aha_ecards"),
+          attributes: { field => value })
+      end
+      assert_enqueued_with(job: Verification::CheckJob, args: [ certificate ])
+      clear_enqueued_jobs
+    end
+
+    suggested = verified_item(person_match: :suggested)
+    assert_enqueued_jobs(1, only: Verification::CheckJob) { accept(suggested) }
+  end
+
+  test "an expiry worked out from the type isn't compared, so it doesn't call for another check" do
+    item = verified_item(proposed_expires_on: Date.current + 700, proposed_expires_on_source: :computed)
+
+    assert_no_enqueued_jobs(only: Verification::CheckJob) { accept(item) }
+  end
+
+  test "a person's recorded result is left alone: changing the person doesn't queue a check" do
+    item = verified_item
+    item.record_authenticity!(status: :verified, method: "person", note: "Checked by phone.", by: users(:admin))
+
+    assert_no_enqueued_jobs(only: Verification::CheckJob) do
+      accept(item, attributes: { crew_member_id: crew_members(:maria_garcia).id.to_s, verification_code: "OTHER" })
+    end
+  end
+
   private
     # A batch whose summary was already sent, so accepting its last item sends no email.
     def finished_batch

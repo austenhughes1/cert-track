@@ -1,0 +1,81 @@
+<% content_for :title, "Verification" %>
+<% dash = tag.span("—", class: "text-gray-400") %>
+
+<div class="mb-4">
+  <h1 class="text-2xl font-semibold">Verification</h1>
+  <p class="mt-1 max-w-3xl text-sm text-gray-500">
+    Current certificates of active crew that a person confirmed fake with their issuer, that an automatic check or QR code
+    flagged for review, or that a person should look up. Only a confirmed fake one counts as not valid and is left out of
+    packets; one flagged for review still counts by its dates until someone checks it with the issuer and records the
+    result on the certificate's page.
+  </p>
+</div>
+
+<% filters = [ [ nil, "All", @counts.values.sum ] ] + VerificationController::FILTERS.map { |status, label| [ status, label, @counts.fetch(status) ] } %>
+<nav class="mb-4 flex gap-1 text-sm" aria-label="Filter by result">
+  <% filters.each do |status, label, count| %>
+    <%= link_to verification_path(status: status), aria: { current: ("page" if @status == status) },
+          class: class_names("rounded-md px-3 py-1.5 font-medium", @status == status ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-200") do %>
+      <%= label %> <span class="ml-0.5 tabular-nums opacity-70"><%= count %></span>
+    <% end %>
+  <% end %>
+</nav>
+
+<% if @certificates.empty? %>
+  <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center" id="verification_empty">
+    <p class="text-sm font-medium text-gray-900">
+      <%= { "fake" => "No certificates are confirmed fake", "flagged" => "No certificates are flagged for review",
+            "needs_check" => "No certificates need a check" }.fetch(@status, "Nothing to check") %>
+    </p>
+    <p class="mt-1 text-sm text-gray-500">Certificates show up here when a check finds a problem with them or a person should look them up.</p>
+  </div>
+<% else %>
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-gray-200 text-sm" id="verification_certificates">
+      <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <tr>
+          <th scope="col" class="px-3 py-2">Person</th>
+          <th scope="col" class="px-3 py-2">Certificate</th>
+          <th scope="col" class="px-3 py-2">Issuer</th>
+          <th scope="col" class="px-3 py-2">Status</th>
+          <th scope="col" class="px-3 py-2">Note</th>
+          <th scope="col" class="px-3 py-2">Checked</th>
+          <th scope="col" class="px-3 py-2"><span class="sr-only">Open</span></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        <% @certificates.each do |certificate| %>
+          <% member = certificate.crew_member %>
+          <tr id="<%= dom_id(certificate, :verification) %>" class="align-top hover:bg-gray-50">
+            <td class="whitespace-nowrap px-3 py-2">
+              <%= link_to member.display_name, crew_member_path(member), class: "font-medium text-gray-900 hover:underline" %>
+            </td>
+            <td class="px-3 py-2"><%= certificate.certificate_type.name %></td>
+            <td class="px-3 py-2" data-column="issuer"><%= certificate.certificate_issuer&.name || certificate.issued_by || dash %></td>
+            <td class="whitespace-nowrap px-3 py-2" data-column="status">
+              <%= authenticity_badge(certificate) %>
+              <% if certificate.authenticity_confirmed_fake? %>
+                <p class="mt-0.5 text-xs text-gray-500"><%= certificate.authenticity_label %></p>
+              <% end %>
+            </td>
+            <td class="max-w-sm px-3 py-2 text-gray-700" data-column="note">
+              <% if certificate.authenticity_note.present? %>
+                <p class="line-clamp-2" title="<%= certificate.authenticity_note %>"><%= certificate.authenticity_note %></p>
+              <% else %>
+                <%= dash %>
+              <% end %>
+            </td>
+            <td class="px-3 py-2 text-xs text-gray-500" data-column="checked"><%= authenticity_checked_sentence(certificate) %></td>
+            <td class="whitespace-nowrap px-3 py-2 text-right">
+              <%= link_to "Open", crew_member_certificate_path(member, certificate, anchor: "authenticity"),
+                    class: "text-blue-700 hover:underline", aria: { label: "Open #{certificate.certificate_type.name} for #{member.display_name}" } %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+  <% if @total > @certificates.size %>
+    <p class="mt-2 text-xs text-gray-500" id="verification_limited">Showing the first <%= @certificates.size %> of <%= @total %>, worst first.</p>
+  <% end %>
+<% end %>

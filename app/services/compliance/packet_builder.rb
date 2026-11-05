@@ -4,7 +4,10 @@ module Compliance
   # Builds a project's compliance packet: a zip holding index.pdf plus every file of
   # every current certificate in a required cell of the project's matrix (active crew,
   # types their role needs on the project). Superseded certificates and certificates
-  # for types a person doesn't need are left out.
+  # for types a person doesn't need are left out. So are the files of a certificate a person
+  # confirmed fake with its issuer (a "fake" cell): index.pdf lists it as left out, with the
+  # reason. Every other certificate goes in, including one only flagged for review (owner,
+  # Nov 4, 2026: never omit a certificate unless it is verified fake).
   #
   # Files are named "Last_First - CODE - exp YYYY-MM-DD.ext" ("exp none" when the
   # certificate never expires); repeats get " (2)", " (3)" and so on. Each file is
@@ -13,6 +16,7 @@ module Compliance
   #
   #   builder = Compliance::PacketBuilder.new(project)
   #   builder.entries               # => [Entry(name:, crew_member:, certificate_type:, certificate:, blob:)]
+  #   builder.excluded_cells        # => [[row, cell]] whose certificate is left out (confirmed fake)
   #   builder.write_zip(path)       # writes the zip to path
   #   builder.attach!(built_by: user) # builds in a temp dir, attaches project.packet, sets packet_built_at,
   #                                   # and records a PacketBuild holding a copy of index.pdf
@@ -25,6 +29,9 @@ module Compliance
     }.freeze
 
     Entry = Data.define(:name, :crew_member, :certificate_type, :certificate, :blob)
+
+    # Cell statuses whose certificate stays out of the zip, with the reason index.pdf gives.
+    EXCLUDED_REASONS = { "fake" => "Failed verification with the issuer" }.freeze
 
     attr_reader :project, :today
 
@@ -61,14 +68,16 @@ module Compliance
       "#{File.basename(filename, ".zip")}-index.pdf"
     end
 
-    # Required cells with a current certificate, in matrix order: [row, cell] pairs.
+    # Required cells with a current certificate that goes in the zip, in matrix order:
+    # [row, cell] pairs.
     def certificate_cells
-      @certificate_cells ||= report.rows.flat_map do |row|
-        report.columns.filter_map do |type|
-          cell = row.cell_for(type)
-          [ row, cell ] if cell.required? && cell.certificate
-        end
-      end
+      @certificate_cells ||= cells_with_certificates.reject { |_, cell| EXCLUDED_REASONS.key?(cell.status) }
+    end
+
+    # Required cells whose current certificate is left out of the zip (confirmed fake),
+    # in matrix order: [row, cell] pairs. They are gaps too.
+    def excluded_cells
+      @excluded_cells ||= cells_with_certificates.select { |_, cell| EXCLUDED_REASONS.key?(cell.status) }
     end
 
     # Array<Entry>: one per file, in matrix order, with unique names.
@@ -88,8 +97,8 @@ module Compliance
 
     # PDF bytes for index.pdf.
     def index_pdf(generated_at: Time.current)
-      PacketIndexPdf.new(project: project, rows: index_rows, gaps: index_gaps, summary: report.summary,
-        generated_at: generated_at).render
+      PacketIndexPdf.new(project: project, rows: index_rows, gaps: index_gaps, excluded: index_excluded,
+        summary: report.summary, generated_at: generated_at).render
     end
 
     # Writes the packet to path (index.pdf first, then the files) and returns path.
@@ -135,6 +144,15 @@ module Compliance
     end
 
     private
+      def cells_with_certificates
+        @cells_with_certificates ||= report.rows.flat_map do |row|
+          report.columns.filter_map do |type|
+            cell = row.cell_for(type)
+            [ row, cell ] if cell.required? && cell.certificate
+          end
+        end
+      end
+
       def preload_files
         ActiveRecord::Associations::Preloader.new(
           records: certificate_cells.map { |_, cell| cell.certificate }, associations: { files_attachments: :blob }
@@ -175,10 +193,18 @@ module Compliance
         end
       end
 
+      # Missing and expired gaps. Fake ones are listed as left out instead (index_excluded).
       def index_gaps
-        report.gaps.map do |gap|
+        report.gaps.reject { |gap| EXCLUDED_REASONS.key?(gap.status) }.map do |gap|
           PacketIndexPdf::Gap.new(person: gap.crew_member.sort_name, type: type_label(gap.certificate_type),
             status: gap.status, expires_on: gap.certificate&.expires_on)
+        end
+      end
+
+      def index_excluded
+        excluded_cells.map do |row, cell|
+          PacketIndexPdf::Excluded.new(person: row.crew_member.sort_name, type: type_label(cell.certificate_type),
+            expires_on: cell.expires_on, reason: EXCLUDED_REASONS.fetch(cell.status))
         end
       end
 

@@ -21,6 +21,10 @@ module Imports
   # error, or a stack overflow on a deeply nested object), every item keeps the whole file
   # (logged); a storage error while downloading it is raised.
   # Images are never split: page_range stays nil and every item shares the one image.
+  #
+  # QR codes (Phase 3b): each PDF item gets the file's barcodes that are on its own pages,
+  # numbered as in its own file: a part cut out as pages 3-4 has them on pages 1-2, and a part
+  # that kept the whole file keeps the file's numbers. Every item of an image shares its barcodes.
   class Splitter
     Part = Data.define(:item, :certificate)
 
@@ -76,6 +80,7 @@ module Imports
       @original_blob = item.file.blob if item.file.attached?
       @pdf = @original_blob&.content_type == PDF_CONTENT_TYPE
       @full_text = item.extracted_text
+      @full_barcodes = Array(item.barcodes).select { |barcode| barcode.is_a?(Hash) }.map(&:stringify_keys)
       load_document
       certificates.each_with_index.map do |certificate, index|
         pages = pages_for(certificate)
@@ -132,12 +137,14 @@ module Imports
       end
 
       def narrow_original(pages)
+        split = nil
         item.page_range = self.class.page_range_for(pages) if pdf?
         if partial?(pages)
           item.extracted_text = self.class.text_for_pages(@full_text, pages)
           split = split_attachable(pages)
           item.file = split if split
         end
+        item.barcodes = barcodes_for(pages, cut: split.present?) if pdf?
         item.save!
         item
       end
@@ -145,14 +152,24 @@ module Imports
       def create_split_item(certificate, pages)
         page_range = self.class.page_range_for(pages) if pdf?
         text = partial?(pages) ? self.class.text_for_pages(@full_text, pages) : @full_text
-        file = (split_attachable(pages) if partial?(pages)) || @original_blob
+        split = split_attachable(pages) if partial?(pages)
 
         ImportItem.create!(
           import_batch: item.import_batch, source_item: item, status: item.status,
           sha256: item.sha256, original_filename: item.original_filename, page_range:,
           extracted_text: text, extraction: { "certificates" => [ certificate ], "non_certificate_pages" => [] },
-          provider: item.provider, ai_units_used: 0, file:
+          provider: item.provider, ai_units_used: 0, file: split || @original_blob,
+          barcodes: pdf? ? barcodes_for(pages, cut: split.present?) : @full_barcodes
         )
+      end
+
+      # The file's barcodes on these pages; renumbered from 1 when the pages were cut into their own file.
+      def barcodes_for(pages, cut:)
+        offset = cut ? pages.first - 1 : 0
+        @full_barcodes.filter_map do |barcode|
+          page = Integer(barcode["page"].to_s, exception: false)
+          barcode.merge("page" => page - offset) if page && pages.include?(page)
+        end
       end
 
       # An attachable for the cut-out pages, or nil when the PDF can't be split.

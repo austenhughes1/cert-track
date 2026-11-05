@@ -1,6 +1,6 @@
 class CrewMembersController < ApplicationController
   INDEX_LIMIT = 100 # no pagination gem; the page says "showing first 100"
-  STATUS_FILTERS = %w[expired missing expiring lapses_on_project].freeze
+  STATUS_FILTERS = %w[fake expired missing expiring lapses_on_project].freeze
   PROJECT_STATUS_ORDER = %w[active planned closed].freeze
 
   require_role :editor, except: %i[index show]

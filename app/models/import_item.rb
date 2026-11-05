@@ -1,6 +1,8 @@
 # One detected certificate from an import: a whole file, or a page range of a PDF.
 # AI proposals stay here until a person (or the auto-accept rules) turns them into a Certificate.
 class ImportItem < ApplicationRecord
+  include Authenticity
+
   TERMINAL_STATUSES = %w[accepted rejected duplicate failed].freeze
   # Still being read by the pipeline (text extraction, then AI): the batch isn't finished.
   PIPELINE_STATUSES = %w[pending extracting].freeze
@@ -16,6 +18,8 @@ class ImportItem < ApplicationRecord
   # stored as type_match matched.
   enum :person_match, { unmatched: 0, suggested: 1, matched: 2, picked: 3 }, prefix: :person, default: :unmatched
   enum :type_match, { unmatched: 0, suggested: 1, matched: 2 }, prefix: :type, default: :unmatched
+  # Phase 3b: matched by a QR/link domain or the model's issuer code; suggested by a fuzzy name.
+  enum :issuer_match, { unmatched: 0, suggested: 1, matched: 2 }, prefix: :issuer, default: :unmatched
   # manual: a reviewer typed the expiry and saved it ("Save edits").
   enum :proposed_expires_on_source, { printed: 0, computed: 1, none: 2, manual: 3 }, prefix: :proposed_expiry
 
@@ -24,6 +28,7 @@ class ImportItem < ApplicationRecord
   has_many :split_items, class_name: "ImportItem", foreign_key: :source_item_id, inverse_of: :source_item, dependent: :destroy
   belongs_to :matched_crew_member, class_name: "CrewMember", optional: true
   belongs_to :matched_certificate_type, class_name: "CertificateType", optional: true
+  belongs_to :matched_certificate_issuer, class_name: "CertificateIssuer", optional: true
   belongs_to :certificate, optional: true # set on accept
   belongs_to :reviewed_by, class_name: "User", optional: true
   belongs_to :duplicate_of, class_name: "ImportItem", optional: true, inverse_of: :duplicates
@@ -33,9 +38,15 @@ class ImportItem < ApplicationRecord
   has_one_attached :file
 
   encrypts :proposed_certificate_number, deterministic: true
+  # Phase 3b. barcodes: QR codes decoded locally, [{ "page" => 1, "text" => "https://..." }]
+  # (a QR link can carry the holder's name and certificate id); nil until the file is read.
+  # No type: Array: with it a NULL column reads as [] and looks changed, so lock! refuses the record.
+  serialize :barcodes, coder: JSON # declared before encrypts, as Rails requires
+  encrypts :proposed_verification_code, :proposed_verification_url, :barcodes
 
   normalizes :page_range, :proposed_certificate_number, :holder_name_raw, :certificate_name_raw,
-    with: ->(value) { value.squish.presence }
+    :proposed_verification_code, with: ->(value) { value.squish.presence }
+  normalizes :proposed_verification_url, with: ->(value) { Certificate.normalize_verification_url(value) }
   normalizes :sha256, with: ->(digest) { digest.strip.downcase }
 
   # A file rejected before it could be read (zip-slip, over a limit) has no digest.
@@ -52,13 +63,14 @@ class ImportItem < ApplicationRecord
   scope :review_queue, -> { needs_review.order(arel_table[:skipped_at].asc.nulls_first, :id) }
   # Parked until the AI allocation resets (next_attempt_at still ahead).
   scope :waiting_for_budget, ->(now = Time.current) { in_pipeline.where(arel_table[:next_attempt_at].gt(now)) }
-  # Finished items (accepted, rejected, duplicate or failed) whose extracted_text/extraction
-  # are past the 30-day retention, counted from the review or, without one, the last change.
-  # Failed items and split-off duplicates hold OCR text too. needs_review items are kept.
+  # Finished items (accepted, rejected, duplicate or failed) whose raw reads (extracted_text,
+  # extraction and the decoded QR codes in barcodes, which can hold the holder's name and
+  # certificate id) are past the 30-day retention, counted from the review or, without one, the
+  # last change. Failed items and split-off duplicates hold them too. needs_review items are kept.
   scope :purgeable, ->(now: Time.current) {
     terminal
       .where("coalesce(import_items.reviewed_at, import_items.updated_at) < ?", now - PURGE_AFTER)
-      .where("import_items.extracted_text IS NOT NULL OR import_items.extraction IS NOT NULL")
+      .where("import_items.extracted_text IS NOT NULL OR import_items.extraction IS NOT NULL OR import_items.barcodes IS NOT NULL")
   }
   # Failed items past the same 30 days, whose files are deleted (purge_stale_files!). Rejected
   # items keep theirs: a rejected file stays the original that a later upload of it
@@ -100,9 +112,10 @@ class ImportItem < ApplicationRecord
         .index_by(&:sha256)
     end
 
-    # Clears extracted_text and extraction on purgeable items. Returns the number cleared.
+    # Clears extracted_text, extraction and barcodes on purgeable items (Imports::ExtractTextJob
+    # reads the QR codes again if the item is read again). Returns the number cleared.
     def purge_stale_extractions!(now: Time.current)
-      purgeable(now: now).update_all(extracted_text: nil, extraction: nil, updated_at: now)
+      purgeable(now: now).update_all(extracted_text: nil, extraction: nil, barcodes: nil, updated_at: now)
     end
 
     # Deletes the files of file_purgeable items (Imports::FileCleanup: a blob a certificate
@@ -156,4 +169,22 @@ class ImportItem < ApplicationRecord
     unreadable = certificate&.dig("unreadable")
     unreadable["expires_on"].to_s.squish.presence if unreadable.is_a?(Hash)
   end
+
+  # What a check of this item is about (Authenticity), as it will be saved or (database: true) as
+  # stored: the issuer, code and link looked up, and the person and card dates compared. An expiry
+  # worked out from the type isn't the card's.
+  def authenticity_inputs(database: false)
+    value = database ? method(:attribute_in_database) : method(:read_attribute)
+    derived = %w[computed none].include?(value.call("proposed_expires_on_source"))
+    { "issuer" => value.call("matched_certificate_issuer_id"), "verification code" => value.call("proposed_verification_code"),
+      "verification link" => value.call("proposed_verification_url"), "person" => value.call("matched_crew_member_id"),
+      "completion date" => value.call("proposed_completed_on"), "expiry date" => (value.call("proposed_expires_on") unless derived) }
+  end
+
+  private
+    # Only a reviewer's edits reset a person's fake result (Authenticity): not the pipeline's
+    # reading (Imports::Reread keeps a confirmed fake through it), nor accepting or rejecting.
+    def authenticity_edit?
+      persisted? && needs_review? && !will_save_change_to_status?
+    end
 end

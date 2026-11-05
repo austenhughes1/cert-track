@@ -1,5 +1,6 @@
 <%# Active projects with compliance counts. Locals: reports (Array<Compliance::ProjectReport>). %>
 <% columns = [
+  [ "fake", "Fake", "text-red-800" ],
   [ "expired", "Expired", "text-red-700" ],
   [ "missing", "Missing", "text-red-700" ],
   [ "expiring", "Expiring", "text-amber-700" ],
@@ -27,8 +28,8 @@
             <th scope="col" class="px-4 py-2">Client</th>
             <th scope="col" class="px-4 py-2">Ends</th>
             <th scope="col" class="px-4 py-2 text-right">Crew</th>
-            <% columns.each do |_status, label, _color| %>
-              <th scope="col" class="px-4 py-2 text-right"><%= label %></th>
+            <% columns.each do |status, label, _color| %>
+              <th scope="col" class="px-4 py-2 text-right" title="<%= status_label(status) %>"><%= label %></th>
             <% end %>
             <th scope="col" class="px-4 py-2"><span class="sr-only">Matrix</span></th>
           </tr>

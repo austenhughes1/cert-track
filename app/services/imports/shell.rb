@@ -36,7 +36,7 @@ module Imports
     # Also used by Certificates::PdfShrinker (pdfimages).
     PACKAGES = {
       "pdfimages" => "poppler-utils", "pdfinfo" => "poppler-utils", "pdftotext" => "poppler-utils",
-      "pdftoppm" => "poppler-utils", "tesseract" => "tesseract-ocr and tesseract-ocr-eng"
+      "pdftoppm" => "poppler-utils", "tesseract" => "tesseract-ocr and tesseract-ocr-eng", "zbarimg" => "zbar-tools"
     }.freeze
 
     class << self

@@ -7,7 +7,7 @@ class CrewMembersHelperTest < ActionView::TestCase
 
   test "status filter options cover every filterable status, most severe first" do
     assert_equal CrewMembersController::STATUS_FILTERS, crew_member_status_filter_options.map(&:last)
-    assert_equal "Has expired", crew_member_status_filter_options.first.first
+    assert_equal [ "Has confirmed fake", "fake" ], crew_member_status_filter_options.first
   end
 
   test "role filter options start with no role and use string ids" do

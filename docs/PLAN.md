@@ -49,6 +49,7 @@ Every layer runs on a free tier, so steady-state cost is **$0/month** while stor
 | Backups | Nightly `pg_dump` to a second R2 bucket, 30 kept. Nightly copy of the certificate files from R2 to the VM's own disk (`Backups::FileCopyJob`, 04:15); copies of deleted files are kept 30 days | $0 | The dumps let a lost VM be rebuilt in under an hour. The file copy covers a file deleted by mistake or a lost Cloudflare account |
 | Email | Google Workspace: the owner's existing account (`austen@abaventures.net`) over `smtp.gmail.com:587` with STARTTLS and an app password | $0 (existing subscription) | About 2,000 messages/day per account over a rolling 24 hours (500 on a trial account), shared with the owner's own mail. The app stops at `MAIL_DAILY_LIMIT` (1,000) a day ([Google](https://support.google.com/a/answer/166852)) |
 | Text extraction | `poppler-utils` (`pdftotext`, `pdftoppm`; `pdfimages` and `pdfinfo` for shrinking scans) and Tesseract OCR in the Docker image | $0 | Runs locally; no data leaves the VM |
+| QR codes | `zbar-tools` (`zbarimg`) in the Docker image, QR codes only (added Nov 4, 2026) | $0 | Runs locally; no data leaves the VM. Never decodes PDF417 or other barcodes, which on licences hold personal data |
 | AI (extraction, chat) | Cloudflare Workers AI free allocation via its OpenAI-compatible endpoint, called with the `ruby_llm` gem | $0 | 10,000 neurons/day; Cloudflare does not train on customer content ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/), [privacy](https://developers.cloudflare.com/workers-ai/privacy/)) |
 | AI paid fallback (off by default) | Claude Haiku 5.5 via `ruby_llm` | About $0.0005 per page | $0.10/M input, $0.50/M output under 100K-token prompts ([Anthropic](https://platform.claude.com/docs/en/docs/about-claude/pricing)) |
 | Archives and PDFs | `rubyzip` to unpack, `combine_pdf` to split multi-certificate PDFs | $0 | Both MIT licensed |
@@ -90,6 +91,7 @@ Every layer runs on a free tier, so steady-state cost is **$0/month** while stor
 | `CHAT_MODEL` | Model ID, chosen with `certtrack:eval_chat` in Phase 4 |
 | `AI_DAILY_NEURON_BUDGET` | Default `9000`, leaves headroom under the 10,000 free neurons |
 | `AUTO_ACCEPT_ENABLED` | Default `false`; turn on after the owner trusts the import output |
+| `VERIFICATION_AUTO_CHECKS` | Default `true`; `false` turns off the automatic issuer lookups (Phase 3b), leaving assisted checks. Tests run with it off and stub the checkers |
 | `ANTHROPIC_API_KEY` | Optional; only for the paid fallback |
 | `ANTHROPIC_MODEL` | Optional; the fallback's model, default `claude-haiku-5-5` |
 | `OLLAMA_URL` | Optional; Ollama endpoint for `AI_PROVIDER=ollama`, default `http://localhost:11434/v1` |
@@ -159,6 +161,21 @@ project_assignments
   starts_on, ends_on date
   # unique [project_id, crew_member_id]
 
+certificate_issuers   # who issues certificates, and how each is verified (Phase 3b)
+  name           citext   unique, not null    # "American Red Cross"
+  code           string   unique, not null    # "REDCROSS" (letters, digits, - and _)
+  aliases        string[] default []          # names as printed on certificates
+  domains        string[] default []          # registrable domains its QR codes and links use: ["redcross.org"]
+  verification_method integer enum unknown | qr_or_code | code_lookup | contact | no_registry, default unknown
+  lookup_url     string                       # the page a person opens to check by hand
+  link_template  string                       # direct link built from a code, with {code}
+  automatic_check string  nullable            # a Verification::Checkers key, or nil for assisted only
+  verification_notes text                     # how to verify, phone/email, terms of use
+  active         boolean  default true
+  position       integer
+  # "Other..." in an issuer picker creates a row with verification_method unknown, unless the
+  # typed name is already an issuer's name or alias ("Red Cross" finds American Red Cross)
+
 certificates          # one line item per earned certificate
   crew_member_id ref
   certificate_type_id ref
@@ -173,6 +190,17 @@ certificates          # one line item per earned certificate
   verified_at    datetime
   superseded_at  datetime nullable  # set when a newer cert of the same type is added
   notes          text
+  # Phase 3b. issued_by stays as the issuer's name as printed.
+  certificate_issuer_id ref nullable
+  verification_code string nullable, encrypted   # what a person types into the issuer's lookup
+  verification_url  string nullable, encrypted   # direct link: decoded QR, else printed URL, else link_template
+  authenticity_status integer enum unchecked | needs_check | verified | cannot_verify | not_found | mismatch | suspicious, default unchecked
+  authenticity_checked_at datetime nullable
+  authenticity_checked_by_id ref users nullable  # nil when the check was automatic
+  authenticity_method string nullable            # "person", "automatic:<checker>", "qr_details:<checker>"
+                                                 # (only a person's not_found or mismatch is confirmed fake)
+  authenticity_note text nullable                # what was found, in plain words, never names
+  authenticity_details jsonb default {}          # issuer status text and which fields matched, never the values
   # has_many_attached :files   (photos and scans stored shrunk; see Implementation notes)
   # index [crew_member_id, certificate_type_id, superseded_at]
   # index [expires_on] where superseded_at is null
@@ -203,6 +231,16 @@ import_items          # one detected certificate (a file, or a page range of a P
   reviewed_by_id ref users nullable
   reviewed_at    datetime
   error_message  text
+  # Phase 3b
+  matched_certificate_issuer_id ref nullable
+  issuer_match   integer  enum unmatched | suggested | matched, default unmatched
+  issuer_suggestions jsonb default []
+  proposed_verification_code string, encrypted
+  proposed_verification_url  string, encrypted
+  barcodes       text, encrypted JSON  # [{ "page" => 1, "text" => "https://..." }] QR codes decoded locally; null until read,
+                                       # and again 30 days after the item finishes (purged like extracted_text)
+  authenticity_status, authenticity_checked_at, authenticity_checked_by_id, authenticity_method,
+  authenticity_note, authenticity_details   # as on certificates; copied on accept
   # has_one_attached :file   (until accepted: the certificate then holds the file; a failed
   #                           item's file is deleted 30 days after it failed)
 
@@ -232,7 +270,7 @@ ai_usage_days
 **Rules the models must enforce**
 
 - **Expiration date.** Use the printed date when the card has one (`printed`). Otherwise compute `completed_on + validity_months` (`computed`). If the type never expires, leave it null (`none`).
-- **Current certificate.** For a crew member and type, the current certificate is the one with `superseded_at` null. Saving a newer certificate of the same type sets `superseded_at` on the older one. History is kept, never deleted.
+- **Current certificate.** For a crew member and type, the current certificate is the one with `superseded_at` null. Saving a newer certificate of the same type sets `superseded_at` on the older one. History is kept, never deleted. A certificate a person confirmed fake (Phase 3b) ranks below every other one, so a genuine card on file stays current when a newer one turns out fake; recording or replacing that result re-ranks them.
 - **Required types for a person on a project.** All `project_requirements` for that project where `crew_role_id` is null or equals the assignment's role (falling back to the member's role).
 - **Compliance status per required type**, with `today` in America/Denver:
   - `missing`: no current certificate.
@@ -287,13 +325,14 @@ Free local OCR reads every file first. A free model then turns the text into JSO
 
 1. **Intake.** `POST /imports` takes many files via direct upload: PDF, JPG, JPEG, PNG, HEIC, WEBP and ZIP, up to 500 MB per batch. Create an `ImportBatch` and enqueue `Imports::ExpandJob`.
 2. **Expand.** Unzip with `rubyzip` into `Dir.mktmpdir`, recursing into nested zips two levels deep. Skip `__MACOSX`, `.DS_Store`, `Thumbs.db` and hidden files. Reject entries with `..` or absolute paths. Stop at 2,000 entries or 2 GB uncompressed (zip-bomb guard). Each supported file is a candidate; hash it with SHA-256. Once every upload is unpacked, the uploads themselves are deleted; a file uploaded on its own (not in a zip) stays, as its item's file. If unpacking stops on an unexpected error, the uploads are kept for the redo, and the nightly purge deletes them 30 days after the drop.
-3. **Extract text (free, local).** For PDFs run `pdftotext -layout` per page. If a page yields fewer than 40 characters, it is a scan: rasterize with `pdftoppm -r 300` and run `tesseract`. For images, auto-rotate and convert to grayscale with libvips, then run `tesseract`. Store the text in `extracted_text` with `=== page N ===` markers.
-4. **AI extraction (free model).** Send the page text, the master list (code, name, aliases) and the JSON schema below. Use `EXTRACTION_MODEL` through `ruby_llm` with structured output. If OCR text is unusable, send the page image (long side 1,568 px or less) to `EXTRACTION_VISION_MODEL` instead. A blank page needs no call. Without a vision model, unreadable pages are skipped and named in the certificate's notes. Usually one call per source file returns every certificate in it, with page numbers. A file with more than 24,000 characters of text takes one call per 24,000 characters, never splitting a page. Unreadable pages go in extra vision calls, as many images per call as the model accepts. The replies are merged.
+3. **Extract text (free, local).** For PDFs run `pdftotext -layout` per page. If a page yields fewer than 40 characters, it is a scan: rasterize with `pdftoppm -r 300` and run `tesseract`. For images, auto-rotate and convert to grayscale with libvips, then run `tesseract`. Store the text in `extracted_text` with `=== page N ===` markers. Then read QR codes (Phase 3b, free, local): run `zbarimg` with only the QR symbology enabled on every page image (a PDF's first 30 pages, rendered in grayscale at 150 dpi; a photo turned upright and made grayscale with libvips), trying it as is, then at 2x and 3x until one decodes (a PDF page is rendered again at 300 and 450 dpi, a photo is enlarged with libvips; at most 36 MP), and store each decoded text with its page number in `barcodes`.
+4. **AI extraction (free model).** Send the page text, the master list (code, name, aliases), the issuer list (code, name, aliases) and the JSON schema below. Use `EXTRACTION_MODEL` through `ruby_llm` with structured output. If OCR text is unusable, send the page image (long side 1,568 px or less) to `EXTRACTION_VISION_MODEL` instead. A blank page needs no call. Without a vision model, unreadable pages are skipped and named in the certificate's notes. Usually one call per source file returns every certificate in it, with page numbers. A file with more than 24,000 characters of text takes one call per 24,000 characters, never splitting a page. Unreadable pages go in extra vision calls, as many images per call as the model accepts. The replies are merged.
 5. **Split.** For each certificate returned, create an `ImportItem`. Multi-page PDFs are split by page range with `combine_pdf`, and the split file is attached to the item. The whole PDF is not kept once its pages are split out.
 6. **Match type (Ruby).** Accept `certificate_type_code` only if it exists in the master list. Otherwise fuzzy-match `certificate_name_as_printed` against names and aliases with `pg_trgm`; similarity of 0.45 or more is a suggestion, not a match.
+6b. **Match issuer and verification fields (Ruby, Phase 3b).** In order: a QR code or printed link on the certificate's pages whose host is on an active issuer's `domains` is a match; else `certificate_issuer_code` naming an active issuer is a match; else `issuer` is fuzzy-matched against issuer names and aliases (0.45 or more is a suggestion). `verification_url` is the QR link on the issuer's domain, else the printed URL (normalized to `https://`), else the issuer's `link_template` with the code. A printed URL on another site than the matched issuer's gives way to the issuer's own `link_template` link, unless it imitates an issuer's site (then it is kept, so authenticity rule 1 flags it). When the certificate's pages carry several of the issuer's QR links (one page or photo with several people's cards), the one whose id is the model's verification code or certificate number is used, else the one naming the holder's last name (360training), else none. `verification_code` is the model's, else the id read from the QR link's query (`certnumber`, `certificate_id`, `enrollmentId`, `cid`, `code`, `id`).
 7. **Match person (Ruby).** Normalize the holder name and compare against crew full names and `name_aliases` with `pg_trgm`. An exact normalized match is a match. Otherwise the best candidate at 0.6 or more, beating the runner-up by at least 0.15, becomes a suggestion. No candidate means review offers "create crew member".
 8. **Dates.** Parse ISO dates. Reject `completed_on` in the future and `expires_on` before `completed_on`. If `expires_on` is null and the type has `validity_months`, compute it and mark `computed`.
-9. **Decide.** Auto-accept only when all hold: type matched by code, person matched exactly, `completed_on` present, expiry present or type never expires, model confidence 0.85 or more, and `AUTO_ACCEPT_ENABLED` is on. Everything else goes to `needs_review`. Ship with `AUTO_ACCEPT_ENABLED=false` until the owner has reviewed about 100 items and trusts the output.
+9. **Decide.** Auto-accept only when all hold: type matched by code, person matched exactly, `completed_on` present, expiry present or type never expires, model confidence 0.85 or more, authenticity not flagged (Phase 3b; a flag only for review blocks it too), and `AUTO_ACCEPT_ENABLED` is on. Before deciding, `Verification::Run` checks the item's authenticity with local rules (see Phase 3b). An item whose issuer's site will be asked (an automatic check, run after the pipeline's transaction) is not auto-accepted: it waits for review, so a "not found" or "doesn't match" is never found after the fact. Everything else goes to `needs_review`. Ship with `AUTO_ACCEPT_ENABLED=false` until the owner has reviewed about 100 items and trusts the output.
 10. **Review queue.** File preview on the left, editable proposed fields on the right: person picker showing suggestions, type picker, dates, number. Actions are Accept, Reject, Skip and "Create crew member from this", with keyboard shortcuts (`a`, `r`, `s`). HEIC/HEIF photos are previewed as a JPEG (2000 px max, quality 80). Accepting creates the `Certificate`, moves the file to it (the import item no longer links to it, and import pages link to the certificate instead) and sets `verified_by`. If two items share person, type and number (front and back photos of one card), offer to merge them into one certificate with two files.
 11. **Finish.** When every item is terminal, set the batch status and email the uploader a summary: accepted, needs review, duplicates, failed.
 
@@ -308,7 +347,10 @@ Free local OCR reads every file first. A free model then turns the text into JSO
       "certificate_type_code": "OSHA30",
       "certificate_name_as_printed": "OSHA 30-Hour Construction Industry Outreach Training",
       "issuer": "Example Safety Training LLC",
+      "certificate_issuer_code": null,
       "certificate_number": "30-1234567",
+      "verification_code": "30-1234567",
+      "verification_url": "examplesafety.com/verify",
       "completed_on": "2025-03-14",
       "expires_on": null,
       "confidence": 0.92,
@@ -319,7 +361,7 @@ Free local OCR reads every file first. A free model then turns the text into JSO
 }
 ```
 
-Prompt rules to put in the system prompt: dates are ISO `YYYY-MM-DD`; use null when a field is absent and never guess; `certificate_type_code` must be a code from the supplied list or null; one entry per distinct certificate; pages are 1-indexed; ignore cover sheets and course outlines (list them in `non_certificate_pages`).
+Prompt rules to put in the system prompt: dates are ISO `YYYY-MM-DD`; use null when a field is absent and never guess; `certificate_type_code` and `certificate_issuer_code` must be codes from the supplied lists or null; `verification_code` and `verification_url` are only what is printed (the server reads QR codes itself); one entry per distinct certificate; pages are 1-indexed; ignore cover sheets and course outlines (list them in `non_certificate_pages`).
 
 **Staying inside the free allocation**
 
@@ -501,6 +543,83 @@ Still open:
 - Until `EXTRACTION_MODEL` is set, production imports stop at the AI step with a clear message.
 - Keep `AUTO_ACCEPT_ENABLED` false until about 100 imported items have been reviewed by hand.
 
+### Phase 3b: Issuers and certificate verification (added Nov 4, 2026)
+
+Most certificates carry a way to check them: a QR code, a printed verification address, or a code to type into the issuer's lookup page. CertTrack records each certificate's issuer, verification code and link, checks authenticity where it can, and flags certificates that don't check out.
+
+Owner decisions (Nov 4, 2026):
+
+- [x] Verify with an assisted check for every issuer, plus automatic checks where the issuer's site allows them. Red Cross, ClickSafety, Safety LMS/ComTrain and HealthStream forbid automated lookups in their terms, and 360training's verification host disallows all robots, so those stay assisted.
+- [x] Read QR codes locally with `zbar-tools` in the Docker image (QR only).
+- [x] Never omit a certificate unless it is verified fake. The owner, Nov 4, 2026: "Unless the cert is VERIFIED to be fake (e.g. the number is verified to be made up), let's never omit the cert." Only a person's "Not found" or "Doesn't match", recorded after checking with the issuer, makes a certificate confirmed fake: it counts as not valid and is left out of packets. A flag from an automatic check, a QR code's details or a lookalike link is only flagged for review: the certificate still counts by its dates and goes in packets. "Can't be verified" still counts as valid, with a note. This replaces the first decision, that any failed check counts as not valid until someone resolves it.
+- [x] Issuers are a master list like certificate types. "Other..." in an issuer picker creates a new issuer from the typed name.
+- [x] Certificates get a verification code and a verification link.
+- [x] The accuracy harness also scores issuer, verification code and verification link. They are reported separately and are not part of the 90% bar.
+
+A local scan of the owner's 48 sample files (Nov 4) found a verification QR code on 20 (Red Cross 7, 360training 9, National OSHA Foundation 3, AHA 1), a printed issuer address without a readable QR on 10, an ID label only on 2, and nothing on 16. ZBar read all 20 QR codes once it also tried each image at 2x and 3x.
+
+**How each issuer verifies** (research Nov 4, 2026; seeded as `certificate_issuers`)
+
+| Issuer (code) | Method | Check |
+| --- | --- | --- |
+| American Red Cross (REDCROSS) | QR or certificate ID; `redcross.org/take-a-class/qrcode?certnumber={code}` shows name, course, dates, Active/Expired | Assisted (terms forbid bots) |
+| 360training (360TRAINING) | QR to `verify.360training.com/qrcode-certificate-validation?enrollmentId=...&s_fname=...&s_lname=...&course=...&issued=...` | Assisted; the name, course and issue date inside the QR link are compared with the certificate locally (`qr_details_360training`) |
+| National OSHA Foundation (NOF) | QR to `nationaloshafoundation.com/certificate-verification/?certificate_id={code}` | Automatic (`national_osha_foundation`); an error page means "unavailable", not "fake" |
+| American Heart Association (AHA) | eCard code at `ecards.heart.org/student/myecards` | Automatic (`aha_ecards`, form POST of the code) |
+| National CPR Foundation (NCPRF) | Certificate ID at `nationalcprfoundation.com/verify/` | Automatic (`national_cpr_foundation`, form POST) |
+| OTI Education Centers on the OSHA Card Portal (OTIEC) | QR to `oshacardportal.com/portalapp/verify/{code}`, VALID / NOT VALID | Automatic (`osha_card_portal`) |
+| ClickSafety, USF OTIEC, Safety LMS, ComTrain, NCCCO, ATSSA, NWSA, IPAF, FOA | Lookup page by code or QR | Assisted |
+| National Safety Council (NSC) | Mostly contact | Assisted |
+| Employer / in-house (EMPLOYER), State DMV (STATEDMV) | No public registry (forklift, aerial lift, competent person, confined space, fall protection, CDL) | Can't be verified |
+
+OSHA runs no national registry for 10- and 30-hour cards; each training organization's QR points to its own page. A forged certificate can reuse a real ID, so a check compares the issuer's name and dates with the certificate, not just whether the ID exists. A QR code pointing to a lookalike site is a classic fake.
+
+**Authenticity rules** (`Verification::Run`, for an import item or a certificate)
+
+1. **Suspicious:** a QR code on the certificate's pages, or its printed or typed verification link, whose host is not an issuer domain but looks like one (it contains a known issuer's name, such as "redcross" or "360training", or is within two letters of a known domain), also when it is spelled with look-alike letters from other alphabets or as punycode (`xn--`); or a disguised link, with another site's name before an `@` ("https://www.redcross.org@verify-now.net/" opens verify-now.net). A QR code to an unrelated site is noted and otherwise ignored (only one written as a link: a dotted word such as a date or ID isn't named). A QR code with a web address in letters other than a to z that imitates no issuer is noted for a person to look at, never dropped.
+2. **QR details:** for issuers whose QR link carries the holder's details (`qr_details_360training`), a different last name, or an issue date more than a day from `completed_on`, is a mismatch. With several such QR codes on the pages, it is a mismatch only when none of them matches. Matching details are noted, but the QR code is not the issuer's confirmation, so the status stays "needs a check". Without such a QR code, rules 3 to 5 decide.
+3. **Automatic check:** if the issuer has an `automatic_check`, `VERIFICATION_AUTO_CHECKS` is on and a code is known, the checker asks the issuer's site. Found with the same last name (and the first name or initial), and dates within a day where the site shows them, is **verified**. The holder is the person the certificate is for: the crew member a reviewer picked, else the printed name (and an exactly matched member's names). An expiry CertTrack worked out from the type's `validity_months` is not the certificate's own and is never compared. Found with a different name or date is a **mismatch**. "No such certificate" is **not found**. Errors, timeouts, blocks and unknown page layouts are "unavailable": the status falls back to "needs a check", with a note.
+4. **Needs a check:** the issuer is known or unknown, and there is a link or code for a person to use.
+5. **Can't be verified:** the issuer's method is `no_registry`, or there is nothing to check with (no code, link or QR code).
+6. A person's recorded result (verified, not found, doesn't match, can't be verified, with a note) wins over automatic checks until someone runs "Check again". "Check again" replaces only a result that was on the page it was pressed on (one recorded after that page was shown stays, and the clicker is told), and a result a person saves while a check runs is never overwritten.
+
+An item's check is copied to its certificate on accept. When the certificate differs from what that check compared (another issuer, code, link, person or card date; a merged item's values; a suggested issuer or person accepted), the certificate is checked again, so an issuer's "Verified" for the printed name never carries over to someone else's certificate. Saving edits to any of these on the review screen, or to the issuer, code, link or dates on the certificate form, checks again too. A person's "Not found" or "Doesn't match" is about the issuer, code and link they looked up (a "Doesn't match" also about the person and the card's dates): when an edit, an accept or a new reading makes those differ from the ones checked (the result keeps keyed digests of them, never the values), it is "needs a check" again, with a note saying what changed and the person's own note kept, so it isn't confirmed fake for details no one checked. Only a person's result or a definite automatic answer (verified, or flagged) settles it: the rules alone leave it on the "Needs a check" list. A QR code read later doesn't fill in a confirmed fake certificate's link. "Read again" keeps it while the new reading gives the details that were checked; either way a re-read item a person confirmed fake is never auto-accepted.
+
+Flagged means `not_found`, `mismatch` or `suspicious`. A flagged certificate gets a red badge, is counted on the dashboard and listed at `/verification`, and a flagged import item is never auto-accepted. Who recorded the result decides the rest:
+
+- **Confirmed fake:** a person recorded `not_found` or `mismatch` with the panel's buttons (`authenticity_method` "person"). The current certificate gets the compliance status `fake` ("Confirmed fake", the most severe), whatever its dates. It is a gap like a missing or expired one. It is left out of packet zips and listed in the packet index as left out: "Failed verification with the issuer". When the person has another certificate of the type that isn't confirmed fake, that one is current instead (and counts, and goes in packets), and the fake one is kept as history.
+- **Flagged for review:** any other flagged result, from an automatic check, a QR code's details, or a lookalike or disguised QR code or link. The certificate keeps the status its dates give it, counts toward compliance and goes in packets like any other. Packets never mention the flag.
+
+Automatic checks leave a person's result alone (rule 6), so they can never make a certificate fake. A person never records "suspicious". Expiry reminders are unchanged.
+
+**Automatic check rules** (`Verification::HttpClient`): HTTPS only, and only to hosts on the domains of issuers that have an `automatic_check`. Redirects must stay on those hosts. 10-second timeout, 1 MB response limit, at most one request per host every 5 seconds, and 200 a day per host. The user agent names CertTrack and https://certs.abaventures.net. Only the verification code is sent. Results keep the issuer's status text and which fields matched, never the issuer's page or the values it showed.
+
+**Screens:** an issuer picker (active issuers, then "Other...", which reveals a name field) on the certificate form and the review queue. A typed name that is already an issuer's name or alias reuses it, and the notice says so. On the review screen "Save edits" confirms the issuer shown, even a suggestion: until then the panel marks it "Suggested, not confirmed", and no automatic check uses it. Verification code and link fields. An authenticity panel on the certificate page and in the review queue, showing the status, note, when and by whom it was checked, "Open verification page" (new tab), the four result buttons (admins and managers) and "Check again". "Not found" and "Doesn't match" ask first, since they mark the certificate fake. A link that isn't on the issuer's own website comes after the issuer's own page; a lookalike or disguised link is never linked. On the review screen the panel's buttons belong to the review form and save its edits first, so the issuer, code and link checked are the ones on screen. Admins edit issuers at `/certificate_issuers`, like the master list. The dashboard shows "Confirmed fake", "Flagged for review" and "Needs a check" tiles, each linking to `/verification` filtered to it. The project matrix shows a confirmed fake cell as "Confirmed fake", titled with the reason. A cell whose certificate is flagged for review keeps its usual badge and gets a small red "Review" marker. The crew filter has "Has confirmed fake".
+
+Claude Code:
+
+- [x] `certificate_issuers` table, model, seeds and admin pages; issuer picker with "Other...".
+- [x] Certificate and import item columns; `Imports::Accept` copies the issuer, code, link and authenticity.
+- [x] QR reading: `zbar-tools` in the Dockerfile and CI; `Certificates::QrReader`; import pipeline step; reading QR codes on manually attached files.
+- [x] Extraction contract: issuer list in the prompt; `certificate_issuer_code`, `verification_code`, `verification_url`; `Imports::IssuerMatcher`; the harness scores the new fields.
+- [x] `Verification::Run`, `Verification::HttpClient`, checkers (`aha_ecards`, `national_cpr_foundation`, `national_osha_foundation`, `osha_card_portal`, `qr_details_360training`) and `Verification::CheckJob`. Checks and QR reading run on the `imports` worker (CPU work), ahead of OCR. When an issuer's site was asked moments ago, the check is tried again a few seconds later (up to 8 times).
+- [x] Compliance `fake` status (a person's Not found or Doesn't match) everywhere statuses are shown (project matrix, crew page and crew filter, Ask, packets, dashboard). A certificate only flagged for review still counts and gets the "Review" marker (owner's rule, Nov 4, 2026).
+
+Done when: importing the owner's sample folder decodes the 20 QR codes and matches each to its issuer by domain; a lookalike QR host is flagged; stubbed issuer replies map to verified, not found, mismatch and unavailable; a certificate flagged by an automatic check keeps its date status in the project matrix, with the Review marker, and stays in packets; once a person records Not found, it shows "Confirmed fake" and is left out of packets; "Other..." creates an issuer from both forms; and `bin/rails test` is green. Each automatic checker's success-page parser is confirmed on one real certificate the first time it runs in production.
+
+Status (Nov 4, 2026): everything except the owner's sample folder and the production checks is met in tests, with synthetic files, the fake AI provider and faked issuer sites. `test/integration/certificate_verification_acceptance_test.rb` runs zips through the whole pipeline and the review screen:
+- QR codes are decoded and given to the item for their page (a QR code on page 2 of a two-certificate PDF goes to page 2's certificate);
+- a Red Cross QR code matches its issuer by domain when the card prints another name;
+- a lookalike QR host is suspicious, a 360training QR code with another last name is a mismatch, and a QR code to an unrelated site is noted and ignored;
+- faked AHA, National CPR Foundation, National OSHA Foundation and OSHA Card Portal replies give verified, not found, mismatch, and "needs a check" for an error page;
+- accepting carries the issuer, code, link and check to the certificate; one flagged by an automatic check or a lookalike QR code keeps its date status in the matrix, with the Review marker, and is in the packet; once a person records Not found on its panel, it shows "Confirmed fake" and is left out of the packet, listed in index.pdf;
+- a QR code on a file attached by hand is read and checked too.
+
+Still open:
+- Import the owner's sample folder and confirm that the 20 QR codes decode and match their issuers by domain. The samples hold personal data, so the owner runs this.
+- Confirm each automatic checker's page parser on one real certificate the first time it runs in production. Until then, a page it doesn't recognise gives "needs a check", never a flag.
+- The Docker image with `zbar-tools` is first built on the next deploy: run the QR smoke test in docs/DEPLOY.md, section 8.
+
 ### Phase 4: Ask box and AI chat
 
 - [x] 4a: `AskQuery`, `/ask`, 30-phrasing test suite.
@@ -570,13 +689,14 @@ The biggest risk of the $0 design is that free tiers can change or be withdrawn.
 **Security and privacy (required, not optional)**
 
 - Certificates carry personal data, and CDL cards can show license numbers and dates of birth. Keep both R2 buckets private. Serve files only through authenticated Rails endpoints with signed URLs that expire within 5 minutes.
-- Encrypt `certificate_number` with Active Record encryption (`encrypts`). Purge `extracted_text` and `extraction` 30 days after an item is accepted, rejected, failed or marked duplicate (items still waiting for review keep theirs).
-- Import files: raw uploads are deleted once unpacked and never kept more than 30 days. A failed item's file is deleted 30 days after it failed. Rejected items keep their files, as the original for duplicate detection. An accepted file belongs only to its certificate, so deleting the certificate, or removing one of its files, deletes the stored file. `Maintenance::PurgeImportExtractionsJob` (nightly, 03:45) does all of this: first the failed items' files, then any uploads still kept, then the extracted text.
+- Encrypt `certificate_number` with Active Record encryption (`encrypts`). Purge `extracted_text`, `extraction` and the decoded QR codes in `barcodes` (Phase 3b; a QR link can carry the holder's name and certificate id) 30 days after an item is accepted, rejected, failed or marked duplicate (items still waiting for review keep theirs).
+- Request logs filter certificate numbers, verification codes and links (on every form, the review screen's included) and the note a person records with a check (`config/initializers/filter_parameter_logging.rb`).
+- Import files: raw uploads are deleted once unpacked and never kept more than 30 days. A failed item's file is deleted 30 days after it failed. Rejected items keep their files, as the original for duplicate detection. An accepted file belongs only to its certificate, so deleting the certificate, or removing one of its files, deletes the stored file. `Maintenance::PurgeImportExtractionsJob` (nightly, 03:45) does all of this: first the failed items' files, then any uploads still kept, then the extracted text and QR codes.
 - Certificate photos are stored without their EXIF, XMP and IPTC metadata, GPS location included (`Certificates::ShrinkFilesJob`). Two exceptions: a file libvips can't read is kept as it is, and a scanned PDF's page images keep whatever they hold. Import files are stored as uploaded, metadata included, until they are accepted: items waiting for review, rejected items (kept for good) and failed items (30 days). Only editors can open them. The nightly VM copy holds them too, and keeps its copy of a photo replaced on acceptance in its trash for 30 days.
 - Packet zips hold full copies of the crew's files, so they live at most 8 days and 4 hours: through the 7th day after the build day, then the 03:50 purge. Index PDFs hold crew names, certificate numbers and dates, and are kept for good as the record of what was sent (owner's decision, Nov 4, 2026). They go only with their project, and a project with past builds can't be deleted.
 - The nightly file copies on the VM are plain files that only the app's user and root can read (files 0600, folders 0700), on the same machine as the database. They are not encrypted.
 - Encrypt database dumps with a key from Rails credentials before uploading them to R2.
-- Data leaves the VM only to Cloudflare (storage and Workers AI), Google (email content, through the owner's Workspace account) and, if switched on, Anthropic. Nothing else.
+- Data leaves the VM only to Cloudflare (storage and Workers AI), Google (email content, through the owner's Workspace account), if switched on, Anthropic, and (Phase 3b, owner's decision Nov 4, 2026) a certificate's verification code to its own issuer's site for an automatic check: `ecards.heart.org`, `nationalcprfoundation.com`, `nationaloshafoundation.com` and `oshacardportal.com`. Nothing else. No names or files are sent to issuers; assisted checks open the issuer's page in the reviewer's own browser.
 - Invite-only accounts with no public sign-up, `force_ssl`, and the generator's built-in rate limit on sign-in.
 
 **Open questions for the owner**

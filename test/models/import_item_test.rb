@@ -131,6 +131,19 @@ class ImportItemTest < ActiveSupport::TestCase
     assert failed.failed? && split_duplicate.duplicate?, "only the text goes; the items stay"
   end
 
+  test "decoded QR codes are purged with the other raw reads, even when they are all that is left" do
+    qr = [ { "page" => 1, "text" => "https://verify.360training.com/q?enrollmentId=1&s_fname=Juan&s_lname=Ortiz&issued=03/14/2025" } ]
+    failed = build(sha256: "e" * 64, status: :failed, barcodes: qr, error_message: "AI extraction failed").tap(&:save!)
+    waiting = build(sha256: "f" * 64, status: :needs_review, barcodes: qr).tap(&:save!)
+    [ failed, waiting ].each { |item| item.update_columns(updated_at: 31.days.ago) }
+
+    assert_equal [ failed ], ImportItem.purgeable.to_a
+    assert_equal 1, ImportItem.purge_stale_extractions!
+    assert_nil failed.reload.barcodes
+    assert_equal qr, waiting.reload.barcodes, "items waiting for review keep theirs"
+    assert_empty ImportItem.purgeable
+  end
+
   test "purge_stale_files! deletes the files of items that failed more than 30 days ago, and nothing else" do
     failed = with_file(build(sha256: "e" * 64, status: :failed, error_message: "OCR failed"))
     recent_failure = with_file(build(sha256: "f" * 64, status: :failed))

@@ -18,6 +18,7 @@
 
 <% if @has_crew || @has_projects %>
   <%= render "dashboard/tiles", overview: @overview, review_count: @review_count %>
+  <%= render "dashboard/verification_tiles", counts: @verification_counts %>
 
   <div class="mt-6 space-y-6">
     <%= render "dashboard/upcoming", certificates: @upcoming, needed_on: @needed_on, today: @today %>

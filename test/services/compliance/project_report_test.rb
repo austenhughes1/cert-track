@@ -70,7 +70,7 @@ class Compliance::ProjectReportTest < ActiveSupport::TestCase
     assert_nil not_required.certificate, "not_required cells carry no certificate"
     assert_nil not_required.expires_on
 
-    assert_equal({ "missing" => 3, "expired" => 2, "expiring" => 2, "lapses_on_project" => 1, "valid" => 5 }, report.summary)
+    assert_equal({ "missing" => 3, "fake" => 0, "expired" => 2, "expiring" => 2, "lapses_on_project" => 1, "valid" => 5 }, report.summary)
     assert_equal %w[expired missing expired], [ ana, ben, cy ].map { |member| report.row_for(member).worst_status }
   end
 
@@ -231,12 +231,96 @@ class Compliance::ProjectReportTest < ActiveSupport::TestCase
   test "summary counts required cells by status" do
     report = Compliance::ProjectReport.new(@tower, today: @today)
 
-    assert_equal({ "missing" => 3, "expired" => 2, "expiring" => 2, "lapses_on_project" => 1, "valid" => 7 }, report.summary)
+    assert_equal({ "missing" => 3, "fake" => 0, "expired" => 2, "expiring" => 2, "lapses_on_project" => 1, "valid" => 7 }, report.summary)
     assert_equal Compliance::STATUSES, report.summary.keys
     assert_not report.compliant?
   end
 
-  test "gaps are the missing and expired cells in row then column order" do
+  # Sets a certificate's check as stored. by_person: recorded with the panel's buttons.
+  def check(name, status, by_person: false)
+    method = by_person ? Authenticity::PERSON_METHOD : "automatic:national_cpr_foundation"
+    certificates(name).update_columns(authenticity_status: Certificate.authenticity_statuses.fetch(status.to_s), authenticity_method: method)
+  end
+
+  test "a certificate a person confirmed fake is a fake gap, whatever its dates" do
+    check(:juan_osha30, :not_found, by_person: true) # never expires
+    check(:juan_flagger, :mismatch, by_person: true) # expiring
+    check(:li_first_aid, :not_found, by_person: true) # expired
+    check(:dave_osha30, :needs_check, by_person: true)
+    report = Compliance::ProjectReport.new(@tower, today: @today)
+    juan = report.row_for(crew_members(:juan_ortiz))
+
+    assert_equal %w[fake fake lapses_on_project valid], juan.cells.first(4).map(&:status)
+    assert_equal certificates(:juan_osha30), juan.cell_for(certificate_types(:osha30)).certificate
+    assert_equal certificates(:juan_flagger).expires_on, juan.cell_for(certificate_types(:flagger)).expires_on
+    assert juan.cell_for(certificate_types(:osha30)).gap?
+    assert_equal "fake", juan.worst_status
+    assert_equal "fake", report.row_for(crew_members(:li_chen)).cell_for(certificate_types(:first_aid)).status
+    assert_equal "valid", report.row_for(crew_members(:dave_miller)).cell_for(certificate_types(:osha30)).status, "needs a check still counts"
+
+    assert_equal({ "missing" => 3, "fake" => 3, "expired" => 1, "expiring" => 1, "lapses_on_project" => 1, "valid" => 6 }, report.summary)
+    assert_equal [
+      [ "Chen", "FIRSTAID", "fake" ], [ "Chen", "CLIMBER", "missing" ],
+      [ "Garcia", "FLAGGER", "missing" ], [ "Garcia", "FIRSTAID", "expired" ],
+      [ "Miller", "FIRSTAID", "missing" ],
+      [ "Ortiz", "OSHA30", "fake" ], [ "Ortiz", "FLAGGER", "fake" ]
+    ], report.gaps.map { |gap| [ gap.crew_member.last_name, gap.certificate_type.code, gap.status ] }
+    assert_equal certificates(:juan_flagger), report.gaps.last.certificate
+    assert_includes report.certificates, certificates(:juan_flagger), "fake certificates stay in the report"
+    assert_includes report.to_csv, "Ortiz,Juan,Climber,ABA Ventures,confirmed fake," \
+      "confirmed fake (#{certificates(:juan_flagger).expires_on.iso8601}),"
+  end
+
+  test "a certificate only flagged for review keeps its date status, counts and is no gap" do
+    check(:juan_osha30, :not_found)                    # never expires: an automatic check
+    certificates(:juan_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:mismatch],
+      authenticity_method: "qr_details:qr_details_360training") # expiring: a QR code's details
+    certificates(:li_first_aid).update_columns(authenticity_status: Certificate.authenticity_statuses[:suspicious],
+      authenticity_method: "qr_link") # expired: a lookalike QR code
+    check(:li_osha30, :suspicious, by_person: true)    # valid: a person never records suspicious
+    certificates(:dave_osha30).update_columns(authenticity_status: Certificate.authenticity_statuses[:not_found],
+      authenticity_method: nil)
+    report = Compliance::ProjectReport.new(@tower, today: @today)
+    juan = report.row_for(crew_members(:juan_ortiz))
+
+    assert_equal %w[valid expiring lapses_on_project valid], juan.cells.first(4).map(&:status)
+    assert_not juan.cell_for(certificate_types(:osha30)).gap?
+    assert_equal "expired", report.row_for(crew_members(:li_chen)).cell_for(certificate_types(:first_aid)).status
+    assert_equal %w[valid valid], [ report.row_for(crew_members(:li_chen)), report.row_for(crew_members(:dave_miller)) ]
+      .map { |row| row.cell_for(certificate_types(:osha30)).status }
+    assert_equal({ "missing" => 3, "fake" => 0, "expired" => 2, "expiring" => 2, "lapses_on_project" => 1, "valid" => 7 }, report.summary,
+      "the same counts as with nothing flagged")
+    assert_equal [ %w[Chen FIRSTAID expired], %w[Chen CLIMBER missing], %w[Garcia FLAGGER missing], %w[Garcia FIRSTAID expired],
+      %w[Miller FIRSTAID missing] ], report.gaps.map { |gap| [ gap.crew_member.last_name, gap.certificate_type.code, gap.status ] }
+    assert_includes report.to_csv, "Ortiz,Juan,Climber,ABA Ventures,valid,expiring (#{certificates(:juan_flagger).expires_on.iso8601}),"
+    assert_no_match(/fake|flagged|review/i, report.to_csv)
+  end
+
+  test "resolving a check clears the fake status" do
+    check(:juan_flagger, :not_found, by_person: true)
+    report = -> { Compliance::ProjectReport.new(@tower, today: @today).row_for(crew_members(:juan_ortiz)).cell_for(certificate_types(:flagger)) }
+    assert_equal "fake", report.call.status
+
+    certificates(:juan_flagger).record_authenticity!(status: :verified, method: "person", by: users(:manager))
+    assert_equal "expiring", report.call.status
+  end
+
+  test "a project whose only problem is a confirmed fake certificate isn't compliant; one flagged for review is" do
+    project = Project.create!(name: "Fake only")
+    project.project_requirements.create!(certificate_type: certificate_types(:osha30))
+    project.project_assignments.create!(crew_member: crew_members(:juan_ortiz))
+    assert Compliance::ProjectReport.new(project, today: @today).compliant?
+
+    check(:juan_osha30, :mismatch)
+    assert Compliance::ProjectReport.new(project, today: @today).compliant?, "an automatic mismatch is only flagged for review"
+
+    check(:juan_osha30, :mismatch, by_person: true)
+    report = Compliance::ProjectReport.new(project, today: @today)
+    assert_not report.compliant?
+    assert_equal [ "fake" ], report.gaps.map(&:status)
+  end
+
+  test "gaps are the missing, expired and fake cells in row then column order" do
     gaps = Compliance::ProjectReport.new(@tower, today: @today).gaps
 
     assert_equal [

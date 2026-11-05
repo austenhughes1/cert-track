@@ -281,6 +281,126 @@ class AskQueryTest < ActiveSupport::TestCase
     { q: "What is required on 2417 for Juan?", intent: :gaps, status: :list, project: :tower_2417, person: :juan_ortiz,
       answer: "Juan Ortiz has no gaps on 2417 · Tower 2417 Upgrade." },
 
+    # --- flagged for review (Phase 3b): automatic checks flagged Juan's Flagger (not found by issuer), Li's
+    # expired first aid (its QR code's details don't match) and Dave's CDL (a lookalike link). Never omit a
+    # certificate unless it is verified fake (owner, Nov 4, 2026): each still counts by its dates, and says so ---
+    { q: "Does Juan have flagger?", scenario: :flagged, intent: :check, status: :yes, person: :juan_ortiz, type: :flagger,
+      certificates: %i[juan_flagger],
+      answer: -> {
+        flagger = certificates(:juan_flagger)
+        "Yes. Juan Ortiz has Flagger, completed #{date(flagger.completed_on)}, but it expires in " \
+          "#{(flagger.expires_on - Date.current).to_i} days (#{date(flagger.expires_on)}). " \
+          "It's flagged for review (not found by issuer) but still counts until someone checks it with the issuer."
+      } },
+    { q: "Is Juan missing flagger?", scenario: :flagged, intent: :check, status: :yes, person: :juan_ortiz, type: :flagger,
+      answer: /\ANo\. Juan Ortiz has Flagger, .* It's flagged for review \(not found by issuer\) but still counts / },
+    { q: "Has Juan's flagger expired?", scenario: :flagged, intent: :check, status: :yes, person: :juan_ortiz, type: :flagger,
+      answer: /\ANo\. Juan Ortiz has Flagger, completed .*, but it expires in \d+ days \(.*\)\. It's flagged for review / },
+    { q: "Has Li Chen's first aid expired?", scenario: :flagged, intent: :check, status: :no, person: :li_chen, type: :first_aid,
+      answer: -> {
+        "Yes. Li Chen has no current First Aid/CPR/AED certificate; the last one expired " \
+          "#{date(certificates(:li_first_aid).expires_on)}. It's also flagged for review (doesn't match issuer)."
+      } },
+    { q: "When does Juan's flagger expire?", scenario: :flagged, intent: :check, status: :yes, person: :juan_ortiz, type: :flagger,
+      answer: -> {
+        flagger = certificates(:juan_flagger)
+        "Juan Ortiz's Flagger expires #{date(flagger.expires_on)} (in #{(flagger.expires_on - Date.current).to_i} days). " \
+          "It's flagged for review (not found by issuer) but still counts until someone checks it with the issuer."
+      } },
+    { q: "Does Dave have his CDL?", scenario: :flagged, intent: :check, status: :yes, person: :dave_miller, type: :cdl_a,
+      answer: /\AYes\. Dave Miller has CDL Class A, .*\. It's flagged for review \(suspicious link\) but still counts until someone checks it with the issuer\.\z/ },
+    { q: "Who has flagger?", scenario: :flagged, intent: :list_holders, status: :list, type: :flagger, members: %i[li_chen dave_miller juan_ortiz],
+      answer: /\A3 people hold a current Flagger certificate: Li Chen \(expires [^;]*\), Dave Miller \(expires [^;]*\), and Juan Ortiz \(expires in \d+ days, [^;]*; flagged for review: not found by issuer\)\. Also on file for inactive crew: Sam Price\.\z/,
+      sections: { current: 3, inactive: 1 } },
+    { q: "Who has a valid flagger card?", scenario: :flagged, intent: :list_holders, status: :list, type: :flagger,
+      members: %i[li_chen dave_miller juan_ortiz], sections: { current: 3, inactive: 1 },
+      answer: /, and Juan Ortiz \(expires in \d+ days, [^;]*; flagged for review: not found by issuer\)\./ },
+    { q: "who's got first aid", scenario: :flagged, intent: :list_holders, status: :list, type: :first_aid, members: %i[juan_ortiz],
+      answer: /\. Expired: Li Chen \([^;]*; flagged for review: doesn't match issuer\) and Mari Garcia \([^;]*\)\.\z/ },
+    { q: "Who doesn't have flagger?", scenario: :flagged, intent: :lacking, status: :list, type: :flagger, members: %i[maria_garcia],
+      certificates: [], answer: "1 active crew member doesn't hold a current Flagger certificate: Mari Garcia (none on file)." },
+    { q: "who doesn't have first aid", scenario: :flagged, intent: :lacking, status: :list, type: :first_aid,
+      members: %i[li_chen maria_garcia dave_miller],
+      answer: -> {
+        "3 active crew members don't hold a current First Aid/CPR/AED certificate: Li Chen (expired " \
+          "#{date(certificates(:li_first_aid).expires_on)}; flagged for review: doesn't match issuer), " \
+          "Mari Garcia (expired #{date(certificates(:maria_first_aid).expires_on)}), and Dave Miller (none on file)."
+      } },
+    { q: "What's missing on 2417?", scenario: :flagged, intent: :gaps, status: :list, project: :tower_2417,
+      members: %i[li_chen maria_garcia dave_miller],
+      answer: -> {
+        "2417 · Tower 2417 Upgrade has 5 gaps (2 expired, 3 missing): " \
+          "Li Chen: First Aid/CPR/AED (expired #{date(certificates(:li_first_aid).expires_on)}; flagged for review: doesn't match issuer), " \
+          "Authorized Climber (missing); Mari Garcia: Flagger (missing), First Aid/CPR/AED (expired " \
+          "#{date(certificates(:maria_first_aid).expires_on)}); Dave Miller: First Aid/CPR/AED (missing)."
+      } },
+    { q: "who needs flagger on 2417", scenario: :flagged, intent: :gaps, status: :list, type: :flagger, project: :tower_2417,
+      members: %i[maria_garcia], answer: "2417 · Tower 2417 Upgrade has 1 Flagger gap (1 missing): Mari Garcia (missing)." },
+    { q: "What's expiring?", scenario: :flagged, intent: :expiring, status: :list, certificates: %i[juan_flagger dave_cdl_a],
+      answer: -> {
+        "2 certificates expire in the next 30 days (by #{date(Date.current + 30)}): Juan Ortiz's Flagger on " \
+          "#{date(certificates(:juan_flagger).expires_on)} (flagged for review: not found by issuer) and " \
+          "Dave Miller's CDL Class A on #{date(certificates(:dave_cdl_a).expires_on)} (flagged for review: suspicious link)."
+      } },
+    { q: "Which certificates have expired?", scenario: :flagged, intent: :expired, status: :list, certificates: %i[maria_first_aid li_first_aid],
+      answer: /\A2 certificates have expired: Mari Garcia's First Aid\/CPR\/AED on [^(]* and Li Chen's First Aid\/CPR\/AED on .* \(flagged for review: doesn't match issuer\)\.\z/ },
+    { q: "What does Juan Ortiz have?", scenario: :flagged, intent: :list_certificates, status: :list, person: :juan_ortiz,
+      answer: /, Flagger \(expires in \d+ days, [^;]*; flagged for review: not found by issuer\), First Aid/ },
+
+    # --- confirmed fake (Phase 3b): a person checked with the issuer and recorded Juan's Flagger as not found
+    # and Li's expired first aid as not matching. Only these count as not valid ---
+    { q: "Does Juan have flagger?", scenario: :fake, intent: :check, status: :no, person: :juan_ortiz, type: :flagger,
+      certificates: %i[juan_flagger],
+      answer: "No. Juan Ortiz's Flagger certificate is confirmed fake (not found by issuer), so it doesn't count." },
+    { q: "Is Juan missing flagger?", scenario: :fake, intent: :check, status: :no, person: :juan_ortiz, type: :flagger,
+      answer: "Yes. Juan Ortiz's Flagger certificate is confirmed fake (not found by issuer), so it doesn't count." },
+    { q: "Has Juan's flagger expired?", scenario: :fake, intent: :check, status: :no, person: :juan_ortiz, type: :flagger,
+      answer: -> {
+        flagger = certificates(:juan_flagger)
+        "No. Juan Ortiz's Flagger expires #{date(flagger.expires_on)} (in #{(flagger.expires_on - Date.current).to_i} days), " \
+          "but it is confirmed fake (not found by issuer), so it doesn't count."
+      } },
+    { q: "Has Li Chen's first aid expired?", scenario: :fake, intent: :check, status: :no, person: :li_chen, type: :first_aid,
+      answer: -> {
+        "Yes. Li Chen's First Aid/CPR/AED expired #{date(certificates(:li_first_aid).expires_on)}, " \
+          "but it is confirmed fake (doesn't match issuer), so it doesn't count."
+      } },
+    { q: "When does Juan's flagger expire?", scenario: :fake, intent: :check, status: :no, person: :juan_ortiz, type: :flagger,
+      answer: -> {
+        flagger = certificates(:juan_flagger)
+        "Juan Ortiz's Flagger expires #{date(flagger.expires_on)} (in #{(flagger.expires_on - Date.current).to_i} days), " \
+          "but it is confirmed fake (not found by issuer), so it doesn't count."
+      } },
+    { q: "Who has flagger?", scenario: :fake, intent: :list_holders, status: :list, type: :flagger, members: %i[li_chen dave_miller],
+      answer: /\A2 people hold a current Flagger certificate: Li Chen \(expires [^;]*\) and Dave Miller \(expires [^;]*\)\. Confirmed fake, so not counted: Juan Ortiz \(not found by issuer\)\. Also on file for inactive crew: Sam Price\.\z/,
+      sections: { current: 2, fake: 1, inactive: 1 } },
+    { q: "Who doesn't have flagger?", scenario: :fake, intent: :lacking, status: :list, type: :flagger,
+      members: %i[maria_garcia juan_ortiz], certificates: %i[juan_flagger],
+      answer: "2 active crew members don't hold a current Flagger certificate: Mari Garcia (none on file) and " \
+        "Juan Ortiz (confirmed fake: not found by issuer)." },
+    { q: "What's missing on 2417?", scenario: :fake, intent: :gaps, status: :list, project: :tower_2417,
+      members: %i[li_chen maria_garcia dave_miller juan_ortiz],
+      answer: -> {
+        "2417 · Tower 2417 Upgrade has 6 gaps (2 confirmed fake, 1 expired, 3 missing): " \
+          "Li Chen: First Aid/CPR/AED (confirmed fake: doesn't match issuer), Authorized Climber (missing); " \
+          "Mari Garcia: Flagger (missing), First Aid/CPR/AED (expired #{date(certificates(:maria_first_aid).expires_on)}); " \
+          "Dave Miller: First Aid/CPR/AED (missing); Juan Ortiz: Flagger (confirmed fake: not found by issuer)."
+      } },
+    { q: "who needs flagger on 2417", scenario: :fake, intent: :gaps, status: :list, type: :flagger, project: :tower_2417,
+      members: %i[maria_garcia juan_ortiz],
+      answer: "2417 · Tower 2417 Upgrade has 2 Flagger gaps (1 confirmed fake, 1 missing): Mari Garcia (missing); " \
+        "Juan Ortiz (confirmed fake: not found by issuer)." },
+    { q: "What's expiring?", scenario: :fake, intent: :expiring, status: :list, certificates: %i[juan_flagger dave_cdl_a],
+      answer: -> {
+        "2 certificates expire in the next 30 days (by #{date(Date.current + 30)}): Juan Ortiz's Flagger on " \
+          "#{date(certificates(:juan_flagger).expires_on)} (confirmed fake: not found by issuer) and " \
+          "Dave Miller's CDL Class A on #{date(certificates(:dave_cdl_a).expires_on)}."
+      } },
+    { q: "Which certificates have expired?", scenario: :fake, intent: :expired, status: :list, certificates: %i[maria_first_aid li_first_aid],
+      answer: /and Li Chen's First Aid\/CPR\/AED on .* \(confirmed fake: doesn't match issuer\)\.\z/ },
+    { q: "What does Juan Ortiz have?", scenario: :fake, intent: :list_certificates, status: :list, person: :juan_ortiz,
+      answer: /, Flagger \(expires in \d+ days, [^;]*; confirmed fake: not found by issuer\), First Aid/ },
+
     # --- not a question we can answer ---
     { q: "asdf qwerty", intent: :unknown, status: :unknown, answer: "I'm not sure what you're asking. #{AskQuery::HELP}" },
     { q: "hello there", intent: :unknown, status: :unknown, answer: /\AI'm not sure what you're asking\./ },
@@ -444,6 +564,87 @@ class AskQueryTest < ActiveSupport::TestCase
     assert_equal "Missing or expired", gaps.title
     assert_equal [ projects(:tower_2417) ], gaps.items.map(&:project).uniq
     assert_nil result.window
+  end
+
+  test "requirements count a confirmed fake certificate as a gap and say why" do
+    scenario_fake
+
+    result = ask("What's required on 2417?")
+    flagger = result.sections.find { |section| section.key == :requirements }.items
+      .find { |requirement| requirement.certificate_type == certificate_types(:flagger) }
+    gaps = result.sections.find { |section| section.key == :gaps }
+
+    assert_equal [ 4, 2 ], [ flagger.needed, flagger.missing ]
+    assert_equal "Missing, expired or confirmed fake", gaps.title
+    assert_includes gaps.items.map(&:status), "fake"
+    assert_match(/4 of 4 assigned crew are missing at least one: /, result.answer)
+    assert_equal "2417 · Tower 2417 Upgrade requires Flagger for everyone on the crew. 2 of 4 on the crew who need it are missing it: " \
+      "Mari Garcia (missing) and Juan Ortiz (confirmed fake: not found by issuer).", ask("Is flagger required on 2417?").answer
+  end
+
+  test "requirements still count a certificate that is only flagged for review" do
+    scenario_flagged
+
+    result = ask("What's required on 2417?")
+    flagger = result.sections.find { |section| section.key == :requirements }.items
+      .find { |requirement| requirement.certificate_type == certificate_types(:flagger) }
+    gaps = result.sections.find { |section| section.key == :gaps }
+
+    assert_equal [ 4, 1 ], [ flagger.needed, flagger.missing ]
+    assert_equal "Missing or expired", gaps.title
+    assert_not_includes gaps.items.map(&:certificate), certificates(:juan_flagger)
+    assert_match(/3 of 4 assigned crew are missing at least one: Li Chen, Mari Garcia, and Dave Miller\.\z/, result.answer)
+    assert_equal "2417 · Tower 2417 Upgrade requires Flagger for everyone on the crew. 1 of 4 on the crew who need it is missing it: " \
+      "Mari Garcia (missing).", ask("Is flagger required on 2417?").answer
+    assert_match(/missing it: Li Chen \(expired [^;]*; flagged for review: doesn't match issuer\), Mari Garcia \(expired [^;]*\), and Dave Miller \(missing\)\.\z/,
+      ask("Is first aid required on 2417?").answer)
+  end
+
+  test "a confirmed fake certificate's evidence row carries the fake status" do
+    scenario_fake
+
+    item = ask("Does Juan have flagger?").evidence.sole
+    assert_equal "fake", item.status
+    assert_equal certificates(:juan_flagger), item.certificate
+    assert_equal %w[fake], ask("Who has flagger?").sections.find { |section| section.key == :fake }.items.map(&:status)
+    assert_equal "Confirmed fake", ask("Who has flagger?").sections.find { |section| section.key == :fake }.title
+  end
+
+  test "a certificate flagged for review keeps its date status as evidence, with the certificate for its marker" do
+    scenario_flagged
+
+    item = ask("Does Juan have flagger?").evidence.sole
+    assert_equal "expiring", item.status
+    assert_equal certificates(:juan_flagger), item.certificate
+    assert item.certificate.authenticity_flagged_for_review?
+
+    holders = ask("Who has flagger?")
+    current = holders.sections.find { |section| section.key == :current }
+    juan = current.items.find { |row| row.certificate == certificates(:juan_flagger) }
+    assert_equal "expiring", juan.status
+    assert_nil holders.sections.find { |section| section.key == :fake }
+  end
+
+  test "a suspicious result recorded by a person is not confirmed fake" do
+    certificates(:juan_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:suspicious],
+      authenticity_method: Authenticity::PERSON_METHOD)
+
+    result = ask("Does Juan have flagger?")
+
+    assert_equal :yes, result.status
+    assert_equal "expiring", result.evidence.sole.status
+    assert_match(/\. It's flagged for review \(suspicious link\) but still counts until someone checks it with the issuer\.\z/, result.answer)
+    assert_includes ask("Who has flagger?").crew_members, crew_members(:juan_ortiz)
+    assert_not_includes ask("Who doesn't have flagger?").crew_members, crew_members(:juan_ortiz)
+    assert_no_match(/fake/, ask("What's missing on 2417?").answer)
+  end
+
+  test "a person's verified result reads like an unchecked one" do
+    certificates(:juan_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:verified],
+      authenticity_method: Authenticity::PERSON_METHOD)
+
+    assert_no_match(/flagged|fake/, ask("Does Juan have flagger?").answer)
+    assert_no_match(/flagged|fake/, ask("Who has flagger?").answer)
   end
 
   test "a type required of everyone and of a role is required of everyone" do
@@ -681,6 +882,25 @@ class AskQueryTest < ActiveSupport::TestCase
 
     def scenario_pedro
       CrewMember.create!(first_name: "Pedro", last_name: "Ortiz", crew_role: crew_roles(:laborer))
+    end
+
+    # Automatic flags only (no method recorded, a QR code's details, a lookalike link): each still counts.
+    def scenario_flagged
+      certificates(:juan_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:not_found], authenticity_method: nil)
+      certificates(:li_first_aid).update_columns(authenticity_status: Certificate.authenticity_statuses[:mismatch],
+        authenticity_method: "automatic:qr_details_360training")
+      certificates(:dave_cdl_a).update_columns(authenticity_status: Certificate.authenticity_statuses[:suspicious],
+        authenticity_method: Verification::Run::LINK_METHOD)
+    end
+
+    # A person checked both with the issuer (the panel's "Not found" and "Doesn't match"): confirmed fake.
+    # Juan's older Flagger is deleted first: a genuine one on file would be current instead (Certificate).
+    def scenario_fake
+      certificates(:juan_flagger_old).destroy!
+      certificates(:juan_flagger).update_columns(authenticity_status: Certificate.authenticity_statuses[:not_found],
+        authenticity_method: Authenticity::PERSON_METHOD)
+      certificates(:li_first_aid).update_columns(authenticity_status: Certificate.authenticity_statuses[:mismatch],
+        authenticity_method: Authenticity::PERSON_METHOD)
     end
 
     def scenario_will_and_may

@@ -46,6 +46,107 @@ class Imports::RereadTest < ActiveSupport::TestCase
     assert item.import_batch.reload.processing?
   end
 
+  test "the issuer match, verification code and link, and the authenticity check are cleared, a person's Verified too" do
+    qr = { "page" => 1, "text" => "https://www.redcross.org/take-a-class/qrcode?certnumber=TEST123" }
+    item = review_item(matched_certificate_issuer: issuer("REDCROSS"), issuer_match: :matched,
+      issuer_suggestions: [ { "id" => issuer("REDCROSS").id, "name" => "American Red Cross", "similarity" => 1.0 } ],
+      proposed_verification_code: "TEST123", proposed_verification_url: qr["text"], barcodes: [ qr ], page_range: "1")
+    item.record_authenticity!(status: :verified, method: "person", note: "Red Cross shows the same name.",
+      details: { "issuer_status" => "Active" }, by: users(:admin))
+    photo = review_item(barcodes: [ qr ], proposed_verification_code: "TEST123")
+
+    reread(item)
+    reread(photo)
+
+    assert_equal [ nil, "unmatched", [], nil, nil ], [ item.matched_certificate_issuer, item.issuer_match, item.issuer_suggestions,
+      item.proposed_verification_code, item.proposed_verification_url ]
+    assert_equal [ "unchecked", nil, nil, nil, nil, {} ], [ item.authenticity_status, item.authenticity_checked_at,
+      item.authenticity_checked_by, item.authenticity_method, item.authenticity_note, item.authenticity_details ]
+    assert_nil item.barcodes, "a PDF's QR codes are read again with its text"
+    assert_equal [ [ qr ], nil ], [ photo.barcodes, photo.proposed_verification_code ], "an image keeps its QR codes, like its text"
+  end
+
+  test "a person's Not found or Doesn't match stays: it is still confirmed fake" do
+    item = review_item(proposed_verification_code: "TEST123", status: :rejected)
+    item.record_authenticity!(status: :mismatch, method: "person", note: "Another name on the issuer's page.", by: users(:admin))
+    checked_at = item.authenticity_checked_at
+
+    reread(item)
+
+    assert item.pending?
+    assert_nil item.proposed_verification_code
+    assert_equal [ "mismatch", "person", users(:admin), "Another name on the issuer's page." ],
+      [ item.authenticity_status, item.authenticity_method, item.authenticity_checked_by, item.authenticity_note ]
+    assert_equal checked_at, item.authenticity_checked_at
+    assert item.authenticity_confirmed_fake?
+  end
+
+  test "a re-read of an item a person confirmed fake is never auto-accepted" do
+    pages = [ certificate_lines(name: "OSHA 30-Hour Construction Industry Outreach Training", holder: "Juan A. Ortiz", completed: COMPLETED) ]
+    item = pdf_item(pages, extraction: extraction_with(certificate_entry(holder: "Juan A. Ortiz", completed: COMPLETED)))
+    perform_enqueued_jobs { Imports::ProcessExtractionJob.perform_now(item) }
+    assert item.reload.needs_review?
+    item.record_authenticity!(status: :not_found, method: "person", note: "The issuer has no such number.", by: users(:admin))
+    Imports::Reject.new(item, user: users(:manager), reason: "Made-up number").call
+
+    with_auto_accept { perform_enqueued_jobs { reread(item.reload) } }
+
+    item.reload
+    assert item.needs_review?, "kept for a person, not auto-accepted"
+    assert_nil item.certificate
+    assert_equal [ "not_found", "person", "The issuer has no such number." ],
+      [ item.authenticity_status, item.authenticity_method, item.authenticity_note ]
+    with_auto_accept do
+      assert_equal [ "Confirmed fake: not found by issuer" ], Imports::Decider.new(item).reasons, "the only thing that held it back"
+    end
+  end
+
+  # The AI read REDCROSS code read_first; a person recorded Not found for it. The item is then read
+  # again, and the AI now reads read_next.
+  def reread_with_new_code(read_first, read_next, auto_accept: false)
+    issuer("REDCROSS")
+    entry = ->(code) { certificate_entry(holder: "Juan A. Ortiz", completed: COMPLETED, issuer: "American Red Cross", issuer_code: "REDCROSS",
+      verification_code: code) }
+    pages = [ certificate_lines(name: "OSHA 30-Hour Construction Industry Outreach Training", holder: "Juan A. Ortiz", completed: COMPLETED) ]
+    item = pdf_item(pages, extraction: extraction_with(entry.call(read_first)))
+    perform_enqueued_jobs { Imports::ProcessExtractionJob.perform_now(item) }
+    assert_equal [ "needs_review", read_first ], [ item.reload.status, item.proposed_verification_code ]
+    item.record_authenticity!(status: :not_found, method: "person", note: "Red Cross has no such certificate.", by: users(:admin))
+    Ai::FakeProvider.reply_next!(extraction_with(entry.call(read_next)), times: 3)
+
+    with_auto_accept(auto_accept) { perform_enqueued_jobs { reread(item) } }
+    item.reload
+  end
+
+  test "Read again whose new reading has another code: no longer confirmed fake, and its certificate isn't either" do
+    item = reread_with_new_code("TEST123", "TEST128") # the AI misread the last digit the first time
+
+    assert_equal [ "needs_review", "TEST128" ], [ item.status, item.proposed_verification_code ]
+    assert_equal [ "needs_check", "details_changed", [ "verification code", "verification link" ] ],
+      [ item.authenticity_status, item.authenticity_method, item.authenticity_details["changed"] ], "the link is the issuer's for the code"
+    assert_equal "Red Cross has no such certificate.", item.authenticity_details["previous_note"]
+    certificate = Imports::Accept.new(item, user: users(:manager)).call
+    assert_not certificate.authenticity_confirmed_fake?, "nobody looked TEST128 up with the issuer"
+    assert_not_equal "fake", certificate.compliance_status
+  end
+
+  test "Read again whose new reading has the code the person looked up keeps it confirmed fake" do
+    item = reread_with_new_code("TEST123", "TEST123")
+
+    assert_equal [ "not_found", "person", "Red Cross has no such certificate." ],
+      [ item.authenticity_status, item.authenticity_method, item.authenticity_note ]
+  end
+
+  test "an item whose fake result a new reading reset is never auto-accepted: a person found it fake" do
+    item = reread_with_new_code("TEST123", "TEST128", auto_accept: true)
+
+    assert item.needs_review?, "kept for a person"
+    assert_nil item.certificate
+    with_auto_accept do
+      assert_includes Imports::Decider.new(item).reasons, "A person recorded it as fake before its details changed"
+    end
+  end
+
   test "an item never narrowed to pages keeps its text, so OCR doesn't run again" do
     item = review_item(extracted_text: "=== page 1 ===\nOSHA 30", status: :rejected)
 

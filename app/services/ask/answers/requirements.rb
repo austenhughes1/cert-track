@@ -19,7 +19,7 @@ module Ask
 
         sections = [
           (Section.new(key: :requirements, title: "Requirements", items: requirements) if requirements.any?),
-          (section(:gaps, items, title: "Missing or expired") if items.any?)
+          (section(:gaps, items, title: gaps_title(gaps)) if items.any?)
         ].compact
         { status: :list, answer: join(requirements_sentence(requirements), crew_sentence(report, requirements, gaps), project_note),
           crew_members: gaps.map(&:crew_member).uniq, certificates: gaps.filter_map(&:certificate), sections: sections }
@@ -84,10 +84,13 @@ module Ask
           end
         end
 
-        # "Mari Garcia (missing)", "Li Chen (expired Sep 29, 2025)"
+        # "Mari Garcia (missing)", "Li Chen (expired Sep 29, 2025)", "Juan Ortiz (confirmed fake: not found by issuer)"
         def gap_text(gap)
-          state = gap.status == "expired" ? "expired #{date(gap.certificate.expires_on)}" : "missing"
-          "#{gap.crew_member.display_name} (#{state})"
+          "#{gap.crew_member.display_name} (#{gap_state(gap)})"
+        end
+
+        def gaps_title(gaps)
+          gaps.any? { |gap| gap.status == "fake" } ? "Missing, expired or confirmed fake" : "Missing or expired"
         end
 
         def project_note

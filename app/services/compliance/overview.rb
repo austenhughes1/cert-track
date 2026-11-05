@@ -50,7 +50,7 @@ module Compliance
       end
     end
 
-    # Every missing or expired cell across the projects.
+    # Every missing, expired or confirmed fake cell across the projects.
     def gaps
       @gaps ||= reports.flat_map(&:gaps)
     end
