@@ -39,12 +39,49 @@ class Imports::DateRulesTest < ActiveSupport::TestCase
     assert_equal :none, result.expires_on_source
   end
 
-  test "no type means no expiry source" do
+  test "no type yet means the 2-year default, which the reviewer's choice of type replaces" do
     result = rules(completed_on: "2025-03-14", type: nil)
 
-    assert_nil result.expires_on
-    assert_nil result.expires_on_source
+    assert_equal Date.new(2027, 3, 14), result.expires_on
+    assert_equal :computed, result.expires_on_source
     assert_empty result.errors
+  end
+
+  test "a validity period printed on the card beats the type's" do
+    result = Imports::DateRules.new(completed_on: "2025-03-14", expires_on: nil, validity_months: 12,
+      certificate_type: certificate_types(:flagger), today: TODAY).call
+
+    assert_equal Date.new(2026, 3, 14), result.expires_on
+    assert_equal :printed_period, result.expires_on_source
+  end
+
+  test "a printed date beats a printed period" do
+    result = Imports::DateRules.new(completed_on: "2025-03-14", expires_on: "2025-09-01", validity_months: 12,
+      certificate_type: certificate_types(:flagger), today: TODAY).call
+
+    assert_equal [ Date.new(2025, 9, 1), :printed ], [ result.expires_on, result.expires_on_source ]
+  end
+
+  test "a type that never expires ignores a reported period" do
+    type = CertificateType.new(name: "OSHA 10", code: "OSHA10", validity_months: nil)
+    result = Imports::DateRules.new(completed_on: "2025-03-14", expires_on: nil, validity_months: 12, certificate_type: type, today: TODAY).call
+
+    assert_equal [ nil, :none ], [ result.expires_on, result.expires_on_source ]
+  end
+
+  test "a certificate that says no expiration has none, whatever its type's validity" do
+    result = Imports::DateRules.new(completed_on: "2025-03-14", expires_on: nil, no_expiration: true,
+      certificate_type: certificate_types(:flagger), today: TODAY).call
+
+    assert_equal [ nil, :no_expiration ], [ result.expires_on, result.expires_on_source ]
+  end
+
+  test "a printed date beats no_expiration, and an unreadable one isn't replaced by it" do
+    printed = Imports::DateRules.new(completed_on: "2025-03-14", expires_on: "2027-03-14", no_expiration: true, certificate_type: nil, today: TODAY).call
+    unreadable = Imports::DateRules.new(completed_on: "2025-03-14", expires_on: "06/2027", no_expiration: true, certificate_type: nil, today: TODAY).call
+
+    assert_equal :printed, printed.expires_on_source
+    assert_nil unreadable.expires_on_source
   end
 
   test "no completion date means nothing to compute from" do

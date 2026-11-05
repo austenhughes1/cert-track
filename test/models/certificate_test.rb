@@ -11,6 +11,48 @@ class CertificateTest < ActiveSupport::TestCase
     Certificate.create!(crew_member: member, certificate_type: type, **attrs)
   end
 
+  test "No expiration has no date, and stays through edits and a change to the type's validity" do
+    certificate = create_cert(completed_on: Date.current, no_expiration: true)
+
+    assert certificate.expiry_no_expiration?
+    assert certificate.never_expires?
+
+    certificate.update!(completed_on: Date.current - 1)
+    @flagger.update!(validity_months: 12)
+
+    assert certificate.reload.expiry_no_expiration?
+    assert_nil certificate.expires_on
+  end
+
+  test "No expiration overrides a date given with it" do
+    certificate = create_cert(completed_on: Date.current, expires_on: Date.current + 100, no_expiration: "1")
+
+    assert_nil certificate.expires_on
+    assert certificate.expiry_no_expiration?
+  end
+
+  test "unticking No expiration works the date out from the type, or keeps a typed one" do
+    certificate = create_cert(completed_on: Date.current, no_expiration: true)
+
+    certificate.update!(no_expiration: "0")
+    assert certificate.expiry_computed?
+    assert_equal @flagger.expiry_for(Date.current), certificate.expires_on
+
+    certificate.update!(no_expiration: true)
+    certificate.update!(expires_on: Date.current + 100, no_expiration: "0")
+    assert certificate.expiry_manual?
+    assert_equal Date.current + 100, certificate.expires_on
+  end
+
+  test "a date from a printed period isn't changed by the type's validity" do
+    certificate = create_cert(completed_on: Date.current, expires_on: Date.current + 365, expires_on_source: :printed_period)
+
+    @flagger.update!(validity_months: 12)
+
+    assert certificate.reload.expiry_printed_period?
+    assert_equal Date.current + 365, certificate.expires_on
+  end
+
   def current_for(member, type)
     Certificate.current.where(crew_member: member, certificate_type: type).sole
   end

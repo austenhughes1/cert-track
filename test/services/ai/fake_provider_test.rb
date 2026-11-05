@@ -31,7 +31,7 @@ class Ai::FakeProviderTest < ActiveSupport::TestCase
         "certificate_name_as_printed" => "OSHA 30-Hour Construction Industry Outreach Training",
         "issuer" => "Example Safety Training LLC", "certificate_issuer_code" => nil, "certificate_number" => "30-1234567",
         "verification_code" => nil, "verification_url" => nil,
-        "completed_on" => "2025-03-14", "expires_on" => nil, "confidence" => 0.95,
+        "completed_on" => "2025-03-14", "expires_on" => nil, "validity_months" => nil, "no_expiration" => false, "confidence" => 0.95,
         "notes" => "No expiration printed", "pages" => [ 1 ]
       } ],
       "non_certificate_pages" => []

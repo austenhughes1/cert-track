@@ -49,7 +49,7 @@ How to fill it in:
 - **`holder_name`**: the name as printed. Case, punctuation and middle initials don't matter: "ORTIZ, JUAN A." matches "Juan Ortiz".
 - **`certificate_type_code`**: the code from your master list, or `null` if the certificate isn't on it. The eval matches against the master list in your **development** database, so make sure it has the same codes as production. To list them, run `bin/rails runner 'CertificateType.active.ordered.each { |t| puts "#{t.code}  #{t.name}" }'`.
 - **`completed_on`**: the completion or issue date, as `YYYY-MM-DD`.
-- **`expires_on`**: only an expiry date that is printed on the certificate, else `null`. Don't calculate one.
+- **`expires_on`**: the expiry date printed on the certificate. If none is printed but a validity period is ("valid for 2 years"), `completed_on` plus that period. If neither is printed, `completed_on` plus 2 years. OSHA 10 and 30 never expire, so they stay `null` unless a date is printed; so does a certificate that explicitly says it has no expiration (owner's rule, Nov 5, 2026). The model reports only a printed date and any stated period (`validity_months`); the score compares the expiry the pipeline works out from them.
 - **`certificate_number`**: as printed, or `null`. This field is reported but doesn't count toward the bar.
 - **`non_certificate_pages`**: pages that aren't certificates, such as cover sheets, course outlines and blank backs.
 - `certificate_name_as_printed`, `issuer`, `confidence` and `notes` aren't scored. Fill them in or leave them `null`.

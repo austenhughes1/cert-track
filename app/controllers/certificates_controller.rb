@@ -116,7 +116,7 @@ class CertificatesController < ApplicationController
     end
 
     def certificate_params
-      params.expect(certificate: [ :certificate_type_id, :certificate_number, :issued_by, :completed_on, :expires_on, :notes,
+      params.expect(certificate: [ :certificate_type_id, :certificate_number, :issued_by, :completed_on, :expires_on, :no_expiration, :notes,
         :certificate_issuer_id, :other_issuer_name, :verification_code, :verification_url, files: [] ])
     end
 

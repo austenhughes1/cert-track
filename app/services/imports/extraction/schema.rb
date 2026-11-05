@@ -26,11 +26,13 @@ module Imports
           verification_url: NULLABLE_STRING,
           completed_on: { type: %w[string null], description: "YYYY-MM-DD" },
           expires_on: { type: %w[string null], description: "YYYY-MM-DD, printed expiration only" },
+          validity_months: { type: %w[integer null], description: "a validity period the certificate states, in months" },
+          no_expiration: { type: "boolean", description: "true only when the certificate explicitly says it does not expire" },
           confidence: { type: "number" },
           notes: NULLABLE_STRING
         },
         required: %w[pages holder_name certificate_type_code certificate_name_as_printed issuer certificate_issuer_code
-          certificate_number verification_code verification_url completed_on expires_on confidence notes],
+          certificate_number verification_code verification_url completed_on expires_on validity_months no_expiration confidence notes],
         additionalProperties: false
       }.freeze
 
@@ -54,7 +56,7 @@ module Imports
           certificate_name_as_printed: "OSHA 30-Hour Construction Industry Outreach Training",
           issuer: "Example Safety Training LLC", certificate_issuer_code: nil, certificate_number: "30-1234567",
           verification_code: "30-1234567", verification_url: "examplesafety.com/verify",
-          completed_on: "2025-03-14", expires_on: nil, confidence: 0.92, notes: "No expiration printed"
+          completed_on: "2025-03-14", expires_on: nil, validity_months: nil, no_expiration: false, confidence: 0.92, notes: "No expiration printed"
         } ],
         non_certificate_pages: []
       }.to_json.freeze

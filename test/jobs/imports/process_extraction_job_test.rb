@@ -270,25 +270,48 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
     assert_empty Certificate.where(import_item_id: item.id)
   end
 
-  test "a card that says it never expires is not an unreadable expiry: the type's rule applies" do
+  test "a card that says it never expires has no expiration, and isn't an unreadable expiry" do
     item = image_item(extraction: normalized(ortiz_osha(expires: "Does not expire")))
 
     process(item)
 
     assert item.needs_review?
-    assert item.proposed_expiry_none?, "OSHA 30 never expires"
+    assert item.proposed_expiry_no_expiration?
     assert_nil item.error_message
     assert_nil item.unreadable_expires_on
     certificate = Imports::Accept.new(item, user: users(:manager), attributes: { expires_on: "" }).call # left blank on the form
-    assert certificate.expiry_none?
+    assert certificate.expiry_no_expiration?
     assert_nil certificate.expires_on
 
     lifetime = image_item(filename: "flagger.jpg", sha256: SecureRandom.hex(32),
       extraction: normalized(ortiz_osha(code: "FLAGGER", name: "Flagger Certification", expires: "Lifetime")))
     with_auto_accept { process(lifetime) }
     assert lifetime.accepted?, lifetime.error_message
-    assert lifetime.certificate.expiry_computed?, "no date on the card: Flagger's 36 months apply"
-    assert_equal Date.parse(COMPLETED) >> 36, lifetime.certificate.expires_on
+    assert lifetime.certificate.expiry_no_expiration?, "the card says so, whatever Flagger's 36 months say"
+    assert_nil lifetime.certificate.expires_on
+  end
+
+  test "expiry rule: a printed period, the type's validity, the 2-year default, and OSHA's none" do
+    entry = ->(**overrides) { ortiz_osha(code: "FLAGGER", name: "Flagger Certification", **overrides) }
+    propose = lambda do |certificate, sha|
+      process(image_item(filename: "#{sha}.jpg", sha256: SecureRandom.hex(32), extraction: normalized(certificate)))
+    end
+
+    period = propose.call(entry.call.merge("validity_months" => 12), "period")
+    assert period.proposed_expiry_printed_period?
+    assert_equal Date.parse(COMPLETED) >> 12, period.proposed_expires_on
+
+    from_type = propose.call(entry.call, "type")
+    assert from_type.proposed_expiry_computed?
+    assert_equal Date.parse(COMPLETED) >> 36, from_type.proposed_expires_on
+
+    no_type = propose.call(ortiz_osha(code: nil, name: "Bloodborne Pathogens Training"), "unlisted")
+    assert no_type.proposed_expiry_computed?
+    assert_equal Date.parse(COMPLETED) >> 24, no_type.proposed_expires_on
+
+    osha = propose.call(ortiz_osha, "osha")
+    assert osha.proposed_expiry_none?
+    assert_nil osha.proposed_expires_on
   end
 
   test "an unreadable completion date is reported for review" do

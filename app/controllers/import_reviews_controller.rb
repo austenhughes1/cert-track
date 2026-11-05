@@ -13,7 +13,7 @@ class ImportReviewsController < ApplicationController
   require_role :editor
 
   INDEX_LIMIT = 200
-  REVIEW_FIELDS = %i[crew_member_id certificate_type_id completed_on expires_on certificate_number issued_by
+  REVIEW_FIELDS = %i[crew_member_id certificate_type_id completed_on expires_on no_expiration certificate_number issued_by
     certificate_issuer_id other_issuer_name verification_code verification_url].freeze
   # Saved edits to these re-run the item's authenticity check (Verification::Run compares them).
   VERIFICATION_ATTRIBUTES = %w[matched_certificate_issuer_id issuer_match proposed_verification_code proposed_verification_url
@@ -262,6 +262,7 @@ class ImportReviewsController < ApplicationController
         certificate_type_id: @item.matched_certificate_type_id,
         completed_on: @item.proposed_completed_on&.iso8601,
         expires_on: (@item.proposed_expires_on.iso8601 if given),
+        no_expiration: @item.proposed_expiry_no_expiration?,
         certificate_number: @item.proposed_certificate_number,
         issued_by: @item.issuer_raw,
         certificate_issuer_id: @item.matched_certificate_issuer_id,
@@ -288,7 +289,9 @@ class ImportReviewsController < ApplicationController
     def save_edits
       member = CrewMember.find_by(id: @fields.crew_member_id.presence)
       type = CertificateType.find_by(id: @fields.certificate_type_id.presence)
-      dates = Imports::DateRules.new(completed_on: @fields.completed_on, expires_on: @fields.expires_on, certificate_type: type).call
+      no_expiration = ActiveModel::Type::Boolean.new.cast(@fields.no_expiration)
+      dates = Imports::DateRules.new(completed_on: @fields.completed_on, expires_on: (@fields.expires_on unless no_expiration),
+        no_expiration: no_expiration, certificate_type: type).call
       problems = dates.errors + issuer_problems
       return problems if problems.any?
 
@@ -380,12 +383,14 @@ class ImportReviewsController < ApplicationController
       Verification::CheckJob.perform_later(@item) if VERIFICATION_ATTRIBUTES.any? { @item.saved_change_to_attribute?(it) }
     end
 
-    # DateRules calls any expiry it is given printed. It stays printed only when it is the
-    # date the AI read off the card; any other date is one the reviewer typed: manual.
+    # DateRules calls any expiry it is given printed. It keeps the item's source (printed, or
+    # worked out from a printed period) only when it is that same date; any other date is one
+    # the reviewer typed: manual.
     def saved_expiry_source(dates)
       return dates.expires_on_source unless dates.expires_on_source == :printed
+      return :manual unless dates.expires_on == @item.proposed_expires_on
 
-      @item.proposed_expiry_printed? && dates.expires_on == @item.proposed_expires_on ? :printed : :manual
+      @item.proposed_expiry_printed? || @item.proposed_expiry_printed_period? ? @item.proposed_expires_on_source.to_sym : :manual
     end
 
     # Only items the screen offered (and that still match) are merged.

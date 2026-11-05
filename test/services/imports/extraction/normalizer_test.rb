@@ -11,7 +11,7 @@ class Imports::Extraction::NormalizerTest < ActiveSupport::TestCase
         "pages" => [ 1 ], "holder_name" => "Juan A. Ortiz", "certificate_type_code" => "OSHA30",
         "certificate_name_as_printed" => "OSHA 30-Hour Construction", "issuer" => "Example Safety Training LLC",
         "certificate_issuer_code" => nil, "certificate_number" => "30-1234567", "verification_code" => nil,
-        "verification_url" => nil, "completed_on" => "2025-03-14", "expires_on" => nil,
+        "verification_url" => nil, "completed_on" => "2025-03-14", "expires_on" => nil, "validity_months" => nil, "no_expiration" => false,
         "confidence" => 0.92, "notes" => "No expiration printed"
       } ],
       "non_certificate_pages" => [ 2 ]
@@ -66,7 +66,23 @@ class Imports::Extraction::NormalizerTest < ActiveSupport::TestCase
       assert_nil entry["expires_on"], wording
       assert_not entry.key?("unreadable"), "#{wording.inspect} is not an unreadable date"
       assert_equal "No expiry date printed (the card says #{wording.inspect}).", entry["notes"]
+      assert_equal !wording.match?(/N\/A|Not applicable/), entry["no_expiration"], wording
     end
+  end
+
+  test "no_expiration needs an explicit statement, and a read date beats it" do
+    read = ->(attrs) { normalize({ "certificates" => [ certificate(**attrs) ] })["certificates"].sole }
+
+    assert_equal false, read.call("expires_on" => nil)["no_expiration"]
+    assert_equal true, read.call("expires_on" => nil, "no_expiration" => true)["no_expiration"]
+    assert_equal false, read.call("expires_on" => "2027-03-14", "no_expiration" => true)["no_expiration"]
+  end
+
+  test "validity_months is a whole number of months in a sane range" do
+    read = ->(value) { normalize({ "certificates" => [ certificate("validity_months" => value) ] })["certificates"].sole["validity_months"] }
+
+    assert_equal [ 24, 12, 24, 24, 24 ], [ 24, 12.0, "24", "24 months", "2 years" ].map(&read)
+    assert_equal [ nil, nil, nil, nil, nil ], [ nil, 0, 1.5, "soon", 500 ].map(&read)
   end
 
   test "only a whole no-expiry wording counts, and only for the expiry" do

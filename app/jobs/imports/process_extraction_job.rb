@@ -112,7 +112,7 @@ module Imports
         type = Imports::TypeMatcher.new(code: certificate["certificate_type_code"], name_as_printed: certificate["certificate_name_as_printed"]).call
         person = Imports::PersonMatcher.new(certificate["holder_name"]).call
         dates = Imports::DateRules.new(completed_on: date(certificate, "completed_on"), expires_on: date(certificate, "expires_on"),
-          certificate_type: type.type).call
+          validity_months: certificate["validity_months"], no_expiration: certificate["no_expiration"], certificate_type: type.type).call
 
         item.update!(
           **issuer_proposal(item, certificate),

@@ -69,6 +69,11 @@
           The current date was computed, so it follows changes to the completed date or type.
         <% end %>
       </p>
+      <div class="mt-2 flex items-center gap-2">
+        <%= form.check_box :no_expiration, class: "rounded border-gray-300" %>
+        <%= form.label :no_expiration, "No expiration", class: "text-sm text-gray-700" %>
+      </div>
+      <p class="mt-1 text-xs text-gray-500" id="no_expiration_hint">Only if the certificate says it has no expiration. This overrides a date above.</p>
     </div>
   </div>
 

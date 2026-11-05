@@ -5,6 +5,14 @@ class CertificateTypesControllerTest < ActionDispatch::IntegrationTest
 
   # --- Access ---
 
+  test "a new type starts at the 2-year default; blanking it is how a type never expires" do
+    sign_in_as users(:admin)
+
+    get new_certificate_type_path
+
+    assert_select "input[name=?][value='24']", "certificate_type[validity_months]"
+  end
+
   test "anonymous users are sent to sign in" do
     get certificate_types_path
     assert_redirected_to new_session_path

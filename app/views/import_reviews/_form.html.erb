@@ -69,7 +69,7 @@
         <%= form.label :expires_on, class: "block text-sm font-medium text-gray-700" do %>
           Expires on<% if unreadable_expiry %> <span class="text-red-700">(required)</span><% end %>
         <% end %>
-        <%= form.date_field :expires_on, required: unreadable_expiry.present?, class: expiry_class,
+        <%= form.date_field :expires_on, class: expiry_class,
               aria: { describedby: unreadable_expiry ? "review_expires_on_unreadable" : "review_expires_on_hint", invalid: ("true" if expiry_missing) } %>
       </div>
     </div>
@@ -84,6 +84,13 @@
         Use the date printed on the card. Leave it blank to work it out from the type<span data-review-expiry-target="rule"><%= import_expiry_rule(selected_type, completed_on) %></span>
       </p>
     <% end %>
+    <div class="-mt-2">
+      <div class="flex items-center gap-2">
+        <%= form.check_box :no_expiration, class: "rounded border-gray-300" %>
+        <%= form.label :no_expiration, "No expiration", class: "text-sm text-gray-700" %>
+      </div>
+      <p class="mt-1 text-xs text-gray-500" id="review_no_expiration_hint">Only if the certificate says it has no expiration. This overrides a date above.</p>
+    </div>
 
     <div class="grid gap-4 sm:grid-cols-2">
       <div>

@@ -7,9 +7,13 @@ module Imports
   #   result.expires_on_source # => :computed
   #   result.errors            # => []
   #
-  # Dates are ISO YYYY-MM-DD strings (or Date objects). A printed expiry wins (:printed).
-  # Without one, the type's validity gives a :computed date, or :none when the type never
-  # expires; with no type (or no completion date to count from) the source is nil.
+  # Dates are ISO YYYY-MM-DD strings (or Date objects). In order (owner's rule, Nov 5, 2026):
+  # a printed expiry wins (:printed); a certificate that explicitly says it has no expiration
+  # (no_expiration:) gives :no_expiration; a type that never expires gives :none (OSHA 10 and 30,
+  # even if the model reports a validity period); a validity period printed on the card
+  # (validity_months:) gives :printed_period; then the type's validity gives :computed; with no
+  # type yet, CertificateType::DEFAULT_VALIDITY_MONTHS does (:computed, so the review form works
+  # it out again from the type the reviewer picks). With no completion date to count from, nil.
   # Problems never raise: they are listed in errors (plain sentences for the review screen)
   # so the item goes to review. A completion date in the future, or an expiry before the
   # completion date, is kept so the reviewer can see and fix it. A date that can't be read
@@ -23,10 +27,12 @@ module Imports
 
     ISO_DATE = /\A(\d{4})-(\d{1,2})-(\d{1,2})\z/
 
-    def initialize(completed_on:, expires_on:, certificate_type:, today: Date.current)
+    def initialize(completed_on:, expires_on:, certificate_type:, validity_months: nil, no_expiration: false, today: Date.current)
       @raw_completed_on = completed_on
       @raw_expires_on = expires_on
       @certificate_type = certificate_type
+      @validity_months = validity_months
+      @no_expiration = no_expiration
       @today = today
     end
 
@@ -52,11 +58,14 @@ module Imports
     private
       def expiry(completed_on, printed_expiry, expiry_unreadable)
         return [ printed_expiry, :printed ] if printed_expiry
-        return [ nil, nil ] if expiry_unreadable || @certificate_type.nil?
-        return [ nil, :none ] if @certificate_type.never_expires?
+        return [ nil, nil ] if expiry_unreadable
+        return [ nil, :no_expiration ] if @no_expiration
+        return [ nil, :none ] if @certificate_type&.never_expires?
         return [ nil, nil ] if completed_on.nil?
+        return [ completed_on.advance(months: @validity_months), :printed_period ] if @validity_months
 
-        [ @certificate_type.expiry_for(completed_on), :computed ]
+        months = @certificate_type&.validity_months || CertificateType::DEFAULT_VALIDITY_MONTHS
+        [ completed_on.advance(months: months), :computed ]
       end
 
       def parse(value, label, errors)

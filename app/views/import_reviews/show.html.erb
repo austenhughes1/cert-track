@@ -71,8 +71,10 @@
             <dt class="<%= label_class %>">Expiry</dt>
             <dd class="mt-0.5 text-gray-700">
               <% if @item.proposed_expiry_printed? %>Printed on the card
+              <% elsif @item.proposed_expiry_printed_period? %>Worked out from the validity printed on the card
               <% elsif @item.proposed_expiry_computed? %>Not printed; computed
               <% elsif @item.proposed_expiry_none? %>Type never expires
+              <% elsif @item.proposed_expiry_no_expiration? %>The card says no expiration
               <% elsif @item.proposed_expiry_manual? %>Typed in by a reviewer
               <% else %><%= dash %><% end %>
             </dd>

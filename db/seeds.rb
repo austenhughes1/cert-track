@@ -1,8 +1,8 @@
 # Idempotent: safe to run repeatedly (bin/rails db:seed). Existing rows are left as the
 # owner edited them; only missing ones are created.
 
-# Example master list (docs/PLAN.md). The owner edits the real list; validity_months stays
-# nil so nothing is computed until the owner sets it.
+# Example master list (docs/PLAN.md). The owner edits the real list. Every type lasts 2 years
+# until the owner changes it, except OSHA 10 and 30, which never expire (owner's rule, Nov 5, 2026).
 MASTER_LIST = [
   [ "OSHA10", "OSHA 10 Construction", "OSHA Outreach Training Program", [ "OSHA 10-Hour Construction Industry Outreach Training", "OSHA 10 Hour" ] ],
   [ "OSHA30", "OSHA 30 Construction", "OSHA Outreach Training Program", [ "OSHA 30-Hour Construction Industry Outreach Training", "OSHA 30 Hour" ] ],
@@ -27,6 +27,7 @@ MASTER_LIST.each.with_index(1) do |(code, name, issuing_body, aliases), position
     type.issuing_body = issuing_body
     type.aliases = aliases
     type.position = position
+    type.validity_months = CertificateType::DEFAULT_VALIDITY_MONTHS unless %w[OSHA10 OSHA30].include?(code)
   end
 end
 

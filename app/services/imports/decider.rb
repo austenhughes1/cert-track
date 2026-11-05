@@ -52,7 +52,7 @@ module Imports
       end
 
       def expiry_known?
-        item.proposed_expires_on.present? || (type_matched? && item.matched_certificate_type.never_expires?)
+        item.proposed_expires_on.present? || item.proposed_expiry_no_expiration? || (type_matched? && item.matched_certificate_type.never_expires?)
       end
 
       def confident?

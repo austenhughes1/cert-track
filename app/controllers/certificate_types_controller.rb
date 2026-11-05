@@ -30,7 +30,7 @@ class CertificateTypesController < ApplicationController
   end
 
   def new
-    @certificate_type = CertificateType.new
+    @certificate_type = CertificateType.new(validity_months: CertificateType::DEFAULT_VALIDITY_MONTHS)
   end
 
   def create

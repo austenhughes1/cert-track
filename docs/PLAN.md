@@ -183,7 +183,7 @@ certificates          # one line item per earned certificate
   issued_by      string   # trainer or provider
   completed_on   date
   expires_on     date     nullable
-  expires_on_source integer enum printed | computed | manual | none
+  expires_on_source integer enum printed | computed | manual | none | printed_period | no_expiration
   source         integer  enum manual | import
   import_item_id ref      nullable
   verified_by_id ref users nullable
@@ -269,7 +269,7 @@ ai_usage_days
 
 **Rules the models must enforce**
 
-- **Expiration date.** Use the printed date when the card has one (`printed`). Otherwise compute `completed_on + validity_months` (`computed`). If the type never expires, leave it null (`none`).
+- **Expiration date (owner's rule, Nov 5, 2026).** Use the printed date when the card has one (`printed`). "No expiration" (`no_expiration`) is assigned only when the certificate explicitly says it has none, read by the model or ticked by a person; a missing date never means that. Otherwise, if the type never expires, leave it null (`none`): a blank validity means this, and OSHA 10 and 30 are the only default types that never expire. Otherwise, if the card states a validity period, use `completed_on` plus that period (`printed_period`). Otherwise use `completed_on` plus the type's `validity_months` (`computed`). Every other default type and every new type starts at 24 months, and an import with no type yet is proposed 24 months until a reviewer picks one.
 - **Current certificate.** For a crew member and type, the current certificate is the one with `superseded_at` null. Saving a newer certificate of the same type sets `superseded_at` on the older one. History is kept, never deleted. A certificate a person confirmed fake (Phase 3b) ranks below every other one, so a genuine card on file stays current when a newer one turns out fake; recording or replacing that result re-ranks them.
 - **Required types for a person on a project.** All `project_requirements` for that project where `crew_role_id` is null or equals the assignment's role (falling back to the member's role).
 - **Compliance status per required type**, with `today` in America/Denver:
@@ -331,7 +331,7 @@ Free local OCR reads every file first. A free model then turns the text into JSO
 6. **Match type (Ruby).** Accept `certificate_type_code` only if it exists in the master list. Otherwise fuzzy-match `certificate_name_as_printed` against names and aliases with `pg_trgm`; similarity of 0.45 or more is a suggestion, not a match.
 6b. **Match issuer and verification fields (Ruby, Phase 3b).** In order: a QR code or printed link on the certificate's pages whose host is on an active issuer's `domains` is a match; else `certificate_issuer_code` naming an active issuer is a match; else `issuer` is fuzzy-matched against issuer names and aliases (0.45 or more is a suggestion). `verification_url` is the QR link on the issuer's domain, else the printed URL (normalized to `https://`), else the issuer's `link_template` with the code. A printed URL on another site than the matched issuer's gives way to the issuer's own `link_template` link, unless it imitates an issuer's site (then it is kept, so authenticity rule 1 flags it). When the certificate's pages carry several of the issuer's QR links (one page or photo with several people's cards), the one whose id is the model's verification code or certificate number is used, else the one naming the holder's last name (360training), else none. `verification_code` is the model's, else the id read from the QR link's query (`certnumber`, `certificate_id`, `enrollmentId`, `cid`, `code`, `id`).
 7. **Match person (Ruby).** Normalize the holder name and compare against crew full names and `name_aliases` with `pg_trgm`. An exact normalized match is a match. Otherwise the best candidate at 0.6 or more, beating the runner-up by at least 0.15, becomes a suggestion. No candidate means review offers "create crew member".
-8. **Dates.** Parse ISO dates. Reject `completed_on` in the future and `expires_on` before `completed_on`. If `expires_on` is null and the type has `validity_months`, compute it and mark `computed`.
+8. **Dates.** Parse ISO dates. Reject `completed_on` in the future and `expires_on` before `completed_on`. If `expires_on` is null, apply the expiration date rule in order: the model's `no_expiration` (`no_expiration`), a type that never expires, the model's `validity_months` (`printed_period`), then the type's validity or 24 months (`computed`). The model never does the date math.
 9. **Decide.** Auto-accept only when all hold: type matched by code, person matched exactly, `completed_on` present, expiry present or type never expires, model confidence 0.85 or more, authenticity not flagged (Phase 3b; a flag only for review blocks it too), and `AUTO_ACCEPT_ENABLED` is on. Before deciding, `Verification::Run` checks the item's authenticity with local rules (see Phase 3b). An item whose issuer's site will be asked (an automatic check, run after the pipeline's transaction) is not auto-accepted: it waits for review, so a "not found" or "doesn't match" is never found after the fact. Everything else goes to `needs_review`. Ship with `AUTO_ACCEPT_ENABLED=false` until the owner has reviewed about 100 items and trusts the output.
 10. **Review queue.** File preview on the left, editable proposed fields on the right: person picker showing suggestions, type picker, dates, number. Actions are Accept, Reject, Skip and "Create crew member from this", with keyboard shortcuts (`a`, `r`, `s`). HEIC/HEIF photos are previewed as a JPEG (2000 px max, quality 80). Accepting creates the `Certificate`, moves the file to it (the import item no longer links to it, and import pages link to the certificate instead) and sets `verified_by`. If two items share person, type and number (front and back photos of one card), offer to merge them into one certificate with two files.
 11. **Finish.** When every item is terminal, set the batch status and email the uploader a summary: accepted, needs review, duplicates, failed.
@@ -353,6 +353,8 @@ Free local OCR reads every file first. A free model then turns the text into JSO
       "verification_url": "examplesafety.com/verify",
       "completed_on": "2025-03-14",
       "expires_on": null,
+      "validity_months": null,
+      "no_expiration": false,
       "confidence": 0.92,
       "notes": "No expiration printed"
     }

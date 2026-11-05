@@ -44,6 +44,7 @@ module Ai
       "certificate_number" => /\Acertificate\s+no\.?\s*:\s*(.*)\z/i,
       "completed_on" => /\Acompleted\s*:\s*(.*)\z/i,
       "expires_on" => /\Aexpires\s*:\s*(.*)\z/i,
+      "validity_months" => /\Avalid\s+for\s+(\d+)\s+years?\z/i,
       "issuer" => /\Aissued\s+by\s*:\s*(.*)\z/i,
       "verification_code" => /\Averification\s+code\s*:\s*(.*)\z/i,
       "verification_url" => /\Averify\s+at\s*:\s*(.*)\z/i
@@ -175,6 +176,8 @@ module Ai
           "verification_url" => fields["verification_url"],
           "completed_on" => completed_on,
           "expires_on" => expires_on,
+          "validity_months" => fields["validity_months"]&.to_i&.*(12),
+          "no_expiration" => fields["expires_on"].to_s.match?(/\A(?:never|no expiration)/i),
           "confidence" => fields["holder_name"] && name && completed_on ? 0.95 : 0.6,
           "notes" => expires_on ? nil : "No expiration printed"
         }

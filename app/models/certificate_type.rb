@@ -1,6 +1,9 @@
 # The master list of certificate types.
 class CertificateType < ApplicationRecord
   FUZZY_THRESHOLD = 0.45
+  # Owner's rule, Nov 5, 2026: a certificate that states no expiry or validity lasts 2 years. New
+  # types start with this; a blank validity means the type never expires (OSHA 10 and 30).
+  DEFAULT_VALIDITY_MONTHS = 24
 
   has_many :certificates, dependent: :restrict_with_error
   has_many :project_requirements, dependent: :restrict_with_error
@@ -66,8 +69,7 @@ class CertificateType < ApplicationRecord
   end
 
   private
-    # Seeded types start with no validity, so certificates entered before the owner sets it
-    # are "never expires". Setting or changing validity re-derives those and every computed
+    # Setting or changing validity re-derives certificates that never expired and every computed
     # date, current and history alike (see Certificate#rederive_expiry!). Runs inside the
     # type's save transaction, so the type and its certificates change together.
     def rederive_certificate_expiries

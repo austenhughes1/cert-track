@@ -33,7 +33,8 @@ module Imports
   # Verification::CheckJob checks the certificate again after the accept commits. So an issuer's
   # "Verified" for the printed name can't carry over to a certificate for someone else.
   #
-  # Expiry: a printed proposal is kept as printed. A computed or missing one is left for the
+  # Expiry: "No expiration" (the reviewer's tick, else the card said so) is kept whatever the type
+  # says. A printed proposal, or one from a period printed on the card, keeps its source. A computed or missing one is left for the
   # Certificate model to derive from the final type and completion date (computed, or none
   # when the type never expires). A proposal a reviewer typed and saved ("Save edits",
   # source manual; older items saved it with no source) is manual. An overridden date is
@@ -75,7 +76,7 @@ module Imports
     # The item's status doesn't allow this review action. errors are on the item.
     class NotReviewable < ActiveRecord::RecordInvalid; end
 
-    OVERRIDABLE_ATTRIBUTES = %i[crew_member_id certificate_type_id completed_on expires_on certificate_number issued_by notes
+    OVERRIDABLE_ATTRIBUTES = %i[crew_member_id certificate_type_id completed_on expires_on no_expiration certificate_number issued_by notes
       certificate_issuer_id verification_code verification_url].freeze
     # Least to most conclusive, for picking a merged certificate's authenticity check.
     AUTHENTICITY_RANK = %w[unchecked cannot_verify needs_check verified].freeze
@@ -228,13 +229,16 @@ module Imports
 
         checked = [ (source.matched_certificate_issuer_id if source.issuer_matched?), source.proposed_verification_code,
           source.proposed_verification_url, (source.matched_crew_member_id if source.person_matched? || source.person_picked?),
-          source.proposed_completed_on, (source.proposed_expires_on unless source.proposed_expiry_computed? || source.proposed_expiry_none?) ]
+          source.proposed_completed_on, (source.proposed_expires_on unless source.proposed_expiry_computed? || source.proposed_expiry_none? || source.proposed_expiry_printed_period?) ]
         now = [ certificate.certificate_issuer_id, certificate.verification_code, certificate.verification_url, certificate.crew_member_id,
-          certificate.completed_on, (certificate.expires_on unless certificate.expiry_computed? || certificate.expiry_none?) ]
+          certificate.completed_on, (certificate.expires_on unless certificate.expiry_computed? || certificate.expiry_none? || certificate.expiry_printed_period?) ]
         now != checked
       end
 
       def assign_expiry(certificate)
+        no_expiration = @attributes.key?(:no_expiration) ? ActiveModel::Type::Boolean.new.cast(@attributes[:no_expiration]) : item.proposed_expiry_no_expiration?
+        return certificate.no_expiration = true if no_expiration
+
         proposed = item.proposed_expires_on
         date = @attributes.key?(:expires_on) ? ActiveModel::Type::Date.new.cast(@attributes[:expires_on].presence) : proposed
         overridden = @attributes.key?(:expires_on) && date != proposed
@@ -243,7 +247,7 @@ module Imports
           certificate.expires_on = nil # the model derives it: computed, or none
         else
           certificate.expires_on = date
-          certificate.expires_on_source = !overridden && item.proposed_expiry_printed? ? :printed : :manual
+          certificate.expires_on_source = !overridden && (item.proposed_expiry_printed? || item.proposed_expiry_printed_period?) ? item.proposed_expires_on_source : :manual
         end
       end
 
@@ -251,7 +255,7 @@ module Imports
       # expiry: the reviewer must type it. Raises RecordInvalid with the message on base,
       # alongside any other errors the certificate has.
       def refuse_unread_expiry!(certificate)
-        return if certificate.expires_on.present? # printed and read, or typed by the reviewer
+        return if certificate.expires_on.present? || certificate.expiry_no_expiration? # read, or the reviewer decided
 
         text = all_items.lazy.filter_map(&:unreadable_expires_on).first
         return unless text

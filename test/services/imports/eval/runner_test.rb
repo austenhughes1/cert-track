@@ -24,6 +24,19 @@ class Imports::Eval::RunnerTest < ActiveSupport::TestCase
     end
   end
 
+  test "the expiry is scored as the pipeline would propose it, not as the model returned it" do
+    with_samples_dir do |dir|
+      page = { name: "Flagger Certification" }
+      expected = expected_for([ page ])
+      expected["certificates"].sole["expires_on"] = Date.parse(expected["certificates"].sole["completed_on"]).advance(months: 36).iso8601
+      write_sample(dir, "computed", page, expected: expected)
+
+      score = Imports::Eval::Runner.new(dir: dir, provider: "fake").call.rows.sole.score
+
+      assert score.correct?("expires_on"), score.mismatches.inspect
+    end
+  end
+
   test "a wrong answer pulls a field below the 90% bar, and the table says where" do
     with_samples_dir do |dir|
       expected = expected_for([ {} ])

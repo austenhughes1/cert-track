@@ -10,8 +10,9 @@ module Imports
     #     is only there when a date was dropped), so the pipeline can tell "not printed" from
     #     "printed but unreadable" and never computes an expiry in place of a printed one. An
     #     expiry that says there is none ("Never", "Does not expire", "Lifetime": NO_EXPIRY) is
-    #     not printed: null with a note, not unreadable, so the type's rule gives the expiry
-    #     (computed, or none when the type never expires) and the reviewer needn't make one up
+    #     not printed: null with a note, not unreadable. It sets no_expiration, as does the model's
+    #     own no_expiration: true, unless it only says "N/A" (the type's rule then gives the
+    #     expiry) or a date was read. Only an explicit statement counts (owner's rule, Nov 5, 2026)
     #   - confidence: a number clamped to 0..1, rounded DOWN to 2 places (0.849 is 0.84, so it
     #     can't pass a 0.85 threshold); missing means 0
     #   - strings squished and capped in length; "null", "N/A", "unknown" and "" become null
@@ -35,6 +36,7 @@ module Imports
       VERIFICATION_URL_LIMIT = 500
       WEB_HOST = /\.[a-z]{2,}\z/ # ends in a top-level domain: not "30.5"
       DATE_FIELDS = %w[completed_on expires_on].freeze
+      MAX_VALIDITY_MONTHS = 240
       BLANK_VALUES = %w[null nil none n/a na unknown - ?].freeze
       ISO_DATE = /\A(\d{4})-(\d{2})-(\d{2})(?:[T ][\d:.]+Z?)?\z/
       # An expiry that says there is none, the whole text, perhaps after a label: "Never",
@@ -79,6 +81,8 @@ module Imports
             "verification_url" => verification_url(entry["verification_url"]),
             "completed_on" => date(entry["completed_on"], "completed_on", notes, unreadable),
             "expires_on" => date(entry["expires_on"], "expires_on", notes, unreadable),
+            "validity_months" => validity_months(entry["validity_months"]),
+            "no_expiration" => no_expiration?(entry),
             "confidence" => confidence(entry["confidence"]),
             "notes" => nil
           }
@@ -87,6 +91,26 @@ module Imports
           result["notes"] = [ string(entry["notes"], "notes"), *notes ].compact.join(" ").truncate(STRING_LIMITS["notes"]).presence
           result["unreadable"] = unreadable if unreadable.any?
           result
+        end
+
+        # A whole number of months, also from "24", "24 months" or "2 years"; else nil.
+        def validity_months(value)
+          months = case value
+          when Numeric then value.to_i if value == value.to_i
+          when String
+            number, unit = value.squish.downcase.match(/\A(\d{1,3})(?:\s*(months?|mos?|years?|yrs?))?\z/)&.captures
+            number && (unit&.start_with?("y") ? number.to_i * 12 : number.to_i)
+          end
+          months if months&.between?(1, MAX_VALIDITY_MONTHS)
+        end
+
+        # A read date beats it, and "N/A" isn't saying the certificate has no expiration.
+        def no_expiration?(entry)
+          text = squished(entry["expires_on"])
+          return false if text&.match?(ISO_DATE)
+
+          [ true, "true" ].include?(entry["no_expiration"]) ||
+            (text.present? && NO_EXPIRY.match?(text) && !text.match?(%r{\b(?:n/?a|not applicable)\b}i))
         end
 
         def page_list(value)
@@ -146,7 +170,7 @@ module Imports
           match = ISO_DATE.match(text)
           return format("%04d-%02d-%02d", *match.captures.map(&:to_i)) if match && Date.valid_date?(*match.captures.map(&:to_i))
 
-          if field == "expires_on" && NO_EXPIRY.match?(text) # no date printed, so the type's rule applies
+          if field == "expires_on" && NO_EXPIRY.match?(text) # no date printed; no_expiration? decides what that means
             notes << "No expiry date printed (the card says #{text.truncate(30).inspect})."
             return
           end

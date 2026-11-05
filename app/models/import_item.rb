@@ -21,7 +21,7 @@ class ImportItem < ApplicationRecord
   # Phase 3b: matched by a QR/link domain or the model's issuer code; suggested by a fuzzy name.
   enum :issuer_match, { unmatched: 0, suggested: 1, matched: 2 }, prefix: :issuer, default: :unmatched
   # manual: a reviewer typed the expiry and saved it ("Save edits").
-  enum :proposed_expires_on_source, { printed: 0, computed: 1, none: 2, manual: 3 }, prefix: :proposed_expiry
+  enum :proposed_expires_on_source, { printed: 0, computed: 1, none: 2, manual: 3, printed_period: 4, no_expiration: 5 }, prefix: :proposed_expiry
 
   belongs_to :import_batch
   belongs_to :source_item, class_name: "ImportItem", optional: true, inverse_of: :split_items # the file this page range came from
@@ -175,7 +175,7 @@ class ImportItem < ApplicationRecord
   # worked out from the type isn't the card's.
   def authenticity_inputs(database: false)
     value = database ? method(:attribute_in_database) : method(:read_attribute)
-    derived = %w[computed none].include?(value.call("proposed_expires_on_source"))
+    derived = %w[computed none printed_period].include?(value.call("proposed_expires_on_source"))
     { "issuer" => value.call("matched_certificate_issuer_id"), "verification code" => value.call("proposed_verification_code"),
       "verification link" => value.call("proposed_verification_url"), "person" => value.call("matched_crew_member_id"),
       "completion date" => value.call("proposed_completed_on"), "expiry date" => (value.call("proposed_expires_on") unless derived) }

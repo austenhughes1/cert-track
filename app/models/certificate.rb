@@ -14,7 +14,7 @@ class Certificate < ApplicationRecord
 
   # printed: taken from the card; computed: completed_on + type validity; manual: typed
   # by a user; none: the type never expires.
-  enum :expires_on_source, { printed: 0, computed: 1, manual: 2, none: 3 }, prefix: :expiry, default: :manual, validate: true
+  enum :expires_on_source, { printed: 0, computed: 1, manual: 2, none: 3, printed_period: 4, no_expiration: 5 }, prefix: :expiry, default: :manual, validate: true
   enum :source, { manual: 0, import: 1 }, prefix: true, default: :manual, validate: true
 
   belongs_to :crew_member
@@ -111,6 +111,21 @@ class Certificate < ApplicationRecord
     expires_on.nil?
   end
 
+  # The "No expiration" tick box: the certificate itself says it has none (source no_expiration), as
+  # opposed to a type that never expires (none). It stays whatever the type's validity becomes.
+  def no_expiration
+    expiry_no_expiration?
+  end
+
+  def no_expiration=(value)
+    if ActiveModel::Type::Boolean.new.cast(value)
+      self.expires_on = nil
+      self.expires_on_source = :no_expiration
+    elsif expiry_no_expiration?
+      self.expires_on_source = :manual # blank then works it out from the type again
+    end
+  end
+
   # Days from today to expires_on (negative once expired); nil when it never expires.
   def days_until_expiry(today: Date.current)
     (expires_on - today).to_i if expires_on
@@ -126,7 +141,7 @@ class Certificate < ApplicationRecord
   # An expiry worked out from the type isn't the card's. Same keys as ImportItem's.
   def authenticity_inputs(database: false)
     value = database ? method(:attribute_in_database) : method(:read_attribute)
-    derived = %w[computed none].include?(value.call("expires_on_source"))
+    derived = %w[computed none printed_period].include?(value.call("expires_on_source"))
     { "issuer" => value.call("certificate_issuer_id"), "verification code" => value.call("verification_code"),
       "verification link" => value.call("verification_url"), "person" => value.call("crew_member_id"),
       "completion date" => value.call("completed_on"), "expiry date" => (value.call("expires_on") unless derived) }
@@ -153,12 +168,14 @@ class Certificate < ApplicationRecord
       persisted?
     end
 
-    # Explicit date: kept (source stays as the caller set it, e.g. printed; else manual).
+    # Explicit date: kept (source stays as the caller set it, e.g. printed or printed_period; else manual).
     # Blank date: completed_on + validity (computed), or nil when the type never expires (none).
     # On edit, a computed date follows changes to completed_on or type; other dates are
     # only recalculated when cleared. A change to the type's validity re-derives computed
     # and none rows through rederive_expiry!.
     def apply_expiration_rule
+      return if expiry_no_expiration? && expires_on.blank?
+
       inputs_changed = new_record? || will_save_change_to_completed_on? || will_save_change_to_certificate_type_id?
 
       if expires_on.present?
@@ -167,7 +184,7 @@ class Certificate < ApplicationRecord
         elsif will_save_change_to_expires_on? && !will_save_change_to_expires_on_source?
           self.expires_on_source = :manual
         end
-      elsif inputs_changed || will_save_change_to_expires_on?
+      elsif inputs_changed || will_save_change_to_expires_on? || will_save_change_to_expires_on_source?
         assign_derived_expiry
       end
     end

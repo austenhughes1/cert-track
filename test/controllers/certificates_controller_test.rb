@@ -10,6 +10,20 @@ class CertificatesControllerTest < ActionDispatch::IntegrationTest
 
   # --- show / new ---
 
+  test "the No expiration box saves a certificate with no expiry, whatever the type's validity" do
+    sign_in_as users(:manager)
+
+    certificate = no_expiration_certificate
+
+    assert certificate.expiry_no_expiration?
+    assert_nil certificate.expires_on
+
+    get edit_crew_member_certificate_path(@juan, certificate)
+    assert_select "input[type=checkbox][name=?][checked]", "certificate[no_expiration]"
+    get crew_member_certificate_path(@juan, certificate)
+    assert_match "the certificate says it has no expiration", response.body
+  end
+
   test "viewer sees a certificate with its files and history" do
     certificate = certificates(:juan_flagger)
     certificate.files.attach(fixture_blob("certificate.pdf"), fixture_blob("certificate.jpg"))
@@ -776,6 +790,11 @@ class CertificatesControllerTest < ActionDispatch::IntegrationTest
   end
 
   private
+    def no_expiration_certificate
+      post crew_member_certificates_path(@juan), params: { certificate: valid_attributes.merge(no_expiration: "1") }
+      @juan.certificates.order(:id).last
+    end
+
     def valid_attributes
       { certificate_type_id: @flagger.id, certificate_number: "FL-90001", issued_by: "ATSSA",
         completed_on: Date.current.iso8601, expires_on: "", notes: "" }

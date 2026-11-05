@@ -237,6 +237,35 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_select "#raw_unread_pages", count: 0
   end
 
+  test "No expiration on the review form: ticked, it saves and accepts with no expiry whatever the type says" do
+    sign_in_as users(:manager)
+    get import_review_path(@item)
+    assert_not no_expiration_box_checked?
+
+    patch import_review_path(@item), params: { review: review_params(no_expiration: "1", expires_on: "2030-01-01") }
+    assert @item.reload.proposed_expiry_no_expiration?
+    assert_nil @item.proposed_expires_on
+
+    get import_review_path(@item)
+    assert no_expiration_box_checked?
+
+    post accept_import_review_path(@item), params: { review: review_params(no_expiration: "1") }
+    assert @item.reload.accepted?
+    assert @item.certificate.expiry_no_expiration?
+    assert_nil @item.certificate.expires_on
+  end
+
+  test "No expiration unticked: a blank expiry goes back to the type's rule" do
+    @item.update!(proposed_expires_on: nil, proposed_expires_on_source: :no_expiration)
+    sign_in_as users(:manager)
+
+    post accept_import_review_path(@item), params: { review: review_params(no_expiration: "0") }
+
+    assert @item.reload.accepted?
+    assert @item.certificate.expiry_computed?
+    assert_equal @first_aid.expiry_for(@item.certificate.completed_on), @item.certificate.expires_on
+  end
+
   test "an expiry printed on the card but unreadable makes the expiry field required and says why" do
     @item.update!(extraction: unreadable_expiry_extraction("06/2027"),
       error_message: "The expiration date \"06/2027\" is not a valid YYYY-MM-DD date.")
@@ -244,7 +273,7 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
 
     get import_review_path(@item)
 
-    assert_select "input[type=date][name=?][required][aria-invalid=true][aria-describedby~=review_expires_on_unreadable]", "review[expires_on]"
+    assert_select "input[type=date][name=?][aria-invalid=true][aria-describedby~=review_expires_on_unreadable]", "review[expires_on]"
     assert_select "label[for=review_expires_on]", /Expires on\s+\(required\)/
     assert_select "#review_expires_on_unreadable[role=alert]",
       "The card's expiry (\"06/2027\") could not be read. Type the expiry date from the card."
@@ -252,7 +281,7 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     typed = Date.current + 200 # once the reviewer has typed and saved it, it is still required but no longer flagged
     patch import_review_path(@item), params: { review: review_params(expires_on: typed.iso8601) }
     get import_review_path(@item)
-    assert_select "input[type=date][name=?][value=?][required]:not([aria-invalid])", "review[expires_on]", typed.iso8601
+    assert_select "input[type=date][name=?][value=?]:not([aria-invalid])", "review[expires_on]", typed.iso8601
     assert_select "#review_expires_on_unreadable:not([role])", /could not be read/
 
     @item.update!(extraction: { "certificates" => [ { "pages" => [ 2 ], "holder_name" => "Jaun Ortis" } ] }, error_message: nil)
@@ -416,7 +445,7 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :unprocessable_entity
     assert_select "#error_explanation", /could not be read\. Type the expiry date from the card\./
-    assert_select "input[type=date][name=?][required]", "review[expires_on]"
+    assert_select "input[type=date][name=?]", "review[expires_on]"
     assert @item.reload.needs_review?
 
     typed = Date.current + 200
@@ -1370,6 +1399,10 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     def unreadable_expiry_extraction(printed)
       { "certificates" => [ { "pages" => [ 2 ], "holder_name" => "Jaun Ortis", "expires_on" => nil, "unreadable" => { "expires_on" => printed } } ],
         "non_certificate_pages" => [] }
+    end
+
+    def no_expiration_box_checked?
+      css_select("input[type=checkbox][name='review[no_expiration]'][checked]").any?
     end
 
     def review_params(**overrides)

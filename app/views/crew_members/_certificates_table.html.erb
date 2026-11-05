@@ -32,6 +32,8 @@
               <%= format_date(certificate.expires_on) %>
               <% if certificate.expiry_computed? %>
                 <span class="text-xs text-gray-400" title="Completed date plus the type's validity">(computed)</span>
+              <% elsif certificate.expiry_printed_period? %>
+                <span class="text-xs text-gray-400" title="Completed date plus the validity printed on the card">(computed)</span>
               <% end %>
             <% end %>
             <% if !superseded %>

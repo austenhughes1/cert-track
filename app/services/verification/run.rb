@@ -44,7 +44,7 @@ module Verification
   # barcodes: the QR codes read from its files ([{ "page" =>, "text" => }], none when not given).
   # The code is the record's, else the one in its link on the issuer's domain, else the one in its
   # QR codes on that domain when they all carry the same one (a page with several people's cards
-  # carries several). An expiry CertTrack worked out from the type's validity (computed) is not
+  # carries several). An expiry CertTrack worked out (from the type or a printed period) is not
   # the certificate's own, so it is never compared with the issuer's.
   #
   # network: false (VERIFICATION_AUTO_CHECKS off, or a caller that mustn't wait) skips rule 3.
@@ -279,13 +279,13 @@ module Verification
         Subject.new(issuer: (item.matched_certificate_issuer if item.issuer_matched?), code: item.proposed_verification_code,
           url: item.proposed_verification_url, barcodes: Array(@barcodes || item.barcodes), holder_names: holder_names.compact_blank.uniq,
           completed_on: item.proposed_completed_on,
-          expires_on: (item.proposed_expires_on unless item.proposed_expiry_computed? || item.proposed_expiry_none?))
+          expires_on: (item.proposed_expires_on unless item.proposed_expiry_computed? || item.proposed_expiry_none? || item.proposed_expiry_printed_period?))
       end
 
       def certificate_subject(certificate)
         Subject.new(issuer: certificate.certificate_issuer, code: certificate.verification_code,
           url: certificate.verification_url, barcodes: Array(@barcodes), holder_names: member_names(certificate.crew_member),
-          completed_on: certificate.completed_on, expires_on: (certificate.expires_on unless certificate.expiry_computed?))
+          completed_on: certificate.completed_on, expires_on: (certificate.expires_on unless certificate.expiry_computed? || certificate.expiry_printed_period?))
       end
 
       def member_names(member)
