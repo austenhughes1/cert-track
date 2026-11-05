@@ -1,10 +1,10 @@
 # CertTrack
 
 CertTrack is an internal Rails 8.1 app for ABA Ventures that tracks crew certificates against each project's
-requirements. It keeps a crew roster with dated certificate records and attached files, a master list of certificate
+requirements. It keeps a crew roster with dated certificate records and attached files, a list of certificate
 types that each project picks from (optionally per crew role), and a per-project compliance matrix. It also emails
 expiry warnings, bulk-imports scanned cards with AI extraction plus a human review queue, and answers questions such as
-"does Juan Ortiz have OSHA 30?". Each certificate records its issuer (a master list, like the certificate types) and its
+"does Juan Ortiz have OSHA 30?". Each certificate records its issuer (a list like the certificate types) and its
 verification code and link. CertTrack reads QR codes on certificates locally, checks authenticity with the issuer's site
 where the issuer allows it (otherwise a person checks, with the link at hand), and flags a certificate that doesn't
 check out for review. Only a certificate a person confirmed fake with its issuer counts as not valid and is left out of

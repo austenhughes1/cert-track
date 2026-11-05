@@ -2,8 +2,8 @@ module Ai
   # A deterministic stand-in for the extraction model (AI_PROVIDER=fake): the default in tests,
   # and usable in development to demo imports without Cloudflare. No network, no randomness.
   #
-  # It reads what a real model would see: the master list and issuer list from the system
-  # prompt (<master_list> and <issuer_list> JSON lines) and the page texts from the prompt
+  # It reads what a real model would see: the certificate types and issuer list from the system
+  # prompt (<certificate_types> and <issuer_list> JSON lines) and the page texts from the prompt
   # ("=== page N ===" markers), and answers in the model output contract. A page is a
   # certificate when it has a line starting with CERTIFICATE (e.g. "CERTIFICATE OF
   # COMPLETION"); its fields come from the synthetic layout below, with labels matched case-
@@ -36,7 +36,7 @@ module Ai
 
     PAGE_MARKER = /^=== page (\d+) ===[ \t]*$/
     DOCUMENT_BLOCK = %r{<document>\n?(.*?)</document>}m
-    MASTER_LIST_BLOCK = %r{<master_list>\n?(.*?)</master_list>}m
+    CERTIFICATE_TYPES_BLOCK = %r{<certificate_types>\n?(.*?)</certificate_types>}m
     ISSUER_LIST_BLOCK = %r{<issuer_list>\n?(.*?)</issuer_list>}m
     CERTIFICATE_LINE = /\Acertificate\b/i
     LABELS = {
@@ -114,13 +114,13 @@ module Ai
 
     private
       def extract(system, prompt)
-        master_list = parse_list(system, MASTER_LIST_BLOCK)
+        certificate_types = parse_list(system, CERTIFICATE_TYPES_BLOCK)
         issuer_list = parse_list(system, ISSUER_LIST_BLOCK)
         certificates = []
         non_certificate_pages = []
 
         parse_pages(prompt).each do |number, text|
-          certificate = parse_certificate(text, master_list, issuer_list)
+          certificate = parse_certificate(text, certificate_types, issuer_list)
           if certificate
             certificates << certificate.merge("pages" => [ number ])
           else
@@ -141,7 +141,7 @@ module Ai
         parts.each_slice(2).to_h { |number, text| [ number.to_i, text.to_s ] }
       end
 
-      # The JSON-line entries of a <master_list> or <issuer_list> block that have a code.
+      # The JSON-line entries of a <certificate_types> or <issuer_list> block that have a code.
       def parse_list(system, pattern)
         block = system.to_s[pattern, 1].to_s
         block.lines.filter_map do |line|
@@ -152,7 +152,7 @@ module Ai
         end
       end
 
-      def parse_certificate(text, master_list, issuer_list)
+      def parse_certificate(text, certificate_types, issuer_list)
         lines = text.lines.map(&:squish).compact_blank
         start = lines.index { |line| line.match?(CERTIFICATE_LINE) && !line.match?(LABELS["certificate_number"]) }
         return unless start
@@ -167,7 +167,7 @@ module Ai
 
         {
           "holder_name" => fields["holder_name"],
-          "certificate_type_code" => list_code(name, master_list),
+          "certificate_type_code" => list_code(name, certificate_types),
           "certificate_name_as_printed" => name,
           "issuer" => fields["issuer"],
           "certificate_issuer_code" => list_code(fields["issuer"], issuer_list, whole_words: true),

@@ -1,11 +1,11 @@
-<% content_for :title, "Master list" %>
+<% content_for :title, "Certificate types" %>
 <%# List buttons redirect back to this exact URL, so Turbo morphs the table and keeps the scroll position. %>
 <% turbo_refreshes_with method: :morph, scroll: :preserve %>
 <% admin = can?(:admin) %>
 
 <div class="mb-4 flex flex-wrap items-end justify-between gap-4">
   <div>
-    <h1 class="text-2xl font-semibold">Master list</h1>
+    <h1 class="text-2xl font-semibold">Certificate types</h1>
     <p class="mt-1 max-w-3xl text-sm text-gray-500">
       Every certificate type the company tracks. Projects choose their required types from this list,
       and imports use the aliases to recognise the names printed on real cards.
@@ -35,7 +35,7 @@
         <% if admin %>
           Add the first one: <%= link_to "new certificate type", new_certificate_type_path, class: "text-blue-700 hover:underline" %>.
         <% else %>
-          An admin adds types to the master list.
+          An admin adds certificate types.
         <% end %>
       </p>
     <% else %>

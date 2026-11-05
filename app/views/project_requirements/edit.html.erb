@@ -12,12 +12,12 @@
   <div class="xl:col-span-3">
     <% if @certificate_types.empty? %>
       <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
-        <p class="text-sm font-medium text-gray-900">The master list has no active certificate types</p>
+        <p class="text-sm font-medium text-gray-900">There are no active certificate types</p>
         <p class="mt-1 text-sm text-gray-500">
           <% if can?(:admin) %>
             <%= link_to "Add certificate types", certificate_types_path, class: "text-blue-700 hover:underline" %> first.
           <% else %>
-            Ask an admin to add certificate types to the master list.
+            Ask an admin to add certificate types.
           <% end %>
         </p>
       </div>

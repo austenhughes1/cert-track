@@ -6,9 +6,11 @@
 # a new certificate, or one whose issuer, verification code, link, dates or files changed, is
 # checked (Verification::CheckJob,
 # which also reads the QR codes on its files; after Certificates::ReadQrCodesJob when files
-# were added).
+# were added). The type picker's "Other..." (certificate_type_id "other" plus other_type_name)
+# adds a certificate type the same way, for anyone who can edit certificates.
 class CertificatesController < ApplicationController
   include IssuerChoice
+  include TypeChoice
 
   require_role :editor, except: :show
   require_role :admin, only: :destroy
@@ -39,6 +41,7 @@ class CertificatesController < ApplicationController
     attributes = certificate_params
     files = extract_files(attributes)
     extract_issuer_choice(attributes)
+    extract_type_choice(attributes)
     @certificate = @crew_member.certificates.new(attributes)
     stamp_verification
 
@@ -58,6 +61,7 @@ class CertificatesController < ApplicationController
     attributes = certificate_params
     files = extract_files(attributes)
     extract_issuer_choice(attributes)
+    extract_type_choice(attributes)
     @certificate.assign_attributes(attributes)
     stamp_verification
 
@@ -116,7 +120,7 @@ class CertificatesController < ApplicationController
     end
 
     def certificate_params
-      params.expect(certificate: [ :certificate_type_id, :certificate_number, :issued_by, :completed_on, :expires_on, :no_expiration, :notes,
+      params.expect(certificate: [ :certificate_type_id, :other_type_name, :certificate_number, :issued_by, :completed_on, :expires_on, :no_expiration, :notes,
         :certificate_issuer_id, :other_issuer_name, :verification_code, :verification_url, files: [] ])
     end
 
@@ -132,21 +136,38 @@ class CertificatesController < ApplicationController
       attributes.delete(:certificate_issuer_id)
     end
 
-    # With "Other...", the issuer is found or created in the certificate's transaction, so a
-    # certificate that doesn't save leaves no new issuer behind (the form shows "Other..." again).
+    # The type picker's choice comes out of the attributes too. @type_choice ("other" or nil) and
+    # @other_type_name refill the form.
+    def extract_type_choice(attributes)
+      @other_type_name = attributes.delete(:other_type_name).to_s.squish.presence
+      @type_problems = type_choice_problems(type_id: attributes[:certificate_type_id], other_name: @other_type_name)
+      return unless other_type_chosen?(attributes[:certificate_type_id])
+
+      @type_choice = OTHER
+      attributes.delete(:certificate_type_id)
+    end
+
+    # With "Other...", the issuer and type are found or created in the certificate's transaction, so a
+    # certificate that doesn't save leaves neither behind (the form shows "Other..." again).
     def save_certificate
-      if @issuer_problems.any?
+      problems = @issuer_problems + @type_problems
+      if problems.any?
         @certificate.validate
-        @issuer_problems.each { |message| @certificate.errors.add(:base, message) }
+        @certificate.errors.delete(:certificate_type) if @type_problems.any?
+        problems.each { |message| @certificate.errors.add(:base, message) }
         return false
       end
-      return @certificate.save unless @issuer_choice
+      return @certificate.save unless @issuer_choice || @type_choice
 
-      saved = with_chosen_issuer(OTHER, @other_issuer_name) do |issuer|
-        @certificate.certificate_issuer = issuer
+      saved = Certificate.transaction do
+        @certificate.certificate_issuer = chosen_issuer(OTHER, @other_issuer_name) if @issuer_choice
+        @certificate.certificate_type = CertificateType.find_or_create_from_name!(@other_type_name) if @type_choice
         @certificate.save || raise(ActiveRecord::Rollback)
       end
-      @certificate.certificate_issuer_id = @certificate.certificate_issuer_id_in_database unless saved
+      unless saved
+        @certificate.certificate_issuer_id = @certificate.certificate_issuer_id_in_database if @issuer_choice
+        @certificate.certificate_type_id = @certificate.certificate_type_id_in_database if @type_choice
+      end
       saved
     end
 
@@ -194,6 +215,7 @@ class CertificatesController < ApplicationController
         "#{verb} #{type_name} for #{@crew_member.display_name}."
       end
       [ notice, (@certificate.authenticity_note if @certificate.authenticity_reset_by_last_save?),
-        (other_issuer_sentence(@certificate.certificate_issuer, @other_issuer_name) if @issuer_choice) ].compact.join(" ")
+        (other_issuer_sentence(@certificate.certificate_issuer, @other_issuer_name) if @issuer_choice),
+        (other_type_sentence(@certificate.certificate_type, @other_type_name) if @type_choice) ].compact.join(" ")
     end
 end

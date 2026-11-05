@@ -1,5 +1,7 @@
-# The master list of certificate types.
+# The list of certificate types.
 class CertificateType < ApplicationRecord
+  include CreatableFromName
+
   FUZZY_THRESHOLD = 0.45
   # Owner's rule, Nov 5, 2026: a certificate that states no expiry or validity lasts 2 years. New
   # types start with this; a blank validity means the type never expires (OSHA 10 and 30).
@@ -38,16 +40,19 @@ class CertificateType < ApplicationRecord
     end
 
     # [[type, similarity], ...] best first, for every type whose name or any alias scores
-    # at least threshold (pg_trgm similarity, case-insensitive). Chainable scope first:
-    # CertificateType.active.fuzzy_match("OSHA 30 hr").
+    # at least threshold (pg_trgm, case-insensitive). Chainable scope first:
+    # CertificateType.active.fuzzy_match("OSHA 30 hr"). Training providers word the same certificate
+    # differently, usually by adding to it ("Bloodborne Pathogens Online Training"), so a name or
+    # alias found whole inside the text scores as well as the text overall (word_similarity).
     def fuzzy_match(text, threshold: FUZZY_THRESHOLD)
       text = text.to_s.squish
       return [] if text.blank?
 
       binds = { query: text, threshold: threshold }
       score = <<~SQL.squish
-        greatest(similarity(certificate_types.name::text, :query),
-                 coalesce((select max(similarity(a, :query)) from unnest(certificate_types.aliases) a), 0))
+        greatest(similarity(certificate_types.name::text, :query), word_similarity(certificate_types.name::text, :query),
+                 coalesce((select max(greatest(similarity(a, :query), word_similarity(a, :query)))
+                           from unnest(certificate_types.aliases) a), 0))
       SQL
 
       select("certificate_types.*", sanitize_sql([ "#{score} AS match_similarity", binds ]))
@@ -67,6 +72,9 @@ class CertificateType < ApplicationRecord
 
     completed_on.advance(months: validity_months)
   end
+
+  private_class_method def self.defaults_from_name = { validity_months: DEFAULT_VALIDITY_MONTHS }
+  private_class_method def self.code_for_unnamed = "TYPE"
 
   private
     # Setting or changing validity re-derives certificates that never expired and every computed

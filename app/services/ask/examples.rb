@@ -1,5 +1,5 @@
 module Ask
-  # Example questions for the Ask page, built from the real roster, master list and
+  # Example questions for the Ask page, built from the real roster, certificate types and
   # projects so every chip gives a real answer. Generic names stand in on an empty database.
   class Examples
     FALLBACK_PERSON = "Juan Ortiz".freeze

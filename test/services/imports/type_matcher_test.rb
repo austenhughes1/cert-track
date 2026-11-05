@@ -1,11 +1,27 @@
 require "test_helper"
 
 class Imports::TypeMatcherTest < ActiveSupport::TestCase
+  test "a provider's wording of a type's name finds it, and a number in the name has to agree" do
+    ten = CertificateType.create!(name: "OSHA 10 Test", code: "T10", aliases: [ "OSHA 10-Hour Construction Safety and Health" ])
+    thirty = CertificateType.create!(name: "OSHA 30 Test", code: "T30", aliases: [ "OSHA 30-Hour Construction Safety and Health" ])
+    blood = CertificateType.create!(name: "Bloodborne Pathogens", code: "BBPTEST")
+
+    assert_equal blood, by_printed_name("Bloodborne Pathogens Online Training").type
+    assert_equal blood, by_printed_name("OSHA Bloodborne Pathogens Training Multi-Industry").type
+    assert_equal thirty, by_printed_name("30-hour Construction Safety and Health").type
+    assert_equal ten, by_printed_name("10-hour Construction Safety and Health").type
+    assert_not_includes by_printed_name("30-hour Construction Safety and Health").suggestions.map { it["id"] }, ten.id
+  end
+
+  def by_printed_name(name)
+    Imports::TypeMatcher.new(code: nil, name_as_printed: name).call
+  end
+
   def match(code: nil, name: nil)
     Imports::TypeMatcher.new(code:, name_as_printed: name).call
   end
 
-  test "a code on the master list is a match, case and whitespace insensitive" do
+  test "a code on the certificate types is a match, case and whitespace insensitive" do
     result = match(code: " osha30 ", name: "OSHA 30-Hour Construction Industry Outreach Training")
 
     assert_equal :matched, result.match

@@ -194,6 +194,14 @@ module ImportsHelper
     safe_join(groups)
   end
 
+  # The review form's type options, then "Other…", whose hint is a new type's default validity.
+  def import_type_options(suggestions:, records:, selected_id:)
+    other = selected_id.to_s == CertificateIssuersHelper::OTHER_VALUE
+    safe_join([ import_picker_options(suggestions:, records:, selected_id: (selected_id unless other)),
+      tag.option(CertificateIssuersHelper::OTHER_LABEL, value: CertificateIssuersHelper::OTHER_VALUE, selected: other,
+        data: { name: "A new type", validity_months: CertificateType::DEFAULT_VALIDITY_MONTHS }) ])
+  end
+
   # A type picker option's data for the review-expiry controller, which keeps the expiry
   # hint in step with the type picked.
   def import_type_option_attributes(type)

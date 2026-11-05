@@ -25,7 +25,7 @@ Rails.application.routes.draw do
     end
   end
 
-  # --- Master list ---
+  # --- Certificate types ---
   resources :certificate_types, except: :show do
     patch :move, on: :member # params: direction=up|down, status=list filter
   end

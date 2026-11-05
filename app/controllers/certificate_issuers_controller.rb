@@ -1,5 +1,5 @@
 # The certificate issuers (docs/PLAN.md, Phase 3b): who issues certificates and how each one's
-# are verified. A master list like certificate types, but admins only, reads included: the
+# are verified. A list like certificate types, but admins only, reads included: the
 # issuer pickers and authenticity panels show other users what they need. An issuer that
 # anything points at is deactivated rather than deleted. Issuers added with "Other..." in an
 # issuer picker arrive with no method or domains, and the list points them out to fill in.

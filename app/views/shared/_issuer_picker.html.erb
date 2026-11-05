@@ -1,11 +1,11 @@
 <%# locals: (form:, issuers:, selected:, current: nil, other_name: nil, suggestions: [], badge: nil, input_class:) %>
 <%# An issuer picker for a certificate_issuer_id field: active issuers, then "Other…" (value
     "other"), which needs a name in other_issuer_name. The controller turns that name into an
-    issuer (CertificateIssuer.find_or_create_from_name!) when it saves. issuer-picker shows the
+    issuer (CertificateIssuer.find_or_create_from_name!) when it saves. other-choice shows the
     name field only while "Other…" is chosen; without JavaScript it stays visible with a hint. %>
 <% hint_id = "#{form.field_id(:certificate_issuer_id)}_hint" %>
 <% other_hint_id = "#{form.field_id(:other_issuer_name)}_hint" %>
-<div data-controller="issuer-picker">
+<div data-controller="other-choice">
   <div class="flex items-center justify-between gap-2">
     <%= form.label :certificate_issuer_id, "Issuer", class: "block text-sm font-medium text-gray-700" %>
     <%= badge %>
@@ -13,16 +13,16 @@
   <%= form.select :certificate_issuer_id,
         issuer_picker_options(issuers: issuers, selected: selected, current: current, suggestions: suggestions),
         { include_blank: "Not known" }, class: "#{input_class} bg-white",
-        aria: { describedby: hint_id }, data: { issuer_picker_target: "select", action: "change->issuer-picker#toggle" } %>
+        aria: { describedby: hint_id }, data: { other_choice_target: "select", action: "change->other-choice#toggle" } %>
   <p id="<%= hint_id %>" class="mt-1 text-xs text-gray-500">
     Who issued the certificate; it tells reviewers how to check it. Not listed? Choose <%= CertificateIssuersHelper::OTHER_LABEL %> and type its name.
   </p>
 
-  <div class="mt-2" data-issuer-picker-target="other">
+  <div class="mt-2" data-other-choice-target="other">
     <%= form.label :other_issuer_name, "New issuer's name", class: "block text-xs font-medium text-gray-600" %>
     <%= form.text_field :other_issuer_name, value: other_name, autocomplete: "off", maxlength: 200, size: nil,
           placeholder: "As printed, e.g. Summit Safety Training", aria: { describedby: other_hint_id },
-          data: { issuer_picker_target: "name" }, class: input_class %>
+          data: { other_choice_target: "name" }, class: input_class %>
     <p id="<%= other_hint_id %>" class="mt-1 text-xs text-gray-500">
       Only used with <%= CertificateIssuersHelper::OTHER_LABEL %>: the issuer is added to the list for an admin to fill in how it verifies.
     </p>

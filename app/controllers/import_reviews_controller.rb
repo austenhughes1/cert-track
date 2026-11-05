@@ -9,11 +9,12 @@
 # post to check, which saves the edits first, so the check uses what the reviewer typed.
 class ImportReviewsController < ApplicationController
   include IssuerChoice
+  include TypeChoice
 
   require_role :editor
 
   INDEX_LIMIT = 200
-  REVIEW_FIELDS = %i[crew_member_id certificate_type_id completed_on expires_on no_expiration certificate_number issued_by
+  REVIEW_FIELDS = %i[crew_member_id certificate_type_id other_type_name completed_on expires_on no_expiration certificate_number issued_by
     certificate_issuer_id other_issuer_name verification_code verification_url].freeze
   # Saved edits to these re-run the item's authenticity check (Verification::Run compares them).
   VERIFICATION_ATTRIBUTES = %w[matched_certificate_issuer_id issuer_match proposed_verification_code proposed_verification_url
@@ -49,7 +50,7 @@ class ImportReviewsController < ApplicationController
 
     check_item_later
     redirect_to import_review_path(@item), status: :see_other,
-      notice: [ "Saved your edits. #{item_label} is still waiting for review.", reset_fake_sentence(@item), issuer_sentence ].compact.join(" ")
+      notice: [ "Saved your edits. #{item_label} is still waiting for review.", reset_fake_sentence(@item), issuer_sentence, type_sentence ].compact.join(" ")
   end
 
   # The authenticity panel's buttons: saves the form's edits (as update does), then records a
@@ -77,7 +78,7 @@ class ImportReviewsController < ApplicationController
       Verification::CheckJob.perform_later(@item, force: true, requested_at: requested_at)
       notice = "Saved your edits and checking again with them. #{AuthenticityChecksController::CHECKING_HINT}"
     end
-    redirect_to import_review_path(@item, anchor: "authenticity"), status: :see_other, notice: [ notice, issuer_sentence ].compact.join(" ")
+    redirect_to import_review_path(@item, anchor: "authenticity"), status: :see_other, notice: [ notice, issuer_sentence, type_sentence ].compact.join(" ")
   end
 
   def accept
@@ -87,7 +88,7 @@ class ImportReviewsController < ApplicationController
     next_id = next_item_id
     certificate = Imports::Accept.new(@item, user: Current.user, attributes: accept_attributes).call
     redirect_to_next next_id, notice: [ "Accepted #{certificate.certificate_type.name} for #{certificate.crew_member.display_name}.",
-      fake_sentence(certificate), issuer_sentence ].compact.join(" ")
+      fake_sentence(certificate), issuer_sentence, type_sentence ].compact.join(" ")
   rescue Imports::Accept::NotReviewable => error
     redirect_to_next nil, alert: error.record.errors.full_messages.to_sentence
   rescue ActiveRecord::RecordInvalid => error
@@ -141,7 +142,7 @@ class ImportReviewsController < ApplicationController
     certificate = Imports::Merge.new(@item, others: others, user: Current.user, attributes: accept_attributes).call
     redirect_to_next next_id, notice: [ "Merged #{helpers.pluralize(others.size + 1, "file")} into one " \
       "#{certificate.certificate_type.name} certificate for #{certificate.crew_member.display_name}.", fake_sentence(certificate),
-      issuer_sentence ].compact.join(" ")
+      issuer_sentence, type_sentence ].compact.join(" ")
   rescue ActiveRecord::RecordInvalid => error # includes Imports::Accept::NotReviewable for a partner reviewed meanwhile
     render_review_errors(error.record.errors.full_messages)
   end
@@ -276,28 +277,41 @@ class ImportReviewsController < ApplicationController
     def fields_from_params
       Fields.new(**params.expect(review: REVIEW_FIELDS).to_h.symbolize_keys).tap do |fields|
         fields.other_issuer_name = fields.other_issuer_name.to_s.squish.presence
+        fields.other_type_name = fields.other_type_name.to_s.squish.presence
       end
     end
 
+    # The issuer and type pickers' problems.
     def issuer_problems
       @issuer_problems ||= issuer_choice_problems(issuer_id: @fields.certificate_issuer_id, other_name: @fields.other_issuer_name,
-        verification_url: @fields.verification_url.to_s.strip)
+        verification_url: @fields.verification_url.to_s.strip) +
+        type_choice_problems(type_id: @fields.certificate_type_id, other_name: @fields.other_type_name)
+    end
+
+    # The chosen type, or nil for none. "Other..." finds or creates it from the typed name.
+    def chosen_type
+      return CertificateType.find_by(id: @fields.certificate_type_id.presence) unless other_type_chosen?(@fields.certificate_type_id)
+
+      @chosen_type = CertificateType.find_or_create_from_name!(@fields.other_type_name)
+    end
+
+    def proposed_dates(type)
+      no_expiration = ActiveModel::Type::Boolean.new.cast(@fields.no_expiration)
+      Imports::DateRules.new(completed_on: @fields.completed_on, expires_on: (@fields.expires_on unless no_expiration),
+        no_expiration: no_expiration, certificate_type: type).call
     end
 
     # Saves the form's edits to the proposal (update and check). Returns the problems that kept it
     # from saving; nothing is saved then, and no issuer is added.
     def save_edits
       member = CrewMember.find_by(id: @fields.crew_member_id.presence)
-      type = CertificateType.find_by(id: @fields.certificate_type_id.presence)
-      no_expiration = ActiveModel::Type::Boolean.new.cast(@fields.no_expiration)
-      dates = Imports::DateRules.new(completed_on: @fields.completed_on, expires_on: (@fields.expires_on unless no_expiration),
-        no_expiration: no_expiration, certificate_type: type).call
-      problems = dates.errors + issuer_problems
+      problems = proposed_dates(nil).errors + issuer_problems
       return problems if problems.any?
 
       with_chosen_issuer(@fields.certificate_issuer_id, @fields.other_issuer_name) do |issuer|
         @chosen_issuer = issuer
-        @item.update!(proposal_attributes(member, type, dates, issuer))
+        type = chosen_type
+        @item.update!(proposal_attributes(member, type, proposed_dates(type), issuer))
       end
       []
     end
@@ -310,7 +324,8 @@ class ImportReviewsController < ApplicationController
     # finds it): Accept enqueues jobs, so it isn't wrapped in a transaction.
     def accept_attributes
       @chosen_issuer = chosen_issuer(@fields.certificate_issuer_id, @fields.other_issuer_name)
-      attributes = @fields.to_h.except(:other_issuer_name).merge(certificate_issuer_id: @chosen_issuer&.id)
+      attributes = @fields.to_h.except(:other_issuer_name, :other_type_name)
+        .merge(certificate_issuer_id: @chosen_issuer&.id, certificate_type_id: chosen_type&.id)
       proposal = fields_from_item
       attributes.except(*VERIFICATION_FIELDS.select { |field| unchanged_verification_field?(field, attributes[field], proposal[field]) })
     end
@@ -339,6 +354,11 @@ class ImportReviewsController < ApplicationController
     # details changed (Authenticity), says so.
     def reset_fake_sentence(record)
       record.authenticity_note if record.authenticity_reset_by_last_save?
+    end
+
+    # What the notice says about a type chosen with "Other..." (TypeChoice#other_type_sentence).
+    def type_sentence
+      other_type_sentence(@chosen_type, @fields.other_type_name) if @chosen_type
     end
 
     # What the notice says about an issuer chosen with "Other..." (IssuerChoice#other_issuer_sentence).

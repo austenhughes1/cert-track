@@ -13,7 +13,7 @@ Put the files directly in `test/fixtures/import_samples/` (subfolders are ignore
 - clean PDFs, and scanned PDFs with no text layer
 - phone photos, including at least one iPhone HEIC, one rotated and one slightly blurry
 - one PDF holding several certificates, ideally with a cover sheet or course outline page
-- several types from your master list, and a card that prints an expiry date
+- several of your certificate types, and a card that prints an expiry date
 
 The eval scores PDF, JPG, PNG, WEBP and HEIC files. It skips zips, so unzip the files you want scored. The Phase 3 acceptance run checks zips separately.
 
@@ -47,16 +47,17 @@ How to fill it in:
 - **One entry per certificate.** A PDF with three certificates has three entries. The front and back of one card scanned into one file are one entry with `"pages": [1, 2]`. Two separate photos of the card are two files, each with its own entry.
 - **`pages`**: 1-indexed page numbers in the file. A photo is `[1]`.
 - **`holder_name`**: the name as printed. Case, punctuation and middle initials don't matter: "ORTIZ, JUAN A." matches "Juan Ortiz".
-- **`certificate_type_code`**: the code from your master list, or `null` if the certificate isn't on it. The eval matches against the master list in your **development** database, so make sure it has the same codes as production. To list them, run `bin/rails runner 'CertificateType.active.ordered.each { |t| puts "#{t.code}  #{t.name}" }'`.
+- **`certificate_type_code`**: the code from your certificate types, or `null` if none fits. A `null` isn't scored, because a certificate needn't be on the list: any certificate can be added as a type. The score compares the type the pipeline proposes: the model's code or, failing that, the fuzzy match on the printed name. The eval matches against the certificate types in your **development** database, so make sure it has the same codes as production. To list them, run `bin/rails runner 'CertificateType.active.ordered.each { |t| puts "#{t.code}  #{t.name}" }'`.
 - **`completed_on`**: the completion or issue date, as `YYYY-MM-DD`.
 - **`expires_on`**: the expiry date printed on the certificate. If none is printed but a validity period is ("valid for 2 years"), `completed_on` plus that period. If neither is printed, `completed_on` plus 2 years. OSHA 10 and 30 never expire, so they stay `null` unless a date is printed; so does a certificate that explicitly says it has no expiration (owner's rule, Nov 5, 2026). The model reports only a printed date and any stated period (`validity_months`); the score compares the expiry the pipeline works out from them.
 - **`certificate_number`**: as printed, or `null`. This field is reported but doesn't count toward the bar.
 - **`non_certificate_pages`**: pages that aren't certificates, such as cover sheets, course outlines and blank backs.
-- `certificate_name_as_printed`, `issuer`, `confidence` and `notes` aren't scored. Fill them in or leave them `null`.
+- **`certificate_name_as_printed`**: the certificate's name as printed. It counts toward the bar, allowing small differences in wording.
+- `issuer`, `confidence` and `notes` aren't scored. Fill them in or leave them `null`.
 
 Three more fields describe how the certificate is verified (Phase 3b). They are scored and reported on their own, and don't count toward the 90% bar:
 
-- **`certificate_issuer_code`**: the code of the issuer from your issuer list, or `null` if the issuer isn't on it. Upper or lower case doesn't matter. The model gets the active issuers from your **development** database, like the master list. To list them, run `bin/rails runner 'CertificateIssuer.active.ordered.each { |i| puts "#{i.code}  #{i.name}" }'`.
+- **`certificate_issuer_code`**: the code of the issuer from your issuer list, or `null` if the issuer isn't on it. Upper or lower case doesn't matter. The model gets the active issuers from your **development** database, like the certificate types. To list them, run `bin/rails runner 'CertificateIssuer.active.ordered.each { |i| puts "#{i.code}  #{i.name}" }'`.
 - **`verification_code`**: the code printed for checking the certificate on the issuer's site, such as a certificate ID or eCard code, or `null`. It is often the same as `certificate_number`. Spaces and case don't matter.
 - **`verification_url`**: a verification address printed on the certificate, as printed, or `null`. Write only what is printed: a QR code doesn't count, because the pipeline reads QR codes itself and the model never sees them. `https://`, `www.`, upper-case letters in the site name, a trailing `/` and the order of `?a=1&b=2` don't matter.
 

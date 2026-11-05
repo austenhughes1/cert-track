@@ -31,7 +31,7 @@
           aria: { describedby: "role_hint" },
           class: "mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 sm:w-60" %>
     <p id="role_hint" class="mt-1 text-xs text-gray-500">
-      Admin: everything, including users and the master list. Manager: edits crew, certificates, projects and imports. Viewer: read-only.
+      Admin: everything, including users, certificate types and issuers. Manager: edits crew, certificates, projects and imports. Viewer: read-only.
       <% if user.persisted? && user.last_admin? %>
         <strong class="font-medium text-gray-700">This is the only admin, so the role can't change.</strong>
       <% end %>

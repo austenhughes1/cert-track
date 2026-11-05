@@ -109,7 +109,7 @@
       <p class="text-sm font-medium text-gray-900">No required certificates yet</p>
       <% if can?(:editor) %>
         <p class="mt-1 text-sm text-gray-500">
-          <%= link_to "Choose them from the master list", edit_project_requirements_path(@project), class: "text-blue-700 hover:underline" %>
+          <%= link_to "Choose them from the certificate types", edit_project_requirements_path(@project), class: "text-blue-700 hover:underline" %>
           or copy them from another project.
         </p>
       <% end %>

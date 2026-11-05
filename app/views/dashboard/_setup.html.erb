@@ -2,10 +2,10 @@
     Locals: type_count, timed_type_count (types with a validity period), has_crew, has_projects. %>
 <% steps = [
   { done: type_count.positive? && timed_type_count.positive?,
-    title: "Review the master list",
+    title: "Review the certificate types",
     body: "#{pluralize(type_count, "active certificate type")}, #{timed_type_count} with a validity period. " \
           "Set how many months each type is valid so expiry dates are filled in for you.",
-    action: ([ "Open master list", certificate_types_path ] if can?(:admin)) },
+    action: ([ "Open certificate types", certificate_types_path ] if can?(:admin)) },
   { done: has_crew,
     title: "Add your crew",
     body: "Enter each person with their role and employer, then record the certificates they hold.",

@@ -1,11 +1,12 @@
 # Who issues certificates, and how each issuer's certificates are verified (docs/PLAN.md, Phase 3b).
-# A master list like CertificateType: defaults come from config/certificate_issuers.yml, admins edit
+# A list like CertificateType: defaults come from config/certificate_issuers.yml, admins edit
 # them at /certificate_issuers, and "Other..." in an issuer picker adds one from a typed name.
 class CertificateIssuer < ApplicationRecord
+  include CreatableFromName
+
   FUZZY_THRESHOLD = 0.45
   DEFAULTS_FILE = Rails.root.join("config/certificate_issuers.yml")
   CODE_PLACEHOLDER = "{code}".freeze
-  CREATE_ATTEMPTS = 3
 
   enum :verification_method, { unknown: 0, qr_or_code: 1, code_lookup: 2, contact: 3, no_registry: 4 },
     prefix: :verified_by, default: :unknown, validate: true
@@ -92,37 +93,6 @@ class CertificateIssuer < ApplicationRecord
         .map { |issuer| [ issuer, issuer.match_similarity.to_f ] }
     end
 
-    # "Other..." in an issuer picker: the existing issuer with this name or alias (case-insensitive;
-    # an active one first, so "Red Cross" finds American Red Cross), or a new one with a code made
-    # from the name and verification_method unknown. Raises on a blank name. IssuerChoice tells the
-    # user which it was (#previously_new_record?, #name, #active?).
-    #
-    # Safe when two requests add the same new name at once, inside a transaction too: the insert runs
-    # in a savepoint, and a name or code another request took first is looked up (or a new code
-    # chosen) again, up to CREATE_ATTEMPTS times.
-    def find_or_create_from_name!(name)
-      name = name.to_s.squish
-      raise ActiveRecord::RecordInvalid, new(name: name).tap(&:validate) if name.blank?
-
-      attempts = 0
-      begin
-        named(name) || transaction(requires_new: true) { create!(name: name, code: unique_code_for(name)) }
-      rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid => error
-        raise if error.is_a?(ActiveRecord::RecordInvalid) && !taken?(error.record)
-        raise if (attempts += 1) >= CREATE_ATTEMPTS
-
-        retry
-      end
-    end
-
-    # The issuer whose name or one of whose aliases is name, case-insensitive: an exact name first,
-    # then an active issuer's alias, then an inactive one's. nil when none.
-    def named(name)
-      find_by(name: name) || # citext
-        where("EXISTS (SELECT 1 FROM unnest(certificate_issuers.aliases) AS issuer_alias WHERE lower(issuer_alias) = lower(?))", name)
-          .order(active: :desc).ordered.first
-    end
-
     # The default issuers (config/certificate_issuers.yml), for db/seeds.rb. Existing codes are left as edited.
     def seed_defaults!
       YAML.safe_load_file(DEFAULTS_FILE).each.with_index(1) do |attributes, position|
@@ -133,21 +103,8 @@ class CertificateIssuer < ApplicationRecord
     end
 
     private
-      # A uniqueness error on name or code: another request got there first.
-      def taken?(record)
-        record.errors.of_kind?(:name, :taken) || record.errors.of_kind?(:code, :taken)
-      end
-
-      def unique_code_for(name)
-        base = name.upcase.gsub(/[^A-Z0-9]+/, "").first(20).presence || "ISSUER"
-        candidate = base
-        suffix = 1
-        while exists?(code: candidate)
-          suffix += 1
-          candidate = "#{base}-#{suffix}"
-        end
-        candidate
-      end
+      def defaults_from_name = {}
+      def code_for_unnamed = "ISSUER"
   end
 
   # Whether a URL's host belongs to this issuer.

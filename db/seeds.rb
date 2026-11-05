@@ -1,9 +1,9 @@
 # Idempotent: safe to run repeatedly (bin/rails db:seed). Existing rows are left as the
 # owner edited them; only missing ones are created.
 
-# Example master list (docs/PLAN.md). The owner edits the real list. Every type lasts 2 years
+# Example certificate types (docs/PLAN.md). The owner edits the real list. Every type lasts 2 years
 # until the owner changes it, except OSHA 10 and 30, which never expire (owner's rule, Nov 5, 2026).
-MASTER_LIST = [
+CERTIFICATE_TYPES = [
   [ "OSHA10", "OSHA 10 Construction", "OSHA Outreach Training Program", [ "OSHA 10-Hour Construction Industry Outreach Training", "OSHA 10 Hour" ] ],
   [ "OSHA30", "OSHA 30 Construction", "OSHA Outreach Training Program", [ "OSHA 30-Hour Construction Industry Outreach Training", "OSHA 30 Hour" ] ],
   [ "FIRSTAID", "First Aid/CPR/AED", nil, [ "Adult First Aid/CPR/AED", "First Aid CPR AED", "CPR/AED" ] ],
@@ -18,10 +18,16 @@ MASTER_LIST = [
   [ "CDLA", "CDL Class A", nil, [ "Commercial Driver License Class A", "Class A CDL" ] ],
   [ "AERIAL", "Aerial Lift Operator", nil, [ "Aerial Work Platform Operator", "MEWP Operator", "Boom Lift Operator" ] ],
   [ "FORKLIFT", "Forklift or Telehandler Operator", nil, [ "Powered Industrial Truck Operator", "Forklift Operator", "Telehandler Operator" ] ],
-  [ "RIGGER", "Rigger and Signal Person", nil, [ "Qualified Rigger", "Signal Person", "Rigging and Signaling" ] ]
+  [ "RIGGER", "Rigger and Signal Person", nil, [ "Qualified Rigger", "Signal Person", "Rigging and Signaling" ] ],
+  [ "BBP", "Bloodborne Pathogens", nil, [ "BBP", "Bloodborne Pathogens Training" ] ],
+  [ "HAZCOM", "Hazard Communication", nil, [ "HazCom", "Hazard Communication Training", "GHS" ] ],
+  [ "TRENCHING", "Trenching and Excavation Safety", nil, [ "Excavation Safety", "Trenching Safety" ] ],
+  [ "GCACADEMY", "GC Academy Construction", nil, [ "T-Mobile GC Academy" ] ],
+  [ "CAPSTAN", "Capstan Hoist Operations", nil, [ "Capstan Hoist" ] ],
+  [ "NWSATTT", "NWSA Telecommunications Tower Technician", nil, [ "NWSA Tower Technician", "TTT-1" ] ]
 ].freeze
 
-MASTER_LIST.each.with_index(1) do |(code, name, issuing_body, aliases), position|
+CERTIFICATE_TYPES.each.with_index(1) do |(code, name, issuing_body, aliases), position|
   CertificateType.find_or_create_by!(code: code) do |type|
     type.name = name
     type.issuing_body = issuing_body

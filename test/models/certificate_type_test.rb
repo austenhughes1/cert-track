@@ -1,6 +1,25 @@
 require "test_helper"
 
 class CertificateTypeTest < ActiveSupport::TestCase
+  test "find_or_create_from_name! makes a new type at the 2-year default, or reuses a name or alias" do
+    created = CertificateType.find_or_create_from_name!("  Scaffold  Safety ")
+
+    assert created.previously_new_record?
+    assert_equal [ "Scaffold Safety", "SCAFFOLDSAFETY", 24 ], [ created.name, created.code, created.validity_months ]
+    assert_equal created, CertificateType.find_or_create_from_name!("scaffold safety")
+    assert_not CertificateType.find_or_create_from_name!("scaffold safety").previously_new_record?
+
+    aliased = CertificateType.create!(name: "Tower Rescue Test", code: "TRT", aliases: [ "Rescue Course" ])
+    assert_equal aliased, CertificateType.find_or_create_from_name!("RESCUE COURSE")
+    assert_raises(ActiveRecord::RecordInvalid) { CertificateType.find_or_create_from_name!(" ") }
+  end
+
+  test "a name that is merely close makes a new type: duplicates are accepted for now" do
+    CertificateType.create!(name: "Scaffold Safety", code: "SCAF")
+
+    assert CertificateType.find_or_create_from_name!("Scaffold Safety Training").previously_new_record?
+  end
+
   def build(**attrs)
     CertificateType.new({ name: "Rigger", code: "RIGGER" }.merge(attrs))
   end

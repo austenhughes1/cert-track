@@ -160,7 +160,7 @@ class Ai::FakeProviderTest < ActiveSupport::TestCase
 
   private
     def prompt_for(pages, issuer_list: [])
-      Imports::Extraction::Prompt.new(master_list: MASTER_LIST, pages: pages, page_count: pages.size, issuer_list: issuer_list)
+      Imports::Extraction::Prompt.new(certificate_types: MASTER_LIST, pages: pages, page_count: pages.size, issuer_list: issuer_list)
     end
 
     def complete(pages, issuer_list: [])

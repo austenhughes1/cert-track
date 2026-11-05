@@ -2,7 +2,7 @@ module Imports
   module Extraction
     # Turns whatever the model replied into the model output contract, so nothing downstream has
     # to trust it:
-    #   - certificate_type_code kept only when it is an active master-list code (upcased), else null
+    #   - certificate_type_code kept only when it is an active certificate type code (upcased), else null
     #   - pages: integers within the pages this call covered, sorted and unique; a certificate
     #     with none gets every page of the call
     #   - dates: valid ISO YYYY-MM-DD strings, else null. The dropped value is mentioned in

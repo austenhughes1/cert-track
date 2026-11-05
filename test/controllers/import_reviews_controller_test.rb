@@ -237,6 +237,38 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_select "#raw_unread_pages", count: 0
   end
 
+  test "Other... for the type starts from the printed name and adds a type on accept, for a manager" do
+    @item.update!(certificate_name_raw: "Scaffold Safety Online Course", matched_certificate_type: nil, type_match: :unmatched)
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+    assert_select "select[name=?] option[value=other]", "review[certificate_type_id]"
+    assert_select "input[name=?][value=?]", "review[other_type_name]", "Scaffold Safety Online Course"
+
+    assert_difference -> { CertificateType.count } do
+      post accept_import_review_path(@item), params: { review: review_params(certificate_type_id: "other", other_type_name: "Scaffold Safety") }
+    end
+
+    assert @item.reload.accepted?
+    assert_equal "Scaffold Safety", @item.certificate.certificate_type.name
+    assert_equal @item.certificate.completed_on.advance(months: 24), @item.certificate.expires_on
+    assert_match "Scaffold Safety was added to the certificate types", flash[:notice]
+  end
+
+  test "Other... for the type on Save edits proposes the new type, and needs a name" do
+    sign_in_as users(:manager)
+
+    assert_no_difference -> { CertificateType.count } do
+      patch import_review_path(@item), params: { review: review_params(certificate_type_id: "other", other_type_name: "") }
+    end
+    assert_response :unprocessable_entity
+
+    patch import_review_path(@item), params: { review: review_params(certificate_type_id: "other", other_type_name: "Scaffold Safety") }
+
+    assert_equal "Scaffold Safety", @item.reload.matched_certificate_type.name
+    assert @item.type_matched?
+  end
+
   test "No expiration on the review form: ticked, it saves and accepts with no expiry whatever the type says" do
     sign_in_as users(:manager)
     get import_review_path(@item)
@@ -902,7 +934,7 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
 
     get import_review_path(@item)
 
-    assert_select "form#review_form [data-controller=issuer-picker]" do
+    assert_select "form#review_form [data-controller=other-choice]" do
       assert_select "[data-match=suggested]", "Suggested"
       assert_select "select[name=?]", "review[certificate_issuer_id]" do
         assert_select "optgroup[label=Suggested] option[value=?][selected]", ridge.id.to_s, text: "Ridgeline CPR · 58% match"

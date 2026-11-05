@@ -26,7 +26,7 @@ module Ask
       end
 
       private
-        # One Requirement per type, in master-list order. A type required of everyone and
+        # One Requirement per type, in certificate type order. A type required of everyone and
         # of a role is required of everyone.
         def requirements_for(report)
           records = project.project_requirements.eager_load(:certificate_type, :crew_role).to_a

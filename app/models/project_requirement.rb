@@ -1,4 +1,4 @@
-# One master-list type required on a project, for everyone (crew_role nil) or one role.
+# One certificate type required on a project, for everyone (crew_role nil) or one role.
 class ProjectRequirement < ApplicationRecord
   belongs_to :project
   belongs_to :certificate_type

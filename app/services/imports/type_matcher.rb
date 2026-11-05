@@ -1,5 +1,5 @@
 module Imports
-  # Matches the certificate type the model read off a card against the master list.
+  # Matches the certificate type the model read off a card against the certificate types.
   #
   #   result = Imports::TypeMatcher.new(code: "OSHA30", name_as_printed: "OSHA 30-Hour ...").call
   #   result.type        # => the CertificateType (the match, or the top suggestion), or nil
@@ -11,7 +11,8 @@ module Imports
   # Imports::Config.type_suggest_threshold or more is :suggested, never :matched. A code that
   # names an inactive (retired) type is only a suggestion, listed after any active candidates
   # with "note" => "inactive certificate type". Suggestions are best first, at most
-  # MAX_SUGGESTIONS.
+  # MAX_SUGGESTIONS. A type whose name and aliases carry numbers none of which are in the printed
+  # name is left out: the words of "30-hour Construction Safety" are as close to OSHA 10 as OSHA 30.
   class TypeMatcher
     Result = Data.define(:type, :match, :suggestions)
 
@@ -48,7 +49,17 @@ module Imports
       def fuzzy_candidates
         return [] unless @name_as_printed
 
+        printed = numbers_in(@name_as_printed)
         CertificateType.active.fuzzy_match(@name_as_printed, threshold: Imports::Config.type_suggest_threshold)
+          .reject { |type, _| printed.any? && numbers_of(type).any? && !printed.intersect?(numbers_of(type)) }
+      end
+
+      def numbers_of(type)
+        numbers_in([ type.name, *type.aliases ].join(" "))
+      end
+
+      def numbers_in(text)
+        text.scan(/\d+/).to_set
       end
 
       def entry(type, similarity, note: nil)

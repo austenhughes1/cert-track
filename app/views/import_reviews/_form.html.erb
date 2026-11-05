@@ -50,13 +50,19 @@
         <%= form.label :certificate_type_id, "Certificate type", class: "block text-sm font-medium text-gray-700" %>
         <%= import_match_badge(item.type_match) %>
       </div>
-      <%= form.select :certificate_type_id,
-            import_picker_options(suggestions: item.type_suggestions, records: type_choices, selected_id: fields.certificate_type_id),
-            { include_blank: "Choose a type" }, required: true, class: "#{input_class} bg-white",
-            data: { review_expiry_target: "type", action: "change->review-expiry#update" } %>
-      <% if can?(:admin) %>
-        <p class="<%= hint_class %>">Missing a type? <%= link_to "Add it to the master list", new_certificate_type_path, class: "text-blue-700 hover:underline", target: "_blank" %>.</p>
-      <% end %>
+      <div data-controller="other-choice">
+        <%= form.select :certificate_type_id,
+              import_type_options(suggestions: item.type_suggestions, records: type_choices, selected_id: fields.certificate_type_id),
+              { include_blank: "Choose a type" }, required: true, class: "#{input_class} bg-white",
+              data: { review_expiry_target: "type", other_choice_target: "select", action: "change->review-expiry#update change->other-choice#toggle" } %>
+        <p class="<%= hint_class %>" id="review_type_hint">Providers name the same certificate differently, so pick the type it is. Not listed? Choose <%= CertificateIssuersHelper::OTHER_LABEL %>.</p>
+        <div class="mt-2" data-other-choice-target="other">
+          <%= form.label :other_type_name, "New certificate type's name", class: "block text-xs font-medium text-gray-600" %>
+          <%= form.text_field :other_type_name, value: fields.other_type_name || item.certificate_name_raw, autocomplete: "off", maxlength: 200, size: nil,
+                data: { other_choice_target: "name" }, class: input_class %>
+          <p class="<%= hint_class %>">Only used with <%= CertificateIssuersHelper::OTHER_LABEL %>: it becomes a new certificate type, valid <%= CertificateType::DEFAULT_VALIDITY_MONTHS %> months until an admin changes that.</p>
+        </div>
+      </div>
     </div>
 
     <div class="grid gap-4 sm:grid-cols-2">

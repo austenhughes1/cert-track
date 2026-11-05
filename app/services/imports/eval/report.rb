@@ -6,12 +6,12 @@ module Imports
     #
     #   report.field_accuracy                  # => { "holder_name" => [22, 24], ... }
     #   report.percent("holder_name")          # => 91.7
-    #   report.meets_bar?                      # => true when type, holder and both dates are >= 90%
+    #   report.meets_bar?                      # => true when name, type, holder and both dates are >= 90%
     #   puts report                            # the table
     class Report
       BAR = 90.0
       LABELS = {
-        "certificate_type_code" => "type", "holder_name" => "holder", "completed_on" => "completed",
+        "certificate_name_as_printed" => "name", "certificate_type_code" => "type", "holder_name" => "holder", "completed_on" => "completed",
         "expires_on" => "expires", "certificate_number" => "number",
         "certificate_issuer_code" => "issuer", "verification_code" => "vcode", "verification_url" => "vlink"
       }.freeze
@@ -55,7 +55,7 @@ module Imports
       end
 
       def below_bar
-        Scorer::SCORED_FIELDS.reject { |field| percent(field) >= BAR }
+        Scorer::SCORED_FIELDS.reject { |field| field_accuracy.fetch(field).last.zero? || percent(field) >= BAR }
       end
 
       def meets_bar?
@@ -75,7 +75,7 @@ module Imports
         lines << table_header
         rows.each { |row| lines << table_row(row) }
         lines << ""
-        lines << "Field accuracy (the bar is #{BAR.to_i}% on type, holder, completed and expires):"
+        lines << "Field accuracy (the bar is #{BAR.to_i}% on name, type, holder, completed and expires):"
         (Scorer::SCORED_FIELDS + Scorer::INFO_FIELDS).each { |field| lines << accuracy_line(field) }
         lines << "Verification fields (reported on their own, not part of the bar):"
         Scorer::VERIFICATION_FIELDS.each { |field| lines << accuracy_line(field) }
@@ -102,7 +102,7 @@ module Imports
           certs = "#{score.matched}/#{score.expected_count}#{"+#{score.extra}" if score.extra.positive?}"
           cells = LABELS.keys.map do |field|
             correct, field_total = score.fields.fetch(field)
-            (field_total.zero? && Scorer::VERIFICATION_FIELDS.include?(field) ? "-" : "#{correct}/#{field_total}").ljust(9)
+            (field_total.zero? ? "-" : "#{correct}/#{field_total}").ljust(9)
           end
           [ name, certs.ljust(7), *cells, number(row.units).rjust(8), "  #{notes(score)}" ].join(" ").rstrip
         end

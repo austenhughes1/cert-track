@@ -172,7 +172,7 @@ module Imports
       def text_calls(provider, usable, page_count)
         model = Ai::Config.extraction_model(provider)
         text_chunks(usable).map do |chunk|
-          prompt = Extraction::Prompt.new(master_list: master_list, pages: chunk, page_count: page_count)
+          prompt = Extraction::Prompt.new(certificate_types: certificate_types, pages: chunk, page_count: page_count)
           PlannedCall.new(model: model, pages: chunk.map(&:first), image_pages: [], system: prompt.system, user: prompt.user,
             max_output_tokens: TEXT_OUTPUT_TOKENS)
         end
@@ -181,7 +181,7 @@ module Imports
       def vision_calls(model, pages, page_count)
         pages.each_slice(Ai::Config.max_images(model)).map do |chunk|
           numbers = chunk.map(&:first)
-          prompt = Extraction::Prompt.new(master_list: master_list, pages: chunk, page_count: page_count, image_pages: numbers)
+          prompt = Extraction::Prompt.new(certificate_types: certificate_types, pages: chunk, page_count: page_count, image_pages: numbers)
           PlannedCall.new(model: model, pages: numbers, image_pages: numbers, system: prompt.system, user: prompt.user,
             max_output_tokens: VISION_OUTPUT_TOKENS)
         end
@@ -238,7 +238,7 @@ module Imports
         certificates = []
         non_certificate_pages = blank.dup
         calls.each do |call|
-          data = Extraction::Normalizer.new(pages: call["pages"], codes: master_list.map(&:first)).call(call["data"])
+          data = Extraction::Normalizer.new(pages: call["pages"], codes: certificate_types.map(&:first)).call(call["data"])
           certificates.concat(data["certificates"])
           non_certificate_pages.concat(data["non_certificate_pages"])
         end
@@ -277,9 +277,9 @@ module Imports
           "and no vision model is set: set EXTRACTION_VISION_MODEL (#{Ai::Config::SPIKE_DOC})."
       end
 
-      # Active master-list types as [[code, name, aliases], ...].
-      def master_list
-        @master_list ||= CertificateType.active.ordered.pluck(:code, :name, :aliases)
+      # Active certificate types as [[code, name, aliases], ...].
+      def certificate_types
+        @certificate_types ||= CertificateType.active.ordered.pluck(:code, :name, :aliases)
       end
 
       # Renders the unreadable pages and yields ({ number => jpeg path } for those that aren't

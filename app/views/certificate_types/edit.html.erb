@@ -2,7 +2,7 @@
 <% content_for :title, "Edit #{name}" %>
 
 <div class="max-w-3xl">
-  <%= link_to "← Master list", certificate_types_path(status: ("all" unless @certificate_type.active_was)), class: "text-sm text-blue-700 hover:underline" %>
+  <%= link_to "← Certificate types", certificate_types_path(status: ("all" unless @certificate_type.active_was)), class: "text-sm text-blue-700 hover:underline" %>
   <h1 class="mt-2 text-2xl font-semibold">Edit <%= name %></h1>
   <p class="mt-1 text-sm text-gray-500">
     <% if @usage.in_use? %>
@@ -22,7 +22,7 @@
     <h2 class="text-sm font-semibold text-gray-900"><%= deactivates ? "Deactivate this type" : "Delete this type" %></h2>
     <p class="mt-1 text-sm text-gray-600">
       <% if !@usage.in_use? %>
-        Nothing uses it yet, so it can be removed from the master list for good.
+        Nothing uses it yet, so it can be removed for good.
       <% elsif deactivates %>
         It's used by <%= @usage.to_sentence %>, so it can't be deleted.
         Deactivating hides it from the default list and keeps its history.

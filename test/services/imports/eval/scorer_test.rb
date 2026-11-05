@@ -1,6 +1,18 @@
 require "test_helper"
 
 class Imports::Eval::ScorerTest < ActiveSupport::TestCase
+  test "the printed name allows small differences in wording, not another certificate" do
+    score = ->(want, got) {
+      Imports::Eval::Scorer.new(expected: { "certificates" => [ { "pages" => [ 1 ], "certificate_name_as_printed" => want } ] },
+        actual: { "certificates" => [ { "pages" => [ 1 ], "certificate_name_as_printed" => got } ] }).call.fields.fetch("certificate_name_as_printed")
+    }
+
+    assert_equal [ 1, 1 ], score.call("Adult First Aid/CPR/AED", "ADULT FIRST AID / CPR / AED")
+    assert_equal [ 1, 1 ], score.call("Bloodborne Pathogens Online Training", "Bloodborne Pathogens Training Online Course")
+    assert_equal [ 0, 1 ], score.call("Bloodborne Pathogens Online Training", "Hazard Communication Online Training")
+    assert_equal [ 0, 0 ], score.call(nil, "Anything")
+  end
+
   test "a perfect answer scores every field" do
     score = score(expected: [ card ], actual: [ card ])
 

@@ -8,17 +8,17 @@ module Imports
     # either way: its reply is schema-checked and normalized, and Ruby (not the model) matches
     # people, certificate types and issuers.
     #
-    #   prompt = Imports::Extraction::Prompt.new(master_list: [["OSHA30", "OSHA 30 Construction", []]],
+    #   prompt = Imports::Extraction::Prompt.new(certificate_types: [["OSHA30", "OSHA 30 Construction", []]],
     #     pages: [[1, "CERTIFICATE OF COMPLETION ..."]], page_count: 1)
-    #   prompt.system # => rules + master list + issuer list
+    #   prompt.system # => rules + certificate types + issuer list
     #   prompt.user   # => "<document>\n=== page 1 ===\n...\n</document>"
     #
-    # issuer_list (Phase 3b) is [[code, name, aliases], ...] like master_list; left out, it is the
+    # issuer_list (Phase 3b) is [[code, name, aliases], ...] like certificate_types; left out, it is the
     # active issuers (Prompt.issuer_list). Empty aliases are left out of its lines to keep the
     # prompt short: it is sent with every call.
     class Prompt
       PAGE_CHAR_LIMIT = 6_000 # a certificate page is far shorter; this caps manuals and junk
-      TAG = %r{<\s*/?\s*(document|master_list|issuer_list)\b[^>]*>}i
+      TAG = %r{<\s*/?\s*(document|certificate_types|issuer_list)\b[^>]*>}i
       CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/
 
       SYSTEM = <<~PROMPT.freeze
@@ -28,7 +28,7 @@ module Imports
         1. Reply with one JSON object shaped like this example: %<example>s
         2. Dates are ISO YYYY-MM-DD. Rewrite printed dates such as 03/14/2025 or March 14, 2025 in that form.
         3. Use null when a field is absent or unreadable. Never guess a value.
-        4. certificate_type_code must be one of the codes in the master list below, or null when no type clearly fits.
+        4. certificate_name_as_printed is the certificate's name exactly as printed. certificate_type_code is the code of the type from the certificate types list below that this certificate is, even when it is worded differently, because training providers name the same certificate differently. Use null when none fits: it is still a certificate, so return it.
         5. Return one entry per distinct certificate. One file can hold several certificates; the front and back of one card are a single certificate.
         6. pages lists the 1-indexed page numbers, from the "=== page N ===" markers, that each certificate is printed on.
         7. List cover sheets, course outlines, agendas, sign-in sheets, blank pages and any other page that is not a certificate in non_certificate_pages.
@@ -38,10 +38,10 @@ module Imports
         11. issuer is the training provider's name as printed. certificate_issuer_code must be one of the codes in the issuer list below, or null when no issuer clearly fits.
         12. verification_code is a code printed for checking the certificate on the issuer's website, such as a certificate ID or eCard code (it may equal certificate_number). verification_url is a verification web address printed on the certificate. Copy both exactly as printed, or use null; never build one. QR codes are read separately, so ignore them.
 
-        Master list, one JSON object per line:
-        <master_list>
-        %<master_list>s
-        </master_list>
+        Certificate types, one JSON object per line:
+        <certificate_types>
+        %<certificate_types>s
+        </certificate_types>
 
         Issuer list, one JSON object per line:
         <issuer_list>
@@ -54,10 +54,10 @@ module Imports
         CertificateIssuer.active.ordered.pluck(:code, :name, :aliases)
       end
 
-      # master_list: [[code, name, aliases], ...]; pages: [[number, text], ...] for this call;
-      # image_pages: page numbers whose images are attached, in order; issuer_list: as master_list.
-      def initialize(master_list:, pages:, page_count:, image_pages: [], issuer_list: nil)
-        @master_list = master_list
+      # certificate_types: [[code, name, aliases], ...]; pages: [[number, text], ...] for this call;
+      # image_pages: page numbers whose images are attached, in order; issuer_list: as certificate_types.
+      def initialize(certificate_types:, pages:, page_count:, image_pages: [], issuer_list: nil)
+        @certificate_types = certificate_types
         @pages = pages
         @page_count = page_count
         @image_pages = image_pages
@@ -65,11 +65,11 @@ module Imports
       end
 
       def system
-        lines = @master_list.map { |code, name, aliases| { code: code, name: name, aliases: Array(aliases) }.to_json }
+        lines = @certificate_types.map { |code, name, aliases| { code: code, name: name, aliases: Array(aliases) }.to_json }
         issuers = (@issuer_list ||= self.class.issuer_list).map do |code, name, aliases|
           { code: code, name: name, aliases: Array(aliases).presence }.compact.to_json
         end
-        format(SYSTEM, example: Schema::EXAMPLE, master_list: lines.join("\n"), issuer_list: issuers.join("\n"))
+        format(SYSTEM, example: Schema::EXAMPLE, certificate_types: lines.join("\n"), issuer_list: issuers.join("\n"))
       end
 
       def user

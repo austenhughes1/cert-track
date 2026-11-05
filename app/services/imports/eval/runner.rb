@@ -61,7 +61,7 @@ module Imports
           ocr = @text_extractor.new(sample.path, content_type: sample.content_type).call
           text = @vision_only ? ocr.pages.map { |page| "=== page #{page.number} ===\n" }.join("\n") : ocr.text
           result = Imports::Extractor.for_file(sample.path.to_s, content_type: sample.content_type, text: text).call
-          Row.new(sample: sample, score: Scorer.new(expected: expected, actual: with_final_expiry(result.data)).call, units: result.units,
+          Row.new(sample: sample, score: Scorer.new(expected: expected, actual: as_proposed(result.data)).call, units: result.units,
             input_tokens: result.input_tokens, output_tokens: result.output_tokens, requests: result.requests,
             seconds: elapsed(started), error: nil, quota: false)
         rescue Ai::ConfigurationError
@@ -74,14 +74,15 @@ module Imports
           failed_row(sample, "#{error.class.name.demodulize}: #{error.message.truncate(120)}", started)
         end
 
-        # Answer files hold the expiry the certificate ends up with, so each returned certificate is
-        # scored on the date the pipeline would propose from what the model read (Imports::DateRules).
-        def with_final_expiry(data)
+        # Each returned certificate is scored on what the pipeline would propose from what the model
+        # read: the type from its code or, failing that, the fuzzy match on its printed name
+        # (Imports::TypeMatcher), and the expiry from Imports::DateRules.
+        def as_proposed(data)
           certificates = Array(data["certificates"]).map do |certificate|
             type = Imports::TypeMatcher.new(code: certificate["certificate_type_code"], name_as_printed: certificate["certificate_name_as_printed"]).call.type
             dates = Imports::DateRules.new(completed_on: certificate["completed_on"], expires_on: certificate["expires_on"],
               validity_months: certificate["validity_months"], no_expiration: certificate["no_expiration"], certificate_type: type).call
-            certificate.merge("expires_on" => dates.expires_on&.iso8601)
+            certificate.merge("certificate_type_code" => type&.code, "expires_on" => dates.expires_on&.iso8601)
           end
           data.merge("certificates" => certificates)
         end

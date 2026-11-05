@@ -221,7 +221,7 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     assert_select "#active_projects", count: 0
   end
 
-  test "the master list step is done once a type has a validity period" do
+  test "the certificate types step is done once a type has a validity period" do
     wipe_tracker_data!
     CertificateType.update_all(validity_months: nil)
     sign_in_as users(:admin)
@@ -244,7 +244,7 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     assert_select "#getting_started a", count: 0
   end
 
-  test "managers can add crew and projects but not edit the master list from the steps" do
+  test "managers can add crew and projects but not edit the certificate types from the steps" do
     wipe_tracker_data!
     CertificateType.update_all(validity_months: nil)
     sign_in_as users(:manager)
@@ -306,7 +306,7 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
       count
     end
 
-    # A fresh install: the seeded master list and users, nothing else.
+    # A fresh install: the seeded certificate types and users, nothing else.
     def wipe_tracker_data!
       ImportItem.update_all(certificate_id: nil, duplicate_of_id: nil)
       Certificate.update_all(import_item_id: nil)

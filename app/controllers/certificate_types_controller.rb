@@ -1,4 +1,4 @@
-# The master list of certificate types. Every signed-in user can read it; only admins
+# The list of certificate types. Every signed-in user can read it; only admins
 # change it. A type that anything points at is deactivated rather than deleted.
 class CertificateTypesController < ApplicationController
   # List filters besides the default (no param), which shows active types only.
@@ -37,7 +37,7 @@ class CertificateTypesController < ApplicationController
     @certificate_type = CertificateType.new(certificate_type_params)
 
     if @certificate_type.save
-      redirect_to list_path(@certificate_type), notice: "Added #{@certificate_type.name} to the master list."
+      redirect_to list_path(@certificate_type), notice: "Added #{@certificate_type.name} to the certificate types."
     else
       render :new, status: :unprocessable_entity
     end

@@ -780,7 +780,7 @@ class AskQueryTest < ActiveSupport::TestCase
     result = ask("who has hazwoper 40")
 
     assert_equal certificate_types(:retired_hazwoper), result.certificate_type
-    assert_includes result.notes, "HAZWOPER 40 is retired from the master list."
+    assert_includes result.notes, "HAZWOPER 40 is a retired certificate type."
   end
 
   test "today defaults to Denver's date and can be given" do

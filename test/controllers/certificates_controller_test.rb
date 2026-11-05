@@ -10,6 +10,43 @@ class CertificatesControllerTest < ActionDispatch::IntegrationTest
 
   # --- show / new ---
 
+  test "Other... for the type adds it from the typed name, and a manager can use it" do
+    sign_in_as users(:manager)
+
+    assert_difference -> { CertificateType.count } do
+      post crew_member_certificates_path(@juan), params: { certificate: valid_attributes.merge(certificate_type_id: "other", other_type_name: "Scaffold Safety") }
+    end
+
+    certificate = @juan.certificates.order(:id).last
+    assert_equal "Scaffold Safety", certificate.certificate_type.name
+    assert_equal certificate.completed_on.advance(months: 24), certificate.expires_on
+    assert_match "Scaffold Safety was added to the certificate types", flash[:notice]
+    assert_nil CertificateType.find_by(name: "Other")
+  end
+
+  test "Other... for the type needs a name, a failed save adds no type, and viewers can't use it" do
+    sign_in_as users(:manager)
+
+    assert_no_difference -> { CertificateType.count } do
+      post crew_member_certificates_path(@juan), params: { certificate: valid_attributes.merge(certificate_type_id: "other", other_type_name: " ") }
+      assert_response :unprocessable_entity
+      assert_select "#error_explanation", /new certificate type's name/
+      assert_select "select[name=?] option[value=other]", "certificate[certificate_type_id]"
+
+      post crew_member_certificates_path(@juan), params: { certificate: valid_attributes.merge(certificate_type_id: "other", other_type_name: "Scaffold Safety", completed_on: "") }
+      assert_response :unprocessable_entity
+      assert_select "select[name=?] option[value=other][selected]", "certificate[certificate_type_id]"
+      assert_select "input[name=?][value=?]", "certificate[other_type_name]", "Scaffold Safety"
+    end
+
+    sign_out
+    sign_in_as users(:viewer)
+    assert_no_difference -> { CertificateType.count } do
+      post crew_member_certificates_path(@juan), params: { certificate: valid_attributes.merge(certificate_type_id: "other", other_type_name: "Scaffold Safety") }
+    end
+    assert_response :forbidden
+  end
+
   test "the No expiration box saves a certificate with no expiry, whatever the type's validity" do
     sign_in_as users(:manager)
 
@@ -454,15 +491,15 @@ class CertificatesControllerTest < ActionDispatch::IntegrationTest
 
     get new_crew_member_certificate_path(@juan)
 
-    assert_select "#verification_fields [data-controller=issuer-picker]" do
-      assert_select "select[name=?][data-issuer-picker-target=select][data-action=?]", "certificate[certificate_issuer_id]",
-        "change->issuer-picker#toggle" do
+    assert_select "#verification_fields [data-controller=other-choice]" do
+      assert_select "select[name=?][data-other-choice-target=select][data-action=?]", "certificate[certificate_issuer_id]",
+        "change->other-choice#toggle" do
         assert_select "option[value='']", "Not known"
         assert_select "option[value=?]", summit.id.to_s, "Summit Safety Training"
         assert_select "option[value=?]", retired.id.to_s, count: 0
         assert_select "option[value=other]:not([selected])", "Other…"
       end
-      assert_select "[data-issuer-picker-target=other] input[name=?][data-issuer-picker-target=name]", "certificate[other_issuer_name]"
+      assert_select "[data-other-choice-target=other] input[name=?][data-other-choice-target=name]", "certificate[other_issuer_name]"
     end
     assert_select "input[name=?]", "certificate[verification_code]"
     assert_select "input[name=?][inputmode=url]", "certificate[verification_url]"

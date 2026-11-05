@@ -9,7 +9,7 @@ Build **CertTrack** (working name), a Rails 8 app for ABA Ventures. It tracks cr
 **In scope**
 
 - Crew roster, plus certificate records with completion date, expiration date and one or more attached files per line item.
-- A master list of certificate types. Each project selects its own subset, optionally per crew role.
+- A list of certificate types. Each project selects its own subset, optionally per crew role.
 - A compliance matrix per project showing who is valid, expiring or missing each required certificate.
 - Bulk import: drop many files or zip archives. AI identifies certificate type, holder and dates, and a person reviews anything uncertain.
 - Email alerts at 90, 60, 30 and 7 days before expiry, and on expiry.
@@ -127,7 +127,7 @@ crew_members
   notes          text
   # GIN trigram index on lower(first_name || ' ' || last_name)
 
-certificate_types     # the master list
+certificate_types     # the certificate types list
   name           citext   unique, not null    # "OSHA 30-Hour Construction"
   code           string   unique              # "OSHA30"
   issuing_body   string
@@ -147,7 +147,7 @@ projects
   packet_built_at datetime nullable    # time of the latest packet build
   # has_one_attached :packet   (latest zip only; deleted 7 days after it is built)
 
-project_requirements  # each project's subset of the master list
+project_requirements  # each project's subset of the certificate types
   project_id     ref      on_delete: :cascade
   certificate_type_id ref
   crew_role_id   ref      nullable   # null = everyone on the project
@@ -270,6 +270,7 @@ ai_usage_days
 **Rules the models must enforce**
 
 - **Expiration date (owner's rule, Nov 5, 2026).** Use the printed date when the card has one (`printed`). "No expiration" (`no_expiration`) is assigned only when the certificate explicitly says it has none, read by the model or ticked by a person; a missing date never means that. Otherwise, if the type never expires, leave it null (`none`): a blank validity means this, and OSHA 10 and 30 are the only default types that never expire. Otherwise, if the card states a validity period, use `completed_on` plus that period (`printed_period`). Otherwise use `completed_on` plus the type's `validity_months` (`computed`). Every other default type and every new type starts at 24 months, and an import with no type yet is proposed 24 months until a reviewer picks one.
+- **Certificate types aren't a gate (owner, Nov 5, 2026).** Any certificate can be a type, and each project chooses which to require. Providers word the same certificate differently, so the type is proposed from the model's code or a fuzzy match on the printed name, and a number in the name has to agree (a 30-hour card is never offered as OSHA 10). "Other..." in a type picker creates a new type from the typed name, at 24 months, for anyone who can edit certificates; a name that is merely close makes a new type, and duplicates can be cleaned up later.
 - **Current certificate.** For a crew member and type, the current certificate is the one with `superseded_at` null. Saving a newer certificate of the same type sets `superseded_at` on the older one. History is kept, never deleted. A certificate a person confirmed fake (Phase 3b) ranks below every other one, so a genuine card on file stays current when a newer one turns out fake; recording or replacing that result re-ranks them.
 - **Required types for a person on a project.** All `project_requirements` for that project where `crew_role_id` is null or equals the assignment's role (falling back to the member's role).
 - **Compliance status per required type**, with `today` in America/Denver:
@@ -290,8 +291,8 @@ Nine screens cover the manual workflow. Everything here works without AI, so Pha
 | Dashboard | `/` | Counts of expired, expiring (30 days) and missing across active projects; review-queue count; next 20 expirations | n/a |
 | Crew | `/crew_members` | Search (trigram), filter by active, employer, role and status. Member page lists current certificates with a history toggle, the files on each line item, project assignments and per-project compliance | admin, manager |
 | Certificate | nested under crew member | Add or edit a line item: type, number, issuer, completed and expires dates, notes. Drag-and-drop **multiple files per line item** (PDF, JPG, PNG, HEIC, WEBP; 25 MB max each) with thumbnail preview and download | admin, manager |
-| Master list | `/certificate_types` | CRUD for certificate types: aliases, validity months, issuing body, sort order | admin |
-| Projects | `/projects` | CRUD; a requirements editor that ticks types from the master list, each optionally limited to one role; "copy requirements from project"; crew assignments with role | admin, manager |
+| Certificate types | `/certificate_types` | CRUD for certificate types: aliases, validity months, issuing body, sort order | admin |
+| Projects | `/projects` | CRUD; a requirements editor that ticks certificate types, each optionally limited to one role; "copy requirements from project"; crew assignments with role | admin, manager |
 | Compliance matrix | `/projects/:id/compliance` | Rows are assigned crew, columns are required types, cells are colored by status with the expiry date. Click a cell to open the certificate. Export CSV. **Download packet**: a zip of every current certificate file for the project's crew plus an index PDF. The zip is kept 7 days; each build's index PDF is kept for good under "Past builds" | n/a |
 | Imports | `/imports` | Drop zone for many files or zips, live batch progress, review queue | admin, manager |
 | Ask and Chat | `/ask`, `/chat` | See the AI chatbot section | n/a (all roles can ask) |
@@ -313,7 +314,7 @@ Nine screens cover the manual workflow. Everything here works without AI, so Pha
 - Compute compliance in one query per project (join assignments, requirements and current certificates) rather than per cell. Matrix pages must render in under 500 ms for 50 crew × 15 types.
 - Viewers are read-only. Enforce roles with a small `authorize!` helper in controllers; no extra gem.
 
-**Seed master list (examples only; the owner edits the real list and validity periods)**
+**Seed certificate types (examples only; the owner edits the real list and validity periods)**
 
 OSHA 10 Construction, OSHA 30 Construction, First Aid/CPR/AED, Flagger, Competent Person (Excavation and Trenching), Confined Space Entry, Fall Protection, Authorized Climber, Climber Rescue, RF Safety Awareness, Fiber Optic Technician, CDL Class A, Aerial Lift Operator, Forklift or Telehandler Operator, Rigger and Signal Person. Seed every `validity_months` as null so nothing is computed until the owner sets it.
 
@@ -326,9 +327,9 @@ Free local OCR reads every file first. A free model then turns the text into JSO
 1. **Intake.** `POST /imports` takes many files via direct upload: PDF, JPG, JPEG, PNG, HEIC, WEBP and ZIP, up to 500 MB per batch. Create an `ImportBatch` and enqueue `Imports::ExpandJob`.
 2. **Expand.** Unzip with `rubyzip` into `Dir.mktmpdir`, recursing into nested zips two levels deep. Skip `__MACOSX`, `.DS_Store`, `Thumbs.db` and hidden files. Reject entries with `..` or absolute paths. Stop at 2,000 entries or 2 GB uncompressed (zip-bomb guard). Each supported file is a candidate; hash it with SHA-256. Once every upload is unpacked, the uploads themselves are deleted; a file uploaded on its own (not in a zip) stays, as its item's file. If unpacking stops on an unexpected error, the uploads are kept for the redo, and the nightly purge deletes them 30 days after the drop.
 3. **Extract text (free, local).** For PDFs run `pdftotext -layout` per page. If a page yields fewer than 40 characters, it is a scan: rasterize with `pdftoppm -r 300` and run `tesseract`. For images, auto-rotate and convert to grayscale with libvips, then run `tesseract`. Store the text in `extracted_text` with `=== page N ===` markers. Then read QR codes (Phase 3b, free, local): run `zbarimg` with only the QR symbology enabled on every page image (a PDF's first 30 pages, rendered in grayscale at 150 dpi; a photo turned upright and made grayscale with libvips), trying it as is, then at 2x and 3x until one decodes (a PDF page is rendered again at 300 and 450 dpi, a photo is enlarged with libvips; at most 36 MP), and store each decoded text with its page number in `barcodes`.
-4. **AI extraction (free model).** Send the page text, the master list (code, name, aliases), the issuer list (code, name, aliases) and the JSON schema below. Use `EXTRACTION_MODEL` through `ruby_llm` with structured output. If OCR text is unusable, send the page image (long side 1,568 px or less) to `EXTRACTION_VISION_MODEL` instead. A blank page needs no call. Without a vision model, unreadable pages are skipped and named in the certificate's notes. Usually one call per source file returns every certificate in it, with page numbers. A file with more than 24,000 characters of text takes one call per 24,000 characters, never splitting a page. Unreadable pages go in extra vision calls, as many images per call as the model accepts. The replies are merged.
+4. **AI extraction (free model).** Send the page text, the certificate types (code, name, aliases), the issuer list (code, name, aliases) and the JSON schema below. Use `EXTRACTION_MODEL` through `ruby_llm` with structured output. If OCR text is unusable, send the page image (long side 1,568 px or less) to `EXTRACTION_VISION_MODEL` instead. A blank page needs no call. Without a vision model, unreadable pages are skipped and named in the certificate's notes. Usually one call per source file returns every certificate in it, with page numbers. A file with more than 24,000 characters of text takes one call per 24,000 characters, never splitting a page. Unreadable pages go in extra vision calls, as many images per call as the model accepts. The replies are merged.
 5. **Split.** For each certificate returned, create an `ImportItem`. Multi-page PDFs are split by page range with `combine_pdf`, and the split file is attached to the item. The whole PDF is not kept once its pages are split out.
-6. **Match type (Ruby).** Accept `certificate_type_code` only if it exists in the master list. Otherwise fuzzy-match `certificate_name_as_printed` against names and aliases with `pg_trgm`; similarity of 0.45 or more is a suggestion, not a match.
+6. **Match type (Ruby).** Accept `certificate_type_code` only if it is an active certificate type. Otherwise fuzzy-match `certificate_name_as_printed` against names and aliases with `pg_trgm`; similarity of 0.45 or more is a suggestion, not a match.
 6b. **Match issuer and verification fields (Ruby, Phase 3b).** In order: a QR code or printed link on the certificate's pages whose host is on an active issuer's `domains` is a match; else `certificate_issuer_code` naming an active issuer is a match; else `issuer` is fuzzy-matched against issuer names and aliases (0.45 or more is a suggestion). `verification_url` is the QR link on the issuer's domain, else the printed URL (normalized to `https://`), else the issuer's `link_template` with the code. A printed URL on another site than the matched issuer's gives way to the issuer's own `link_template` link, unless it imitates an issuer's site (then it is kept, so authenticity rule 1 flags it). When the certificate's pages carry several of the issuer's QR links (one page or photo with several people's cards), the one whose id is the model's verification code or certificate number is used, else the one naming the holder's last name (360training), else none. `verification_code` is the model's, else the id read from the QR link's query (`certnumber`, `certificate_id`, `enrollmentId`, `cid`, `code`, `id`).
 7. **Match person (Ruby).** Normalize the holder name and compare against crew full names and `name_aliases` with `pg_trgm`. An exact normalized match is a match. Otherwise the best candidate at 0.6 or more, beating the runner-up by at least 0.15, becomes a suggestion. No candidate means review offers "create crew member".
 8. **Dates.** Parse ISO dates. Reject `completed_on` in the future and `expires_on` before `completed_on`. If `expires_on` is null, apply the expiration date rule in order: the model's `no_expiration` (`no_expiration`), a type that never expires, the model's `validity_months` (`printed_period`), then the type's validity or 24 months (`computed`). The model never does the date math.
@@ -438,7 +439,7 @@ The Haiku estimate assumes two model round trips of about 4,000 input tokens and
 - Point `ruby_llm`'s OpenAI-compatible provider at `https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/v1` ([Cloudflare](https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility)). Pick `CHAT_MODEL` from catalog models that support function calling. Confirm the exact config keys against the `ruby_llm` docs.
 - Tools are read-only `RubyLLM::Tool` classes, scoped to the signed-in user:
   - `find_crew_members(name)`: up to 5 matches with id, name, role, employer, active.
-  - `find_certificate_types(query)`: matches from the master list.
+  - `find_certificate_types(query)`: matching certificate types.
   - `check_certificate(crew_member_id, certificate_type_id)`: status, expiry and certificate id.
   - `list_certificates(crew_member_id, include_history)`: current, or all.
   - `who_has(certificate_type_id, status)`: holders filtered by status.
@@ -500,7 +501,7 @@ Status (Nov 4, 2026): deployed. `https://certs.abaventures.net/up` returns 200 w
 - [x] Migrations, models, validations and the model rules from the Data model section.
 - [x] Crew CRUD with trigram search and filters.
 - [x] Certificate line items with multiple attached files: direct upload to R2, photos and scans stored shrunk (2400 px JPEG at quality 80; scanned PDF pages at 200 ppi), thumbnails.
-- [x] Master list CRUD with aliases; seed the example list.
+- [x] Certificate types CRUD with aliases; seed the example list.
 - [x] Projects, requirements editor with optional role, "copy requirements", assignments.
 - [x] `Compliance::ProjectReport` service, matrix view, CSV export, packet zip built in a background job (zip kept 7 days; each build's record and index PDF kept for good).
 - [x] Dashboard and role-based authorization.
@@ -554,7 +555,7 @@ Owner decisions (Nov 4, 2026):
 - [x] Verify with an assisted check for every issuer, plus automatic checks where the issuer's site allows them. Red Cross, ClickSafety, Safety LMS/ComTrain and HealthStream forbid automated lookups in their terms, and 360training's verification host disallows all robots, so those stay assisted.
 - [x] Read QR codes locally with `zbar-tools` in the Docker image (QR only).
 - [x] Never omit a certificate unless it is verified fake. The owner, Nov 4, 2026: "Unless the cert is VERIFIED to be fake (e.g. the number is verified to be made up), let's never omit the cert." Only a person's "Not found" or "Doesn't match", recorded after checking with the issuer, makes a certificate confirmed fake: it counts as not valid and is left out of packets. A flag from an automatic check, a QR code's details or a lookalike link is only flagged for review: the certificate still counts by its dates and goes in packets. "Can't be verified" still counts as valid, with a note. This replaces the first decision, that any failed check counts as not valid until someone resolves it.
-- [x] Issuers are a master list like certificate types. "Other..." in an issuer picker creates a new issuer from the typed name.
+- [x] Issuers are a list like certificate types. "Other..." in an issuer picker creates a new issuer from the typed name.
 - [x] Certificates get a verification code and a verification link.
 - [x] The accuracy harness also scores issuer, verification code and verification link. They are reported separately and are not part of the 90% bar.
 
@@ -596,7 +597,7 @@ Automatic checks leave a person's result alone (rule 6), so they can never make 
 
 **Automatic check rules** (`Verification::HttpClient`): HTTPS only, and only to hosts on the domains of issuers that have an `automatic_check`. Redirects must stay on those hosts. 10-second timeout, 1 MB response limit, at most one request per host every 5 seconds, and 200 a day per host. The user agent names CertTrack and https://certs.abaventures.net. Only the verification code is sent. Results keep the issuer's status text and which fields matched, never the issuer's page or the values it showed.
 
-**Screens:** an issuer picker (active issuers, then "Other...", which reveals a name field) on the certificate form and the review queue. A typed name that is already an issuer's name or alias reuses it, and the notice says so. On the review screen "Save edits" confirms the issuer shown, even a suggestion: until then the panel marks it "Suggested, not confirmed", and no automatic check uses it. Verification code and link fields. An authenticity panel on the certificate page and in the review queue, showing the status, note, when and by whom it was checked, "Open verification page" (new tab), the four result buttons (admins and managers) and "Check again". "Not found" and "Doesn't match" ask first, since they mark the certificate fake. A link that isn't on the issuer's own website comes after the issuer's own page; a lookalike or disguised link is never linked. On the review screen the panel's buttons belong to the review form and save its edits first, so the issuer, code and link checked are the ones on screen. Admins edit issuers at `/certificate_issuers`, like the master list. The dashboard shows "Confirmed fake", "Flagged for review" and "Needs a check" tiles, each linking to `/verification` filtered to it. The project matrix shows a confirmed fake cell as "Confirmed fake", titled with the reason. A cell whose certificate is flagged for review keeps its usual badge and gets a small red "Review" marker. The crew filter has "Has confirmed fake".
+**Screens:** an issuer picker (active issuers, then "Other...", which reveals a name field) on the certificate form and the review queue. A typed name that is already an issuer's name or alias reuses it, and the notice says so. On the review screen "Save edits" confirms the issuer shown, even a suggestion: until then the panel marks it "Suggested, not confirmed", and no automatic check uses it. Verification code and link fields. An authenticity panel on the certificate page and in the review queue, showing the status, note, when and by whom it was checked, "Open verification page" (new tab), the four result buttons (admins and managers) and "Check again". "Not found" and "Doesn't match" ask first, since they mark the certificate fake. A link that isn't on the issuer's own website comes after the issuer's own page; a lookalike or disguised link is never linked. On the review screen the panel's buttons belong to the review form and save its edits first, so the issuer, code and link checked are the ones on screen. Admins edit issuers at `/certificate_issuers`, like the certificate types. The dashboard shows "Confirmed fake", "Flagged for review" and "Needs a check" tiles, each linking to `/verification` filtered to it. The project matrix shows a confirmed fake cell as "Confirmed fake", titled with the reason. A cell whose certificate is flagged for review keeps its usual badge and gets a small red "Review" marker. The crew filter has "Has confirmed fake".
 
 Claude Code:
 
@@ -704,7 +705,7 @@ The biggest risk of the $0 design is that free tiers can change or be withdrawn.
 **Open questions for the owner**
 
 - [ ] Roughly how many crew members and active projects are there?
-- [ ] What is the real master list, and how many months is each type valid?
+- [ ] What are the real certificate types, and how many months is each type valid?
 - [ ] Should crew members get their own expiry emails, and are subcontractor workers tracked in the same roster?
 - [ ] Who should receive the daily and weekly digests?
 - [ ] Do any prime contractors require a specific packet format or cover sheet?

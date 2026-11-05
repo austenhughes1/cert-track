@@ -252,7 +252,7 @@ class AskQuery
       notes = [ parse.person, parse.type, parse.project ].compact.select { |match| match.matched? && match.fuzzy && match.phrase }
         .map { |match| "Matched #{Ask::Wording.quote(match.phrase)} to #{base_label(match.record)}." }
       type = parse.type&.record
-      notes << "#{type.name} is retired from the master list." if type && parse.type.matched? && !type.active?
+      notes << "#{type.name} is a retired certificate type." if type && parse.type.matched? && !type.active?
       if answered && parse.leftovers.any?
         notes << "Ignored #{Ask::Wording.sentence(parse.leftover_phrases.map { |phrase| Ask::Wording.quote(phrase) })}."
       end

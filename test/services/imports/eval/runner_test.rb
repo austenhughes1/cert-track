@@ -37,6 +37,22 @@ class Imports::Eval::RunnerTest < ActiveSupport::TestCase
     end
   end
 
+  test "the type is scored as proposed, by fuzzy match when the model gave no code, and a blank answer isn't scored" do
+    with_samples_dir do |dir|
+      page = { name: "Flagger Certification" }
+      answer = expected_for([ page ])
+      unlisted = expected_for([ page ])
+      unlisted["certificates"].sole["certificate_type_code"] = nil
+      write_sample(dir, "listed", page, expected: answer)
+      write_sample(dir, "unlisted", page, expected: unlisted)
+
+      rows = Imports::Eval::Runner.new(dir: dir, provider: "fake").call.rows
+
+      assert_equal [ 1, 1 ], rows.first.score.fields.fetch("certificate_type_code")
+      assert_equal [ 0, 0 ], rows.last.score.fields.fetch("certificate_type_code")
+    end
+  end
+
   test "a wrong answer pulls a field below the 90% bar, and the table says where" do
     with_samples_dir do |dir|
       expected = expected_for([ {} ])
@@ -75,7 +91,7 @@ class Imports::Eval::RunnerTest < ActiveSupport::TestCase
       assert_match "Verification fields (reported on their own, not part of the bar):", text
       assert_match(/issuer\s+1\/1\s+100\.0%\s+\(reported, not part of the bar\)/, text)
       assert_match(/vlink\s+1\/1\s+100\.0%/, text)
-      assert_match(/^older_answer\.pdf\s+1\/1(\s+1\/1){5}\s+-\s+-\s+-/, text)
+      assert_match(/^older_answer\.pdf\s+1\/1(\s+1\/1){6}\s+-\s+-\s+-/, text)
     end
   end
 

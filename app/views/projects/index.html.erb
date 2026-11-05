@@ -3,7 +3,7 @@
 <div class="mb-4 flex items-end justify-between gap-4">
   <div>
     <h1 class="text-2xl font-semibold">Projects</h1>
-    <p class="mt-1 text-sm text-gray-500">Each project picks its required certificates from the master list and tracks its assigned crew.</p>
+    <p class="mt-1 text-sm text-gray-500">Each project picks its required certificates from the certificate types and tracks its assigned crew.</p>
   </div>
   <% if can?(:editor) %>
     <%= link_to "New project", new_project_path, class: "rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>

@@ -151,7 +151,7 @@ class Certificate < ApplicationRecord
   # dates were derived from the old validity, so they become completed_on + the new one
   # (or nil when the type no longer expires). Printed and manual dates are kept. Returns
   # true when the date was rewritten. Only these two derived columns change, so validations
-  # are skipped: a problem elsewhere on an old row must not block the master-list edit.
+  # are skipped: a problem elsewhere on an old row must not block the certificate type edit.
   # Callbacks still run, so the send log is re-armed for the new date.
   def rederive_expiry!
     return false unless expiry_computed? || expiry_none?

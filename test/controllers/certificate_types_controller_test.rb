@@ -25,7 +25,7 @@ class CertificateTypesControllerTest < ActionDispatch::IntegrationTest
       get certificate_types_path
 
       assert_response :success, "#{role} index"
-      assert_select "title", "Master list · CertTrack"
+      assert_select "title", "Certificate types · CertTrack"
       assert_select "tr##{dom_id(certificate_types(:osha30))}"
       assert_select "a[href=?]", new_certificate_type_path, count: 0
       assert_select "a[href=?]", edit_certificate_type_path(certificate_types(:osha30)), count: 0
@@ -230,7 +230,7 @@ class CertificateTypesControllerTest < ActionDispatch::IntegrationTest
 
     type = CertificateType.order(:id).last
     assert_redirected_to certificate_types_path
-    assert_equal "Added Fall Protection to the master list.", flash[:notice]
+    assert_equal "Added Fall Protection to the certificate types.", flash[:notice]
     assert_equal [ "Fall Protection", "FALL-PROT", "ANSI", 12, 6, true ], [ type.name, type.code, type.issuing_body, type.validity_months, type.position, type.active ]
     assert_equal [ "Fall Protection Competent Person", "Fall Arrest, Rescue and Suspension" ], type.aliases
 
@@ -312,7 +312,7 @@ class CertificateTypesControllerTest < ActionDispatch::IntegrationTest
 
     assert_select "#danger_zone p", /can't be deleted\. It's already inactive\./
     assert_select "#danger_zone form", count: 0
-    assert_select "a[href=?]", certificate_types_path(status: "all"), "← Master list"
+    assert_select "a[href=?]", certificate_types_path(status: "all"), "← Certificate types"
   end
 
   test "update saves changes, round-trips aliases and re-dates computed certificates" do

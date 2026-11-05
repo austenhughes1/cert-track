@@ -49,7 +49,7 @@ class Imports::ExtractorTest < ActiveSupport::TestCase
     assert_nil result.data["certificates"].sole["certificate_type_code"]
   end
 
-  test "the reply is normalized against the master list and the file's pages" do
+  test "the reply is normalized against the certificate types and the file's pages" do
     Ai::FakeProvider.reply_next!({ "certificates" => [ { "pages" => [ 1, 7 ], "holder_name" => "Juan Ortiz",
       "certificate_type_code" => "osha30", "completed_on" => "14/03/2025", "confidence" => 3 },
       { "pages" => [ 2 ], "certificate_type_code" => "NOPE", "holder_name" => "Li Chen", "confidence" => 0.9 } ] })

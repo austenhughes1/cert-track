@@ -10,7 +10,10 @@ module Imports
     # Each expected certificate is paired with the returned one that shares the most pages
     # (then the same holder, then the same type); an expected certificate with nothing left
     # to pair scores every field wrong. Fields:
-    #   certificate_type_code  exact code, case-insensitive (null must be null)
+    #   certificate_name_as_printed  the same words, whatever the case and punctuation, allowing a few
+    #                          differences: it says what the certificate is, on the list or not
+    #   certificate_type_code  exact code, case-insensitive. Only where the answer names a type: a
+    #                          certificate needn't be on the list, so a blank answer isn't scored
     #   holder_name            equal after NameNormalizer ("ORTIZ, JUAN A." == "Juan Ortiz")
     #   completed_on, expires_on  the same YYYY-MM-DD, or both null
     #   certificate_number     letters and digits only, case-insensitive (informational)
@@ -21,7 +24,9 @@ module Imports
     #   verification_code        spaces and case ignored
     #   verification_url         scheme, "www.", host case, a trailing slash and query order ignored
     class Scorer
-      SCORED_FIELDS = %w[certificate_type_code holder_name completed_on expires_on].freeze
+      SCORED_FIELDS = %w[certificate_name_as_printed certificate_type_code holder_name completed_on expires_on].freeze
+      ANSWER_OPTIONAL_FIELDS = %w[certificate_name_as_printed certificate_type_code].freeze
+      NAME_OVERLAP = 0.7 # the share of words two wordings of one printed name have in common
       INFO_FIELDS = %w[certificate_number].freeze
       VERIFICATION_FIELDS = %w[certificate_issuer_code verification_code verification_url].freeze
       FIELDS = (SCORED_FIELDS + INFO_FIELDS + VERIFICATION_FIELDS).freeze
@@ -64,8 +69,10 @@ module Imports
       end
 
       # Whether an expected certificate is scored on field: always, except a verification field
-      # its answer leaves out.
+      # its answer leaves out, and a name or type its answer leaves blank.
       def self.scores?(expected_certificate, field)
+        return expected_certificate[field].present? if ANSWER_OPTIONAL_FIELDS.include?(field)
+
         VERIFICATION_FIELDS.exclude?(field) || expected_certificate.key?(field)
       end
 
@@ -88,7 +95,16 @@ module Imports
         end
 
         def same?(field, want, got)
+          return same_name?(want, got) if field == "certificate_name_as_printed"
+
           normalize(field, want) == normalize(field, got)
+        end
+
+        def same_name?(want, got)
+          want, got = [ want, got ].map { |name| name.to_s.downcase.scan(/[a-z0-9]+/).to_set }
+          return want == got if want.empty? || got.empty?
+
+          (want & got).size.fdiv((want | got).size) >= NAME_OVERLAP
         end
 
         def normalize(field, value)

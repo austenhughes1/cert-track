@@ -84,7 +84,7 @@ module Ask
           [ details, (authenticity_text(certificate) if certificate) ].compact.join("; ")
         end
 
-        # Same order as the crew member page: master-list position, then name.
+        # Same order as the crew member page: certificate type position, then name.
         def type_order(type)
           [ type.position.nil? ? 1 : 0, type.position.to_i, type.name.downcase ]
         end
