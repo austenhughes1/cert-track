@@ -1,5 +1,5 @@
 module Backups
-  # Nightly encrypted pg_dump of the primary database to R2, keeping the newest 14
+  # Nightly encrypted pg_dump of the primary database to R2, keeping the newest 30
   # (config/recurring.yml). Failures raise so Solid Queue records them.
   class DatabaseJob < ApplicationJob
     queue_as :default

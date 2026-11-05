@@ -21,8 +21,13 @@ class Backups::StorageTest < ActiveSupport::TestCase
     assert_nil Backups::Storage.taken_at("db/notes.txt")
   end
 
-  test "prune keeps exactly the 14 newest backups and leaves foreign objects alone" do
-    keys = backup_keys(20)
+  test "keeps the owner's 30 nightly backups, at least as many as the file-copy trash keeps days" do
+    assert_equal 30, Backups::Storage::DEFAULT_KEEP
+    assert_operator Backups::Storage::DEFAULT_KEEP, :>=, Backups::FileCopyStore::TRASH_DAYS
+  end
+
+  test "prune keeps exactly the DEFAULT_KEEP newest backups and leaves foreign objects alone" do
+    keys = backup_keys(Backups::Storage::DEFAULT_KEEP + 6)
     client = stub_s3_client(list_objects_v2: list_response(keys.shuffle + [ "db/README.txt", "db/manual.sql" ]))
     storage = Backups::Storage.new(client:, bucket: "certtrack-backups")
 
@@ -33,8 +38,8 @@ class Backups::StorageTest < ActiveSupport::TestCase
     assert(deleted_requests(client).all? { |request| request[:params][:bucket] == "certtrack-backups" })
   end
 
-  test "prune deletes nothing when 14 or fewer backups exist" do
-    client = stub_s3_client(list_objects_v2: list_response(backup_keys(14)))
+  test "prune deletes nothing when DEFAULT_KEEP or fewer backups exist" do
+    client = stub_s3_client(list_objects_v2: list_response(backup_keys(Backups::Storage::DEFAULT_KEEP)))
 
     assert_empty Backups::Storage.new(client:, bucket: "b").prune
     assert_empty deleted_keys(client)

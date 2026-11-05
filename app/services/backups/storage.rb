@@ -6,7 +6,9 @@ module Backups
   class Storage
     PREFIX = "db/".freeze
     KEY_PATTERN = %r{\Adb/cert_track-\d{8}T\d{6}Z\.sql\.gz\.enc\z}
-    DEFAULT_KEEP = 14
+    # Owner's choice (Nov 4, 2026): at least FileCopyStore::TRASH_DAYS nightly backups, so a
+    # deleted file's copy can be found by name for its whole time in the trash.
+    DEFAULT_KEEP = 30
 
     def self.build_client
       Aws::S3::Client.new(

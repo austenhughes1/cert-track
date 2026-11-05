@@ -26,12 +26,12 @@ class Backups::CreateTest < ActiveSupport::TestCase
   test "uploads an encrypted gzipped dump under a timestamped key, then prunes" do
     skip_unless_pg_tools
     uploads = {}
-    old_keys = Array.new(14) { |day| Backups::Storage.key_for(Time.utc(2026, 10, 1, 9) + day.days) }
+    old_keys = Array.new(Backups::Storage::DEFAULT_KEEP) { |day| Backups::Storage.key_for(Time.utc(2026, 10, 1, 9) + day.days) }
     client = stub_s3_client(uploads:)
     storage = Backups::Storage.new(client:, bucket: "b")
 
     result = travel_to(Time.utc(2026, 11, 2, 10, 0, 0)) do
-      # The listing taken after upload includes the new backup plus 14 older ones.
+      # The listing taken after upload includes the new backup plus DEFAULT_KEEP older ones.
       client.stub_responses(:list_objects_v2, list_response(old_keys + [ Backups::Storage.key_for(Time.current) ]))
       Backups::Create.new(storage:, encryptor: backup_encryptor).call
     end

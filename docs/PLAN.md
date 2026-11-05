@@ -46,7 +46,7 @@ Every layer runs on a free tier, so steady-state cost is **$0/month** while stor
 | Hosting | Oracle Cloud Always Free Ampere A1 VM: 2 OCPU, 12 GB RAM, ARM64, Ubuntu | $0 | 200 GB block storage, 10 TB egress/month ([Oracle](https://docs.oracle.com/en-us/iaas/Content/FreeTier/resourceref.htm)) |
 | Deploy | Kamal 2 with kamal-proxy (automatic Let's Encrypt TLS), arm64 images | $0 | Rails 8 default deploy tool |
 | File storage | Cloudflare R2 through the Active Storage S3 service. Photos and scans are stored shrunk to 2400 px on the long side, JPEG quality 80; full-size originals are not kept | $0 under 10 GB, then $0.015/GB-month | Free: 10 GB-month, 1M writes, 10M reads, no egress fees ([R2](https://developers.cloudflare.com/r2/pricing/)). The owner accepted the overage past 10 GB on Nov 4, 2026; a Cloudflare budget alert warns of it |
-| Backups | Nightly `pg_dump` to a second R2 bucket, 14 kept. Nightly copy of the certificate files from R2 to the VM's own disk (`Backups::FileCopyJob`, 04:15); copies of deleted files are kept 30 days | $0 | The dumps let a lost VM be rebuilt in under an hour. The file copy covers a file deleted by mistake or a lost Cloudflare account |
+| Backups | Nightly `pg_dump` to a second R2 bucket, 30 kept. Nightly copy of the certificate files from R2 to the VM's own disk (`Backups::FileCopyJob`, 04:15); copies of deleted files are kept 30 days | $0 | The dumps let a lost VM be rebuilt in under an hour. The file copy covers a file deleted by mistake or a lost Cloudflare account |
 | Email | Google Workspace: the owner's existing account (`austen@abaventures.net`) over `smtp.gmail.com:587` with STARTTLS and an app password | $0 (existing subscription) | About 2,000 messages/day per account over a rolling 24 hours (500 on a trial account), shared with the owner's own mail. The app stops at `MAIL_DAILY_LIMIT` (1,000) a day ([Google](https://support.google.com/a/answer/166852)) |
 | Text extraction | `poppler-utils` (`pdftotext`, `pdftoppm`; `pdfimages` and `pdfinfo` for shrinking scans) and Tesseract OCR in the Docker image | $0 | Runs locally; no data leaves the VM |
 | AI (extraction, chat) | Cloudflare Workers AI free allocation via its OpenAI-compatible endpoint, called with the `ruby_llm` gem | $0 | 10,000 neurons/day; Cloudflare does not train on customer content ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/), [privacy](https://developers.cloudflare.com/workers-ai/privacy/)) |
@@ -442,7 +442,7 @@ Claude Code:
 - [x] Dockerfile: install `poppler-utils`, `tesseract-ocr`, `tesseract-ocr-eng`, and libvips with HEIC support.
 - [x] Kamal: arm64 builder, Postgres 17 accessory with a volume, secrets from `.kamal/secrets`, proxy host `certs.abaventures.net` with SSL, `SOLID_QUEUE_IN_PUMA=1`.
 - [x] Rails authentication generator, `role` enum, and `bin/rails certtrack:create_admin`.
-- [x] Nightly `Backups::DatabaseJob` (pg\_dump, gzip, upload to R2, keep 14) and `bin/rails certtrack:restore_latest`.
+- [x] Nightly `Backups::DatabaseJob` (pg\_dump, gzip, upload to R2, keep 30; 14 until Nov 4, 2026) and `bin/rails certtrack:restore_latest`.
 - [x] GitHub Actions running tests, RuboCop and Brakeman (the Rails 8 default CI).
 
 Done when: `https://certs.abaventures.net/up` returns 200 with a valid certificate, the admin can sign in, and a backup restores into a scratch database.
@@ -534,6 +534,8 @@ Owner decisions:
 - [x] Store photos and scans shrunk to 2400 px, JPEG quality 80, without the full-size original (`Certificates::ShrinkFilesJob`, which replaces the HEIC-only `ConvertHeicJob`).
 - [x] Copy the certificate files from R2 to the VM's own disk every night, and keep copies of deleted files 30 days (`Backups::FileCopyJob` at 04:15; `certtrack:copy_files_now`, `certtrack:file_copy_status` and `certtrack:restore_files`; a dashboard banner for admins).
 - [x] Send email through the owner's Google Workspace account instead of Resend (`smtp.gmail.com:587`, an app password, `MAIL_DAILY_LIMIT` 1,000).
+- [x] Keep 30 nightly database backups instead of 14 (`Backups::Storage::DEFAULT_KEEP`), so a deleted file's copy can be found by name for its whole 30 days in the trash. About 30 extra small encrypted dumps in R2.
+- [x] Leave location data (EXIF/GPS) on import files while they wait for review; it is removed when a file is accepted and shrunk.
 - [x] Rejected import items keep their files: they stay the original for duplicate detection, and "Read again" can undo a wrong rejection. Only failed items' files are deleted, 30 days after they failed.
 
 Fixes that needed no decision:
@@ -562,7 +564,7 @@ The biggest risk of the $0 design is that free tiers can change or be withdrawn.
 | Workers AI retires a model | Extraction or chat errors | Model IDs live in env vars; re-run the eval tasks and swap |
 | Gmail's per-account limit (about 2,000/day, shared with the owner's mail) | Some emails a day late; if the account hits Gmail's limit, the owner's own mail is refused too | `MAIL_DAILY_LIMIT` 1,000 leaves about half for the owner; the digest design |
 | Stored files grow past R2's free 10 GB | R2 bills $0.015/GB-month, about $1.37/month at 100 GB | Photos and scans stored shrunk, packet zips deleted after 7 days, a Cloudflare budget alert; the owner accepted the cost on Nov 4, 2026 |
-| Files deleted from R2 by mistake, or the Cloudflare account lost | Certificate files gone | The nightly copy on the VM's disk; `certtrack:restore_files` puts files back; copies of deleted files are kept 30 days, findable by name for 14 (while a database backup from before the delete is kept) |
+| Files deleted from R2 by mistake, or the Cloudflare account lost | Certificate files gone | The nightly copy on the VM's disk; `certtrack:restore_files` puts files back; copies of deleted files are kept 30 days, findable by name the whole time (30 database backups are kept) |
 | Single VM, no redundancy | Downtime during outages | Acceptable for an internal tool; uptime alerts |
 
 **Security and privacy (required, not optional)**

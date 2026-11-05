@@ -5,11 +5,11 @@ require_relative "../../services/backups/backups_test_support"
 class Backups::DatabaseJobTest < ActiveJob::TestCase
   include BackupsTestSupport
 
-  test "dumps the real test database, encrypts it, uploads it to R2 and prunes to 14" do
+  test "dumps the real test database, encrypts it, uploads it to R2 and prunes to DEFAULT_KEEP" do
     skip_unless_pg_tools
     uploads = {}
     deleted = []
-    old_keys = Array.new(16) { |day| Backups::Storage.key_for(Time.utc(2026, 10, 1, 9) + day.days) }
+    old_keys = Array.new(Backups::Storage::DEFAULT_KEEP + 2) { |day| Backups::Storage.key_for(Time.utc(2026, 10, 1, 9) + day.days) }
     stubs = {
       put_object: capture_upload(uploads),
       list_objects_v2: ->(_context) { list_response(old_keys + uploads.keys) },

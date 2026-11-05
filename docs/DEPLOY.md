@@ -7,7 +7,7 @@ How to stand up, deploy, back up and rebuild CertTrack on its $0 stack: one Orac
 | App container (Puma + Solid Queue), kamal-proxy (TLS) | Oracle VM, Docker |
 | Postgres 17 data | Oracle VM, `~/cert_track-db/data` (Kamal accessory `cert_track-db`) |
 | Certificate files (photos and scans stored shrunk) | R2 bucket `certtrack-files` (private) |
-| Nightly encrypted database dumps, newest 14 | R2 bucket `certtrack-backups` (private) |
+| Nightly encrypted database dumps, newest 30 | R2 bucket `certtrack-backups` (private) |
 | Nightly copy of the certificate files (also import item files and packet index PDFs) | The VM's own disk, `/var/lib/certtrack/file-copies` (`/rails/file_copies` inside the container); see "File copies" in section 9 |
 | Docker images | `ghcr.io/austenhughes1/cert_track` (private) |
 | Deploy config | `config/deploy.yml`, `.kamal/secrets`, `Dockerfile` |
@@ -71,7 +71,7 @@ GitHub → Settings → Developer settings → Personal access tokens → **Toke
 
 1. Cloudflare dashboard → **R2 Object Storage**. Enabling R2 asks for a payment method; usage stays inside the free tier.
 2. Create bucket **`certtrack-files`**: Standard storage class, location Automatic (or the Western North America hint). Leave **Public access off**: no r2.dev URL and no custom domain. The app hands out presigned URLs that expire in 5 minutes.
-3. Create bucket **`certtrack-backups`** the same way, also private. Don't add a lifecycle rule shorter than 14 days, because the backup job does its own pruning to the newest 14.
+3. Create bucket **`certtrack-backups`** the same way, also private. Don't add a lifecycle rule shorter than 30 days, because the backup job does its own pruning to the newest 30.
 4. **R2 API token:** R2 → Manage API tokens → Create API token.
    - Permission: **Object Read & Write**.
    - Scope: **Apply to specific buckets only**, `certtrack-files` and `certtrack-backups`.
@@ -268,7 +268,7 @@ Last, add a free uptime monitor (UptimeRobot or Better Stack, for example) on `h
 
 ## 9. Backups and the restore drill
 
-- `Backups::DatabaseJob` runs nightly at 03:00 America/Denver (`config/recurring.yml`). It runs `pg_dump` (plain SQL, `--clean --if-exists`), gzips the dump, encrypts it with AES-256-GCM using `backup_encryption_key` from the credentials, uploads it to `certtrack-backups/db/`, and keeps the newest 14. Check runs at https://certs.abaventures.net/jobs, the Mission Control dashboard (admins only).
+- `Backups::DatabaseJob` runs nightly at 03:00 America/Denver (`config/recurring.yml`). It runs `pg_dump` (plain SQL, `--clean --if-exists`), gzips the dump, encrypts it with AES-256-GCM using `backup_encryption_key` from the credentials, uploads it to `certtrack-backups/db/`, and keeps the newest 30. Check runs at https://certs.abaventures.net/jobs, the Mission Control dashboard (admins only).
 - `Backups::FileCopyJob` copies the certificate files to the VM's own disk nightly at 04:15, after the dump (see "File copies" below). Check its runs at `/jobs`, or with `certtrack:file_copy_status`.
 - Take a backup now (do this right after the first deploy):
 
@@ -307,7 +307,7 @@ R2 holds the only live copy of every certificate file. `Backups::FileCopyJob` ke
 - **What it never copies:** thumbnails and previews (made again from their file), packet zips (rebuilt on demand, deleted after 7 days) and raw import uploads (deleted once unpacked).
 - **R2 reads:** only files without a copy are downloaded, once each: 2 HEAD requests plus 1 GET per 5 MB, so 3 reads for a typical file (up to 5 MB) and 4 for one of 5-10 MB. Nothing is downloaded again on later nights. Each download streams to disk and must match the blob's size and MD5 before it is kept.
 - **Layout:** `ab/cd/<key>` (the Active Storage disk layout), `trash/YYYY-MM-DD/`, `incoming/`, `status.json` and `copy.lock`. Files are 0600 and folders 0700, owned by uid 1000. The copies are not encrypted: anyone with root on the VM can read them, as with the database.
-- **Deleted files:** when a file is deleted, or nothing kept uses it any more, its copy moves to `trash/<date>/`, dated the night the job first found it missing, and is deleted 30 days later. If its database row comes back first (the database restored in place), the next run moves the copy back out of the trash, even on its 30th night. The trash names copies by key only. Only a database backup from before the delete links a key to a file name, and only the newest 14 backups are kept: about two weeks of nightly ones, less after manual `certtrack:backup_now` runs. So for about 14 days a deleted file can be found by name ("Files missing from R2", step 2); from day 15 to day 30, only by opening the files in `trash/<date>/` one by one.
+- **Deleted files:** when a file is deleted, or nothing kept uses it any more, its copy moves to `trash/<date>/`, dated the night the job first found it missing, and is deleted 30 days later. If its database row comes back first (the database restored in place), the next run moves the copy back out of the trash, even on its 30th night. The trash names copies by key only. Only a database backup from before the delete links a key to a file name. The newest 30 backups are kept, about a month of nightly ones (fewer days after manual `certtrack:backup_now` runs), so a deleted file can be found by name ("Files missing from R2", step 2) for as long as its copy stays in the trash. Each manual backup pushes the oldest nightly one out a day early; if that cut it short, open the files in `trash/<date>/` one by one.
 - **Free-space guard:** copying stops before free space on that disk drops under the larger of 5 GB and 10% of the disk (10 GB on the 100 GB boot volume), so Postgres always has room. The job logs it, and admins see an amber dashboard banner. Free up space or grow the volume (section 11).
 - **The banner** also appears when the folder is missing or can't be written to, or when no complete copy has finished in 2 days (for example because some files keep failing). It shows the time of the last complete copy.
 - **Commands:**
@@ -325,7 +325,7 @@ R2 holds the only live copy of every certificate file. `Backups::FileCopyJob` ke
 1. If the bucket or account is gone, create the bucket, CORS policy and API token again (section 3), update `deploy.env` and run `bin/kamal deploy`.
 2. A file deleted in the app lost its database rows too. Steps 3 and 4 only look at blobs in the production database, so they can't bring it back; its copy waits in the trash for 30 days. To fetch one file by hand (and skip steps 3 and 4):
    1. Find its trash folder: `ssh ubuntu@$KAMAL_HOST 'sudo ls /var/lib/certtrack/file-copies/trash'`. The folder's date is the night the 04:15 copy first found the file missing, so it was deleted in the 24 hours before.
-   2. List the backups with `bin/kamal app exec "bin/rails certtrack:list_backups"` and pick the last one taken before the delete, usually the 03:00 backup of the day before the folder's date. The newest backup won't have the file if it was deleted before that backup ran. Only the newest 14 backups are kept (about two weeks); after that, none names the file.
+   2. List the backups with `bin/kamal app exec "bin/rails certtrack:list_backups"` and pick the last one taken before the delete, usually the 03:00 backup of the day before the folder's date. The newest backup won't have the file if it was deleted before that backup ran. Only the newest 30 backups are kept (about a month); after that, none names the file.
    3. Restore that backup into the scratch database: `bin/kamal app exec "bin/rails certtrack:restore_latest KEY=db/cert_track-<timestamp>.sql.gz.enc"`.
    4. Look up the file's key there: `bin/kamal accessory exec db --reuse "psql -U cert_track -d cert_track_restore_check -c \"select key, filename, byte_size from active_storage_blobs where filename ilike '%osha%'\""` (put part of the file's name in place of `osha`).
    5. Run `ssh ubuntu@$KAMAL_HOST 'sudo find /var/lib/certtrack/file-copies -name <key>'`, copy that file off with `sudo cat`, and attach it to the certificate again. Then drop the scratch database (section 9).
@@ -376,7 +376,7 @@ New uploads use the new provider at once. To send items the old model already re
 
 ## 13. Rebuild from scratch (lost or reclaimed VM)
 
-R2 still holds every file and the last 14 backups. The nightly file copies are lost with the VM; the first nightly run on the new VM copies everything from R2 again. You need this repo, `config/master.key` and `deploy.env`.
+R2 still holds every file and the last 30 backups. The nightly file copies are lost with the VM; the first nightly run on the new VM copies everything from R2 again. You need this repo, `config/master.key` and `deploy.env`.
 
 1. If the old instance still exists, terminate it so the new one fits in the Always Free A1 allowance.
 2. Create a new VM and open its ports: section 1, steps 4 to 7, including the iptables commands.

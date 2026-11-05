@@ -12,9 +12,9 @@ module Backups
   # trash, dated the day it was first found missing, and is deleted TRASH_DAYS later. A copy
   # whose blob is back (its row returned with a database restore) leaves the trash first, before
   # any of the trash expires. Only a database backup from before the delete still names a
-  # deleted file, and those are kept 14 days (Backups::Storage::DEFAULT_KEEP): after that, its
-  # copy in the trash can only be found by opening the files there (docs/DEPLOY.md, "Files
-  # missing from R2"). Copying stops, and is reported, once free space would drop under the
+  # deleted file. The newest 30 are kept (Backups::Storage::DEFAULT_KEEP), as long as the trash
+  # keeps copies, so a trashed copy can be found by name until it expires (fewer days after
+  # manual backups; docs/DEPLOY.md, "Files missing from R2"). Copying stops, and is reported, once free space would drop under the
   # store's reserve (the larger of 5 GB and 10% of the disk).
   class FileCopy
     class LowSpaceError < StandardError; end

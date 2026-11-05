@@ -1,7 +1,7 @@
 require "zlib"
 
 module Backups
-  # pg_dump -> gzip -> AES-256-GCM -> temp file -> R2, then prune to the newest 14.
+  # pg_dump -> gzip -> AES-256-GCM -> temp file -> R2, then prune to the newest 30 (Storage::DEFAULT_KEEP).
   # Only ciphertext touches disk; the temp dir is removed even when a step fails.
   class Create
     Result = Data.define(:key, :bytes, :pruned_keys)
