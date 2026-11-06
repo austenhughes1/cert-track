@@ -291,6 +291,19 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
     assert_nil lifetime.certificate.expires_on
   end
 
+  test "a blank verification code falls back to the certificate number when the issuer looks up by code" do
+    CertificateIssuer.seed_defaults!
+    blank = ortiz_osha(number: "5B1", issuer: "National CPR Foundation", issuer_code: "NCPRF")
+    item = process(image_item(extraction: extraction_with(blank)))
+    assert_equal "5B1", item.proposed_verification_code
+
+    typed = ortiz_osha(number: "5B1", issuer: "National CPR Foundation", issuer_code: "NCPRF", verification_code: "CODE9")
+    assert_equal "CODE9", process(image_item(filename: "typed.jpg", sha256: SecureRandom.hex(32), extraction: extraction_with(typed))).proposed_verification_code
+
+    no_issuer = ortiz_osha(number: "26-007689462", issuer: "OSHA")
+    assert_nil process(image_item(filename: "osha.jpg", sha256: SecureRandom.hex(32), extraction: extraction_with(no_issuer))).proposed_verification_code
+  end
+
   test "an unread QR code and unread details flag the item for a clearer copy, and a clean one isn't flagged" do
     clean = process(image_item(extraction: normalized(ortiz_osha)))
     assert_equal [], clean.quality_flags
@@ -527,7 +540,7 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
       "by code" => [ [ other, REDCROSS_QR ], ortiz_osha(verification_code: "TEST123"), [ "TEST123", REDCROSS_QR ] ],
       "by number" => [ [ other, REDCROSS_QR ], ortiz_osha(number: "test123"), [ "TEST123", REDCROSS_QR ] ],
       "by holder" => [ [ marias, juans ], ortiz_osha(issuer_code: "360TRAINING"), [ "111", juans ] ],
-      "can't tell" => [ [ other, REDCROSS_QR ], ortiz_osha, [ nil, nil ] ]
+      "can't tell which link: the issuer's own, for the printed number" => [ [ other, REDCROSS_QR ], ortiz_osha, [ "30-1234567", issuer("REDCROSS").link_for("30-1234567") ] ]
     }
 
     cases.each do |label, (texts, certificate, expected)|
@@ -610,7 +623,7 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
     issuer("NOF")
     items = {
       "checks off" => [ false, ortiz_osha(issuer_code: "NOF", verification_code: "NOF-1") ],
-      "no code" => [ true, ortiz_osha(issuer_code: "NOF") ],
+      "no code" => [ true, ortiz_osha(issuer_code: "NOF", number: nil) ],
       "assisted issuer" => [ true, ortiz_osha(issuer_code: "REDCROSS", verification_code: "RC-1") ],
       "suggested issuer" => [ true, ortiz_osha(issuer: "National OSHA Foundatoin", verification_code: "NOF-1") ]
     }

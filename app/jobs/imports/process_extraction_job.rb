@@ -20,7 +20,9 @@ module Imports
   # Phase 3b (step 6b): Imports::Splitter gives each item the QR codes on its own pages. The
   # issuer is matched (Imports::IssuerMatcher) from those QR links and the printed
   # verification_url, the model's certificate_issuer_code, then the printed issuer name.
-  # proposed_verification_code is the model's, else the id in a matched issuer's QR link
+  # proposed_verification_code is the model's, else the id in a matched issuer's QR link, else the
+  # certificate number when the issuer looks certificates up by code: models often leave the code
+  # blank when it is the printed number, and without one the issuer's site is never asked.
   # (Imports::IssuerMatcher.code_in_link); proposed_verification_url is that QR link, else the
   # printed address, else the matched issuer's link_template with the code. When the pages
   # carry several of the issuer's QR links (one page or photo with several people's cards), the
@@ -143,6 +145,7 @@ module Imports
         qr_link = issuer_qr_link(qr_texts, known, codes: [ code, text(certificate["certificate_number"], limit: nil) ].compact,
           holder: text(certificate["holder_name"]))
         code ||= Imports::IssuerMatcher.code_in_link(known, qr_link)
+        code ||= text(certificate["certificate_number"], limit: nil) if known&.verified_by_qr_or_code? || known&.verified_by_code_lookup?
 
         { matched_certificate_issuer: issuer.issuer, issuer_match: issuer.match, issuer_suggestions: issuer.suggestions,
           proposed_verification_code: code, proposed_verification_url: qr_link || verification_link(printed_url, known, code) }

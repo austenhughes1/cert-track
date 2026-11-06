@@ -214,7 +214,7 @@ class CertificateVerificationAcceptanceTest < ActionDispatch::IntegrationTest
     assert lookalike.authenticity_flagged?
     assert_equal "qr_link", lookalike.authenticity_method
     assert_equal({ "qr_host" => "redcross-verify.com", "looks_like" => "redcross.org" }, lookalike.authenticity_details)
-    assert_nil lookalike.proposed_verification_url, "a lookalike link is never offered as the verification link"
+    assert_equal "www.redcross.org", URI.parse(lookalike.proposed_verification_url).host, "a lookalike link is never offered: the link is the issuer's own, for the printed number"
 
     # 360training's QR link carries the holder: a different last name is a mismatch, found locally.
     assert training.authenticity_mismatch?

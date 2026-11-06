@@ -111,6 +111,18 @@ class Verification::CheckersTest < ActiveSupport::TestCase
 
   # National CPR Foundation
 
+  test "NCPRF: the live site's results table is read for the row with this code" do
+    result, = check(NCPRF, response(page("ncprf_found_table")), code: "5a1b2c", holder: "Juan A. Ortiz", completed_on: Date.new(2025, 3, 14))
+    assert_equal :verified, result.status
+    assert_equal({ "holder" => "match", "completed_on" => "match" }, result.details["compared"])
+
+    other, = check(NCPRF, response(page("ncprf_found_table")), code: "5A1B2C", holder: "Li Chen", completed_on: Date.new(2025, 3, 14))
+    assert_equal :mismatch, other.status, "another person's row must not satisfy this code"
+
+    missing, = check(NCPRF, response(page("ncprf_found_table")), code: "NOTLISTED", holder: "Juan A. Ortiz", completed_on: Date.new(2025, 3, 14))
+    assert_equal :unavailable, missing.status
+  end
+
   test "NCPRF: a result with the holder's name and dates is verified" do
     result, transport = check(NCPRF, response(page("ncprf_found")), code: "NCPRF-1",
       completed_on: Date.new(2025, 3, 14), expires_on: Date.new(2027, 3, 14))
