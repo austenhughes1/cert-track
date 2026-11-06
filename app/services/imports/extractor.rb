@@ -17,8 +17,11 @@ module Imports
   #   # The accuracy harness, without an ImportItem:
   #   Imports::Extractor.for_file("/path/card.pdf", content_type: "application/pdf", text: ocr_text).call
   #
-  # Pages whose OCR text is usable (Imports::TextExtractor.usable?) go to EXTRACTION_MODEL, in
-  # one call unless the file is over MAX_DOCUMENT_CHARS (then several, never splitting a page).
+  # Pages whose text is usable (Imports::TextExtractor.usable?) go to EXTRACTION_MODEL, in one call
+  # unless the file is over MAX_DOCUMENT_CHARS (then several, never splitting a page). With a vision
+  # model set, a scanned page or photo goes to it instead, whatever OCR made of it: the accuracy
+  # test (Nov 5, 2026) found OCR garbles a photo's text in ways that still look usable ("Rash
+  # Williams"), where the vision model reads the image correctly.
   # Pages OCR could not read are rendered (Imports::PageImages): a blank one (blank_page?) is a
   # non-certificate page with no AI call, and the rest go to EXTRACTION_VISION_MODEL with their
   # image, as many per call as the model accepts (config/ai_models.yml max_images). With no
@@ -62,7 +65,7 @@ module Imports
     MAX_DOCUMENT_CHARS = 24_000 # per call: about 6,000 tokens, inside every candidate's context window
     MAX_LONG_SIDE = 1568
     TEXT_OUTPUT_TOKENS = 2048
-    VISION_OUTPUT_TOKENS = 1024
+    VISION_OUTPUT_TOKENS = 2048 # a page photographed with nine cards on it needs more than 1024
     # The reply size assumed by estimated_units: about one certificate entry per page.
     ESTIMATED_OUTPUT_TOKENS_PER_CALL = 50
     ESTIMATED_OUTPUT_TOKENS_PER_PAGE = 150
@@ -91,8 +94,8 @@ module Imports
     private_constant :ChunkBoundary
 
     class << self
-      def for_file(path, content_type:, text:)
-        new(nil, text: text, file_path: path, content_type: content_type)
+      def for_file(path, content_type:, text:, scanned_pages: nil)
+        new(nil, text: text, file_path: path, content_type: content_type, scanned_pages: scanned_pages)
       end
 
       # [[page number, text], ...] from extracted_text ("=== page N ===" markers, see
@@ -139,11 +142,13 @@ module Imports
     end
 
     # done: calls saved from an earlier run of the same file (saved_calls), reused when they match.
-    def initialize(item = nil, text: nil, file_path: nil, content_type: nil, done: [])
+    # scanned_pages: the page numbers whose text came from OCR.
+    def initialize(item = nil, text: nil, file_path: nil, content_type: nil, scanned_pages: nil, done: [])
       @item = item
       @text = text || item&.extracted_text
       @file_path = file_path
       @content_type = content_type || (item&.file&.content_type if item&.file&.attached?)
+      @scanned_pages = scanned_pages || item&.ocr_pages || []
       @done = Array(done).map(&:stringify_keys)
     end
 
@@ -153,8 +158,11 @@ module Imports
       Ai::Config.ensure_ready!(provider)
 
       pages = self.class.parse_pages(@text)
-      usable, unreadable = pages.partition { |_number, text| Imports::TextExtractor.usable?(text) }
-      vision_model = Ai::Config.extraction_vision_model(provider) if unreadable.any?
+      vision_model = Ai::Config.extraction_vision_model(provider)
+      usable, unreadable = pages.partition do |number, text|
+        Imports::TextExtractor.usable?(text) && !(vision_model && scanned?(number))
+      end
+      vision_model = nil if unreadable.empty?
 
       with_page_images(unreadable.map(&:first), vision: vision_model.present?) do |images, blank|
         unread = vision_model ? [] : images.keys
@@ -169,6 +177,10 @@ module Imports
     end
 
     private
+      def scanned?(number)
+        @content_type.to_s.start_with?("image/") || @scanned_pages.include?(number)
+      end
+
       def text_calls(provider, usable, page_count)
         model = Ai::Config.extraction_model(provider)
         text_chunks(usable).map do |chunk|

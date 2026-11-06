@@ -63,6 +63,20 @@ class Imports::ExtractorTest < ActiveSupport::TestCase
     assert_equal [ 0.03, 0.9 ], certificates.map { |certificate| certificate["confidence"] }
   end
 
+  test "with a vision model, a photo goes to it even when OCR found plausible text; a page with a text layer stays on the text model" do
+    photo = Imports::Extractor.for_file(file_fixture("certificate.jpg").to_s, content_type: "image/jpeg",
+      text: "=== page 1 ===\nCertificate of Completion Rash Williams Flagger completed 2025-03-14 and more words to read")
+    photo.call
+    assert_equal [ "fake-vision" ], Ai::FakeProvider.calls.map(&:model)
+    Ai::FakeProvider.reset!
+
+    Ai::Config.with(extraction_vision_model: false) do
+      Imports::Extractor.for_file(file_fixture("certificate.jpg").to_s, content_type: "image/jpeg",
+        text: "=== page 1 ===\nCertificate of Completion Rash Williams Flagger completed 2025-03-14 and more words to read").call
+    end
+    assert_equal [ "fake-extractor" ], Ai::FakeProvider.calls.map(&:model), "no vision model: OCR's reading is all there is"
+  end
+
   test "a page OCR could not read goes to the vision model with its page image" do
     Ai::FakeProvider.reply_next!({ "certificates" => [ { "pages" => [ 1 ], "holder_name" => "Juan A. Ortiz",
       "certificate_type_code" => "OSHA30", "completed_on" => "2025-03-14", "confidence" => 0.9 } ], "non_certificate_pages" => [] })

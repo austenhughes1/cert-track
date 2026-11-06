@@ -60,7 +60,8 @@ module Imports
           expected = sample.expected
           ocr = @text_extractor.new(sample.path, content_type: sample.content_type).call
           text = @vision_only ? ocr.pages.map { |page| "=== page #{page.number} ===\n" }.join("\n") : ocr.text
-          result = Imports::Extractor.for_file(sample.path.to_s, content_type: sample.content_type, text: text).call
+          result = Imports::Extractor.for_file(sample.path.to_s, content_type: sample.content_type, text: text,
+            scanned_pages: ocr.pages.select(&:ocr).map(&:number)).call
           Row.new(sample: sample, score: Scorer.new(expected: expected, actual: as_proposed(result.data)).call, units: result.units,
             input_tokens: result.input_tokens, output_tokens: result.output_tokens, requests: result.requests,
             seconds: elapsed(started), error: nil, quota: false)

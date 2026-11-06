@@ -24,7 +24,7 @@ module Imports
     end
 
     def scan?(item)
-      item.read_by_ocr || item.file.content_type.to_s.start_with?("image/")
+      item.ocr_pages.any? || item.file.content_type.to_s.start_with?("image/")
     end
 
     def details_unread?(certificate, dates)

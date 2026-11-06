@@ -195,7 +195,7 @@ module Imports
       # and QR codes down to those pages: the file is read again so the AI sees every page.
       # A person's confirmed fake stays (see the class comment).
       def reset_attributes
-        attributes = @item.page_range.present? ? RESET_ATTRIBUTES.merge(extracted_text: nil, barcodes: nil, unread_qr_pages: [], read_by_ocr: false) : RESET_ATTRIBUTES
+        attributes = @item.page_range.present? ? RESET_ATTRIBUTES.merge(extracted_text: nil, barcodes: nil, unread_qr_pages: [], ocr_pages: []) : RESET_ATTRIBUTES
         @item.authenticity_confirmed_fake? ? attributes.except(*AUTHENTICITY_RESET.keys) : attributes
       end
 

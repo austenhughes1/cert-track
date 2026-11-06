@@ -235,7 +235,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_05_140000) do
     t.text "authenticity_note"
     t.jsonb "authenticity_details", default: {}, null: false
     t.integer "unread_qr_pages", default: [], null: false, array: true
-    t.boolean "read_by_ocr", default: false, null: false
+    t.integer "ocr_pages", default: [], null: false, array: true
     t.jsonb "quality_flags", default: [], null: false
     t.index ["authenticity_checked_by_id"], name: "index_import_items_on_authenticity_checked_by_id"
     t.index ["certificate_id"], name: "index_import_items_on_certificate_id"

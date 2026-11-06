@@ -60,7 +60,7 @@ module Imports
         item.file.open do |file|
           if item.extracted_text.nil?
             result = TextExtractor.new(file.path, content_type: item.file.content_type, timeout: tool_timeout).call
-            item.update!(extracted_text: result.text, read_by_ocr: result.pages.any?(&:ocr), error_message: nil)
+            item.update!(extracted_text: result.text, ocr_pages: result.pages.select(&:ocr).map(&:number), error_message: nil)
           end
           if item.barcodes.blank?
             reader = Certificates::QrReader.new(file.path, content_type: item.file.content_type, timeout: tool_timeout)

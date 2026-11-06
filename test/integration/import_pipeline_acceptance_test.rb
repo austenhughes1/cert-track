@@ -336,11 +336,11 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
         (family.map(&:holder_name_raw) - [ holder ]).each { |other| assert_not_includes item.extracted_text, other }
       end
 
-      # One text call per file that reached the AI step: OCR read every scan and photo, so the
-      # vision model was never needed, and the duplicate, notes.txt and the zip-slip entry cost nothing.
+      # One call per file that reached the AI step: text PDFs to the text model, scans and photos to the
+      # vision model. The duplicate, notes.txt and the zip-slip entry cost nothing.
       ai_files = zip.candidates.size - 3
       assert_equal ai_files, Ai::FakeProvider.calls.size
-      assert_equal [ Ai::Config::FAKE_MODEL ], Ai::FakeProvider.calls.map(&:model).uniq
+      assert_equal [ Ai::Config::FAKE_MODEL, Ai::Config::FAKE_VISION_MODEL ], Ai::FakeProvider.calls.map(&:model).uniq.sort, "photos and scans go to the vision model"
       assert_equal ai_files, batch.import_items.where.not(extraction: nil).where(source_item_id: nil).count
       assert batch.import_items.where(source_item_id: nil).where.not(extraction: nil).all? { |item| item.ai_units_used.positive? }
       assert_operator Ai::Budget.used_today, :>, 0

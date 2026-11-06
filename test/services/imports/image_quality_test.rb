@@ -6,7 +6,7 @@ class Imports::ImageQualityTest < ActiveSupport::TestCase
   COMPLETED = Dates.new(completed_on: Date.new(2025, 3, 14))
 
   def item(content_type: "image/jpeg", **attrs)
-    ImportItem.new({ read_by_ocr: false }.merge(attrs)).tap do |record|
+    ImportItem.new(attrs).tap do |record|
       record.file.attach(io: StringIO.new("x"), filename: "card", content_type: content_type)
     end
   end
@@ -33,7 +33,7 @@ class Imports::ImageQualityTest < ActiveSupport::TestCase
       assert_equal [ "hard_to_read" ], Imports::ImageQuality.flags(item, data, COMPLETED), data.inspect
     end
     assert_equal [ "hard_to_read" ], Imports::ImageQuality.flags(item, READ, Dates.new(completed_on: nil))
-    assert_equal [ "hard_to_read" ], Imports::ImageQuality.flags(item(content_type: "application/pdf", read_by_ocr: true), READ.merge("holder_name" => nil), COMPLETED)
+    assert_equal [ "hard_to_read" ], Imports::ImageQuality.flags(item(content_type: "application/pdf", ocr_pages: [ 1 ]), READ.merge("holder_name" => nil), COMPLETED)
   end
 
   test "a PDF with a text layer missing a detail isn't an image problem" do

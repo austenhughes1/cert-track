@@ -82,6 +82,7 @@ module Imports
       @full_text = item.extracted_text
       @full_barcodes = Array(item.barcodes).select { |barcode| barcode.is_a?(Hash) }.map(&:stringify_keys)
       @full_unread_qr_pages = item.unread_qr_pages.dup
+      @full_ocr_pages = item.ocr_pages.dup
       load_document
       certificates.each_with_index.map do |certificate, index|
         pages = pages_for(certificate)
@@ -146,7 +147,10 @@ module Imports
           item.file = split if split
         end
         item.barcodes = barcodes_for(pages, cut: split.present?) if pdf?
-        item.unread_qr_pages = unread_qr_pages_for(pages, cut: split.present?) if pdf?
+        if pdf?
+          item.unread_qr_pages = page_numbers_for(@full_unread_qr_pages, pages, cut: split.present?)
+          item.ocr_pages = page_numbers_for(@full_ocr_pages, pages, cut: split.present?)
+        end
         item.save!
         item
       end
@@ -162,8 +166,8 @@ module Imports
           extracted_text: text, extraction: { "certificates" => [ certificate ], "non_certificate_pages" => [] },
           provider: item.provider, ai_units_used: 0, file: split || @original_blob,
           barcodes: pdf? ? barcodes_for(pages, cut: split.present?) : @full_barcodes,
-          unread_qr_pages: pdf? ? unread_qr_pages_for(pages, cut: split.present?) : item.unread_qr_pages,
-          read_by_ocr: item.read_by_ocr
+          unread_qr_pages: pdf? ? page_numbers_for(@full_unread_qr_pages, pages, cut: split.present?) : @full_unread_qr_pages,
+          ocr_pages: pdf? ? page_numbers_for(@full_ocr_pages, pages, cut: split.present?) : @full_ocr_pages
         )
       end
 
@@ -176,10 +180,10 @@ module Imports
         end
       end
 
-      # The same for the pages with a QR code that couldn't be read.
-      def unread_qr_pages_for(pages, cut:)
+      # The same for a list of the file's page numbers (read by OCR; a QR code that couldn't be read).
+      def page_numbers_for(numbers, pages, cut:)
         offset = cut ? pages.first - 1 : 0
-        (@full_unread_qr_pages & pages).map { |page| page - offset }
+        (numbers & pages).map { |page| page - offset }
       end
 
       # An attachable for the cut-out pages, or nil when the PDF can't be split.
