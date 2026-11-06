@@ -522,6 +522,7 @@ Status (Nov 2, 2026): every `travel_to` criterion passes in `test/jobs/notificat
 ### Phase 3: Bulk import
 
 - [ ] Spike first: build the accuracy harness, compare 2 or 3 free Workers AI text models and 1 vision model, record scores in this file, set `EXTRACTION_MODEL` and `EXTRACTION_VISION_MODEL`.
+  - Results so far (Nov 5, 2026, the owner's 25 samples, 34 certificates; the bar is 90%). Llama 3.3 70B alone: name 79%, type 88%, holder 88%, completed 68%, expires 76%; its misses are mostly photos OCR garbled. Llama 3.1 8B and Gemma 4 did worse and Gemma 4 often timed out; Mistral Small ran out of allowance. Llama 70B for text pages with Llama 4 Scout for scans and photos, without the OCR text: name 74%, type 76%, holder 91%, completed 74%, expires 71%. On the 24 files other than sample_01, a compilation sheet of 9 certificates, that is name 100%, type 100%, holder 92%, completed 96%, expires 96%. Still to do: score sample_01 again now that the scorer pairs by name, then set the two models. The free allowance ran out at about 5,200 neurons by our count, so real usage is about twice what we estimate.
 - [x] Pipeline steps 1 to 11, the daily budget tracking, and rescheduling on quota errors.
 - [x] Review queue with keyboard shortcuts and front/back merge.
 

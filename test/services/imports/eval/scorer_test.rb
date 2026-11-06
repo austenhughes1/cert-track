@@ -1,6 +1,14 @@
 require "test_helper"
 
 class Imports::Eval::ScorerTest < ActiveSupport::TestCase
+  test "one person's several certificates on a page are paired by their names" do
+    entry = ->(name, code) { { "pages" => [ 1 ], "holder_name" => "Juan Ortiz", "certificate_name_as_printed" => name, "certificate_type_code" => code } }
+    score = Imports::Eval::Scorer.new(expected: { "certificates" => [ entry.call("First Aid", "FIRSTAID"), entry.call("Flagger", "FLAGGER") ] },
+      actual: { "certificates" => [ entry.call("Flagger", "FLAGGER"), entry.call("First Aid", "FIRSTAID") ] }).call
+
+    assert_equal [ 2, 2 ], score.fields.fetch("certificate_type_code")
+  end
+
   test "the printed name allows small differences in wording, not another certificate" do
     score = ->(want, got) {
       Imports::Eval::Scorer.new(expected: { "certificates" => [ { "pages" => [ 1 ], "certificate_name_as_printed" => want } ] },

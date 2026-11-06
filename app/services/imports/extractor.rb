@@ -21,7 +21,8 @@ module Imports
   # unless the file is over MAX_DOCUMENT_CHARS (then several, never splitting a page). With a vision
   # model set, a scanned page or photo goes to it instead, whatever OCR made of it: the accuracy
   # test (Nov 5, 2026) found OCR garbles a photo's text in ways that still look usable ("Rash
-  # Williams"), where the vision model reads the image correctly.
+  # Williams"), where the vision model reads the image correctly. It doesn't get the OCR text either:
+  # withholding it scored better on every field.
   # Pages OCR could not read are rendered (Imports::PageImages): a blank one (blank_page?) is a
   # non-certificate page with no AI call, and the rest go to EXTRACTION_VISION_MODEL with their
   # image, as many per call as the model accepts (config/ai_models.yml max_images). With no
@@ -170,13 +171,18 @@ module Imports
 
         page_texts = pages.to_h
         planned = text_calls(provider, usable, pages.size)
-        planned.concat(vision_calls(vision_model, images.keys.map { |number| [ number, page_texts[number] ] }, pages.size)) if vision_model
+        planned.concat(vision_calls(vision_model, images.keys.map { |number| [ number, (page_texts[number] unless withhold_ocr_text?(provider, number)) ] }, pages.size)) if vision_model
         calls = perform(provider, planned, images, &on_progress)
         merge(provider, calls, blank: blank, unread: unread)
       end
     end
 
     private
+      # The fake provider has no eyes, so it still reads the text.
+      def withhold_ocr_text?(provider, number)
+        provider.to_s != "fake" && scanned?(number)
+      end
+
       def scanned?(number)
         @content_type.to_s.start_with?("image/") || @scanned_pages.include?(number)
       end

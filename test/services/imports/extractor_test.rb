@@ -77,6 +77,16 @@ class Imports::ExtractorTest < ActiveSupport::TestCase
     assert_equal [ "fake-extractor" ], Ai::FakeProvider.calls.map(&:model), "no vision model: OCR's reading is all there is"
   end
 
+  test "the vision model isn't given a scanned page's OCR text, except by the fake provider, which has no eyes" do
+    extractor = Imports::Extractor.for_file(file_fixture("certificate.jpg").to_s, content_type: "image/jpeg", text: "x")
+    text_pdf = Imports::Extractor.for_file(file_fixture("certificate.jpg").to_s, content_type: "application/pdf", text: "x", scanned_pages: [ 2 ])
+
+    assert extractor.send(:withhold_ocr_text?, "workers_ai", 1)
+    assert_not extractor.send(:withhold_ocr_text?, "fake", 1)
+    assert text_pdf.send(:withhold_ocr_text?, "workers_ai", 2)
+    assert_not text_pdf.send(:withhold_ocr_text?, "workers_ai", 1), "a text layer page isn't scanned"
+  end
+
   test "a page OCR could not read goes to the vision model with its page image" do
     Ai::FakeProvider.reply_next!({ "certificates" => [ { "pages" => [ 1 ], "holder_name" => "Juan A. Ortiz",
       "certificate_type_code" => "OSHA30", "completed_on" => "2025-03-14", "confidence" => 0.9 } ], "non_certificate_pages" => [] })

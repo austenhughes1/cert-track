@@ -8,7 +8,7 @@ module Imports
     #   score.extra                  # => certificates the model returned that are not expected
     #
     # Each expected certificate is paired with the returned one that shares the most pages
-    # (then the same holder, then the same type); an expected certificate with nothing left
+    # (then the same printed name, the same holder, the same type); an expected certificate with nothing left
     # to pair scores every field wrong. Fields:
     #   certificate_name_as_printed  the same words, whatever the case and punctuation, allowing a few
     #                          differences: it says what the certificate is, on the list or not
@@ -89,7 +89,8 @@ module Imports
         def best_match(want, candidates)
           candidates.max_by.with_index do |got, index|
             overlap = (Array(want["pages"]).map(&:to_i) & Array(got["pages"]).map(&:to_i)).size
-            [ overlap, same?("holder_name", want["holder_name"], got["holder_name"]) ? 1 : 0,
+            [ overlap, same_name?(want["certificate_name_as_printed"], got["certificate_name_as_printed"]) ? 1 : 0,
+              same?("holder_name", want["holder_name"], got["holder_name"]) ? 1 : 0,
               same?("certificate_type_code", want["certificate_type_code"], got["certificate_type_code"]) ? 1 : 0, -index ]
           end
         end
