@@ -70,10 +70,10 @@ env:
     # raising it would starve web.
     WEB_CONCURRENCY: 2
     JOB_CONCURRENCY: 1
-    # Model IDs are chosen in Phase 3/4; uncomment once picked. Until EXTRACTION_MODEL is set,
-    # imports fail at the AI step with "set EXTRACTION_MODEL" (docs/IMPORT_SPIKE.md).
-    # EXTRACTION_MODEL: "@cf/..."
-    # EXTRACTION_VISION_MODEL: "@cf/..."
+    # Chosen by the accuracy test on the owner's samples (docs/PLAN.md, Phase 3, Nov 2026). Text PDFs go
+    # to the first; scanned pages and photos to the second.
+    EXTRACTION_MODEL: "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+    EXTRACTION_VISION_MODEL: "@cf/meta/llama-4-scout-17b-16e-instruct"
     # CHAT_MODEL: "@cf/..."
     # Only with AI_PROVIDER=anthropic (default claude-haiku-5-5) or ollama (default http://localhost:11434/v1).
     # ANTHROPIC_MODEL: claude-haiku-5-5
