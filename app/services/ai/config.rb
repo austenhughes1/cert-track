@@ -31,6 +31,9 @@ module Ai
     # Providers with a free daily allocation that resets at 00:00 UTC (Ai::Budget applies).
     DAILY_ALLOCATION_PROVIDERS = %w[workers_ai fake].freeze
     DEFAULT_DAILY_BUDGET = 9000
+    # A ceiling on paid tokens per UTC day, so a runaway batch waits instead of draining the account:
+    # about 350 files a day, roughly $10 at Claude Opus 5.5's rates (AI_DAILY_TOKEN_BUDGET to change).
+    DEFAULT_DAILY_TOKEN_BUDGET = 2_000_000
     DEFAULT_ANTHROPIC_MODEL = "claude-haiku-5-5"
     DEFAULT_OLLAMA_URL = "http://localhost:11434/v1"
     OLLAMA_RESOLVE_TIMEOUT = 2 # seconds to look up OLLAMA_URL's host
@@ -72,11 +75,18 @@ module Ai
         ENV["CHAT_MODEL"].presence
       end
 
-      # Neurons per UTC day the app lets itself use (AI_DAILY_NEURON_BUDGET, default 9000).
-      def daily_budget
-        value = override(:daily_budget) || ENV["AI_DAILY_NEURON_BUDGET"].presence
+      # Units per UTC day the app lets itself use: neurons on Workers AI (AI_DAILY_NEURON_BUDGET,
+      # default 9000), tokens on a paid provider (AI_DAILY_TOKEN_BUDGET, default 2,000,000).
+      def daily_budget(provider = self.provider)
+        paid = paid_ceiling?(provider)
+        value = override(:daily_budget) || ENV[paid ? "AI_DAILY_TOKEN_BUDGET" : "AI_DAILY_NEURON_BUDGET"].presence
         budget = Integer(value.to_s, exception: false) if value
-        budget&.positive? ? budget : DEFAULT_DAILY_BUDGET
+        budget&.positive? ? budget : (paid ? DEFAULT_DAILY_TOKEN_BUDGET : DEFAULT_DAILY_BUDGET)
+      end
+
+      # A provider billed per token whose daily spend the app caps itself.
+      def paid_ceiling?(provider = self.provider)
+        provider.to_s == "anthropic"
       end
 
       def cloudflare_account_id

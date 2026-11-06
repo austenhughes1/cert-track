@@ -1,4 +1,5 @@
 require "test_helper"
+require "vips"
 require_relative "../../support/scanned_pdf"
 
 class Imports::ExtractTextJobTest < ActiveJob::TestCase
@@ -24,6 +25,36 @@ class Imports::ExtractTextJobTest < ActiveJob::TestCase
     assert_nil item.error_message
     assert_equal [], item.barcodes, "no QR codes on it"
     assert_enqueued_with job: Imports::AiExtractJob, args: [ item ]
+  end
+
+  teardown { Array(@resaved_paths).each { FileUtils.rm_f(it) } }
+
+  test "a re-saved copy of an earlier upload is a duplicate: no text read, no AI call, no file kept" do
+    first = item_with(resaved("light.png", 1), content_type: "image/png")
+    Imports::ExtractTextJob.perform_now(first)
+    assert first.reload.content_digest.present?
+    clear_enqueued_jobs
+
+    copy = item_with(resaved("heavy.png", 9), content_type: "image/png")
+
+    assert_no_enqueued_jobs(only: Imports::AiExtractJob) { Imports::ExtractTextJob.perform_now(copy) }
+
+    copy.reload
+    assert copy.duplicate?
+    assert_equal first, copy.duplicate_of
+    assert_nil copy.extracted_text
+  end
+
+  test "a failed earlier upload doesn't count, and Read again isn't stopped by a copy" do
+    failed = item_with(resaved("light.png", 1), content_type: "image/png")
+    failed.update!(status: :failed, content_digest: "abc")
+    Imports::ExtractTextJob.perform_now(item = item_with(resaved("heavy.png", 9), content_type: "image/png"))
+    assert_not item.reload.duplicate?
+
+    other = item_with(resaved("third.png", 6), content_type: "image/png")
+    other.update!(content_digest: item.content_digest)
+    assert_enqueued_with(job: Imports::AiExtractJob) { Imports::ExtractTextJob.perform_now(other) }
+    assert_not other.reload.duplicate?, "it has a digest already: someone asked for a new read"
   end
 
   test "stores the QR codes with the page numbers of the file" do
@@ -194,6 +225,13 @@ class Imports::ExtractTextJobTest < ActiveJob::TestCase
   end
 
   private
+    def resaved(name, compression)
+      path = Rails.root.join("tmp", "digest-test-#{SecureRandom.hex(4)}-#{name}").to_s
+      Vips::Image.new_from_file(file_fixture("qr/redcross_qr.png").to_s).pngsave(path, compression: compression)
+      @resaved_paths = [ *@resaved_paths, path ]
+      path
+    end
+
     def file(name)
       File.join(@dir, name)
     end

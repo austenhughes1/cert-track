@@ -88,6 +88,18 @@ models:
     structured_output: true
     vision: true
     max_images: 20
+  "claude-sonnet-5-5":
+    input_per_million: 0
+    output_per_million: 0
+    structured_output: true
+    vision: true
+    max_images: 20
+  "claude-opus-5-5":
+    input_per_million: 0
+    output_per_million: 0
+    structured_output: true
+    vision: true
+    max_images: 20
 
   # --- Ai::FakeProvider (AI_PROVIDER=fake; the default in tests). Cheap, so a whole test
   # batch fits in the budget while the budget code still runs. ---

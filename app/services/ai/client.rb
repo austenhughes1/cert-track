@@ -35,7 +35,9 @@ module Ai
     REQUEST_TIMEOUT = 120 # seconds
     MAX_RETRIES = 2 # ruby_llm retries 429/5xx/timeouts this many times before raising
     RUBY_LLM_PROVIDERS = { "workers_ai" => :openai, "ollama" => :ollama, "anthropic" => :anthropic }.freeze
-    QUOTA_PATTERN = /daily free allocation|free allocation|\b4006\b|quota|rate.?limit|too many requests/i
+    # "Credit balance" and "usage limit" are an Anthropic account out of funds or at its spend limit:
+    # files wait for a top-up or a higher limit rather than fail.
+    QUOTA_PATTERN = /daily free allocation|free allocation|\b4006\b|quota|rate.?limit|too many requests|credit balance|usage limit/i
     SCHEMA_REJECTED_PATTERN = /response_format|json_schema|json mode|structured output|schema/i
     RETRY_WITHOUT_DAILY_RESET = 15.minutes # a 429 from a provider with no daily allocation
     THINK_BLOCK = %r{<think>.*?</think>}m
@@ -121,8 +123,9 @@ module Ai
       def ensure_budget_left!
         return unless Ai::Budget.exhausted?(provider)
 
+        unit = Ai::Config.paid_ceiling?(provider) ? "tokens" : "neurons"
         raise QuotaExceeded, "Today's AI budget is used up (#{Ai::Budget.used_today(provider).to_fs(:delimited)} of " \
-          "#{Ai::Config.daily_budget.to_fs(:delimited)} neurons, UTC day); the next call waits for the reset."
+          "#{Ai::Config.daily_budget(provider).to_fs(:delimited)} #{unit}, UTC day); the next call waits for the reset."
       end
 
       def ruby_llm_reply(system:, prompt:, schema:, images:, max_output_tokens:)

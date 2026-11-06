@@ -220,6 +220,15 @@ class Ai::ClientTest < ActiveSupport::TestCase
     assert_match "daily free allocation", error.message
   end
 
+  test "an Anthropic account out of credit or at its spend limit waits rather than fails" do
+    [ "Your credit balance is too low to access the Anthropic API.", "You have reached your specified API usage limits." ].each do |message|
+      error = assert_raises(Ai::QuotaExceeded, message) do
+        stub_client("claude-opus-5-5", provider: "anthropic") { raise RubyLLM::BadRequestError.new(message) }.json(system: "s", prompt: "p")
+      end
+      assert error.retry_at.present?, "it comes back to try again"
+    end
+  end
+
   test "a 429 from a provider without a daily allocation retries after Retry-After or 15 minutes" do
     travel_to Time.utc(2026, 11, 3, 12) do
       headers = { "retry-after" => "120" }

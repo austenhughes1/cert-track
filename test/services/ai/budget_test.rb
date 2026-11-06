@@ -116,14 +116,40 @@ class Ai::BudgetTest < ActiveSupport::TestCase
     end
   end
 
-  test "providers without a daily allocation are never exhausted" do
+  test "a provider with neither an allocation nor a ceiling is never exhausted" do
     travel_to Time.utc(2026, 11, 3, 12) do
-      AiUsageDay.record!(provider: "anthropic", units: 1_000_000, day: Date.new(2026, 11, 3))
+      AiUsageDay.record!(provider: "ollama", units: 9_000_000, day: Date.new(2026, 11, 3))
 
-      assert_not Ai::Budget.limited?("anthropic")
-      assert_not Ai::Budget.exhausted?("anthropic")
-      assert_equal 0, Ai::Budget.mark_exhausted!("anthropic")
+      assert_not Ai::Budget.limited?("ollama")
+      assert_not Ai::Budget.exhausted?("ollama")
+      assert_equal 0, Ai::Budget.mark_exhausted!("ollama")
     end
+  end
+
+  test "Anthropic has a ceiling on paid tokens per UTC day, and the next day starts fresh" do
+    travel_to Time.utc(2026, 11, 3, 12) do
+      assert Ai::Budget.limited?("anthropic")
+      assert_equal Ai::Config::DEFAULT_DAILY_TOKEN_BUDGET, Ai::Config.daily_budget("anthropic")
+
+      AiUsageDay.record!(provider: "anthropic", units: 1_999_999, day: Date.new(2026, 11, 3))
+      assert_not Ai::Budget.exhausted?("anthropic")
+      AiUsageDay.record!(provider: "anthropic", units: 1, day: Date.new(2026, 11, 3))
+      assert Ai::Budget.exhausted?("anthropic")
+    end
+    travel_to(Time.utc(2026, 11, 4, 0, 10)) { assert_not Ai::Budget.exhausted?("anthropic") }
+  end
+
+  test "Anthropic's rate limit doesn't end its day, and its usage stays in tokens" do
+    travel_to Time.utc(2026, 11, 3, 12) do
+      assert_equal 0, Ai::Budget.mark_exhausted!("anthropic")
+      assert_not Ai::Budget.exhausted?("anthropic")
+      assert_equal 2_300, Ai::Budget.units_for(provider: "anthropic", model: "claude-opus-5-5", input_tokens: 2_000, output_tokens: 300)
+    end
+  end
+
+  test "AI_DAILY_TOKEN_BUDGET is the Anthropic ceiling, not the neuron budget" do
+    Ai::Config.with(daily_budget: 500) { assert_equal 500, Ai::Config.daily_budget("anthropic") }
+    assert_equal Ai::Config::DEFAULT_DAILY_BUDGET, Ai::Config.daily_budget("workers_ai")
   end
 
   test "the fake provider is budgeted like Workers AI so tests exercise the guard" do

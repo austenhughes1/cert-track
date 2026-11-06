@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_05_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_06_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -237,8 +237,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_05_140000) do
     t.integer "unread_qr_pages", default: [], null: false, array: true
     t.integer "ocr_pages", default: [], null: false, array: true
     t.jsonb "quality_flags", default: [], null: false
+    t.string "content_digest"
     t.index ["authenticity_checked_by_id"], name: "index_import_items_on_authenticity_checked_by_id"
     t.index ["certificate_id"], name: "index_import_items_on_certificate_id"
+    t.index ["content_digest"], name: "index_import_items_on_content_digest"
     t.index ["duplicate_of_id"], name: "index_import_items_on_duplicate_of_id"
     t.index ["import_batch_id"], name: "index_import_items_on_import_batch_id"
     t.index ["matched_certificate_issuer_id"], name: "index_import_items_on_matched_certificate_issuer_id"

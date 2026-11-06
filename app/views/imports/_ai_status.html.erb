@@ -18,7 +18,7 @@
     <span id="ai_budget" class="<%= status.exhausted ? "font-medium text-amber-800" : "text-gray-600" %>">
       Today (UTC): <span class="tabular-nums"><%= number_with_delimiter(status.used.to_i) %></span>
       <% if status.budget %>
-        of <span class="tabular-nums"><%= number_with_delimiter(status.budget) %></span> neurons used<%= ", the daily budget is used up" if status.exhausted %>
+        of <span class="tabular-nums"><%= number_with_delimiter(status.budget) %></span> <%= Ai::Config.paid_ceiling?(status.provider) ? "tokens" : "neurons" %> used<%= ", the daily budget is used up" if status.exhausted %>
       <% else %>
         tokens used
       <% end %>

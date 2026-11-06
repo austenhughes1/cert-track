@@ -236,13 +236,14 @@ module Imports
         return unless Ai::Budget.limited?(provider) && pending.any?
 
         estimate = pending.sum { |planned_call| estimated_units(provider, planned_call) }
-        budget = Ai::Config.daily_budget
+        budget = Ai::Config.daily_budget(provider)
         return if estimate <= budget
 
+        unit, setting = Ai::Config.paid_ceiling?(provider) ? %w[tokens AI_DAILY_TOKEN_BUDGET] : %w[neurons AI_DAILY_NEURON_BUDGET]
         raise OverBudget.new("This file is too big to read with one day's AI budget: it needs about " \
-          "#{estimate.to_fs(:delimited)} neurons over #{pending.size} AI calls, and the daily budget " \
-          "(AI_DAILY_NEURON_BUDGET) is #{budget.to_fs(:delimited)}. Split it into smaller files and upload those, " \
-          "or read it with the paid fallback (AI_PROVIDER=anthropic).", estimate: estimate, budget: budget)
+          "#{estimate.to_fs(:delimited)} #{unit} over #{pending.size} AI calls, and the daily budget " \
+          "(#{setting}) is #{budget.to_fs(:delimited)}. Split it into smaller files and upload those.",
+          estimate: estimate, budget: budget)
       end
 
       def estimated_units(provider, planned_call)

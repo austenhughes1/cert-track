@@ -199,7 +199,8 @@ An unset variable becomes an **empty** secret without any warning, so don't skip
 | `AUTO_ACCEPT_ENABLED` | `config/deploy.yml` | `false` until you trust the import output |
 | `VERIFICATION_AUTO_CHECKS` | `config/deploy.yml` | `true`: automatic issuer lookups for AHA, National CPR Foundation, National OSHA Foundation and the OSHA Card Portal (only the verification code is sent). `false` leaves assisted checks only |
 | `ANTHROPIC_API_KEY` | your shell (optional) | Paid fallback only; see section 12 |
-| `ANTHROPIC_MODEL` | `config/deploy.yml` (optional) | Model for `AI_PROVIDER=anthropic`, text and images; default `claude-haiku-5-5` |
+| `ANTHROPIC_MODEL` | `config/deploy.yml` | Model for `AI_PROVIDER=anthropic`, text and images. Set to `claude-opus-5-5` by the accuracy test |
+| `AI_DAILY_TOKEN_BUDGET` | `config/deploy.yml` | The app's ceiling on paid tokens per UTC day; past it, files wait for the next day (about 5,700 tokens a file) |
 | `OLLAMA_URL` | `config/deploy.yml` (optional) | Ollama endpoint for `AI_PROVIDER=ollama`; default `http://localhost:11434/v1`. It must be this machine or its private network (localhost, a private IP, or a Kamal accessory name such as `cert_track-ollama`). Any other host is refused before anything is sent, because certificate text would leave the VM |
 | `WEB_CONCURRENCY`, `JOB_CONCURRENCY` | `config/deploy.yml` | `2` Puma workers, `1` process per Solid Queue worker (sized for 2 OCPU; see section 10) |
 

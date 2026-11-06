@@ -17,6 +17,10 @@ module Imports
   # same way; an item with none is read for them again. Pages with a QR code that couldn't be
   # decoded go in unread_qr_pages, for the image quality flag (Imports::ImageQuality).
   #
+  # Before anything else, a file whose content is the same as an earlier upload's (a re-saved copy,
+  # Imports::ContentDigest) becomes a duplicate of it, so it costs no OCR and no AI call. Read again
+  # keeps the digest and doesn't stop here: it is someone asking for a new read.
+  #
   # Items that are no longer pending or extracting (rejected, already done) are left
   # alone, and a deleted item discards the job.
   class ExtractTextJob < ApplicationJob
@@ -48,12 +52,37 @@ module Imports
       raise TextExtractor::Error, "The import item has no file attached" unless item.file.attached?
 
       item.extracting!
+      return if same_content_as_earlier_upload?(item)
+
       read_file(item) if item.extracted_text.nil? || item.barcodes.blank?
 
       Imports::AiExtractJob.perform_later(item)
     end
 
     private
+      # Only on a first read: an item with a digest, stored text or AI usage is a resumed run or Read
+      # again. Under an advisory lock on the digest, so of two copies arriving together only one is read.
+      def same_content_as_earlier_upload?(item)
+        return false if item.content_digest.present? || item.source_item_id.present? || item.extracted_text.present? || item.ai_units_used.to_i.positive?
+
+        digest = item.file.open { |file| ContentDigest.new(file.path, content_type: item.file.content_type, timeout: tool_timeout).call }
+        return false if digest.nil?
+
+        original = ImportItem.transaction do
+          ImportItem.connection.execute("SELECT pg_advisory_xact_lock(hashtext(#{ImportItem.connection.quote("content:#{digest}")}))")
+          item.update!(content_digest: digest)
+          ImportItem.original_for_content(digest, except: item)
+        end
+        return false unless original
+
+        item.mark_duplicate_of!(original)
+        item.file.purge_later # a duplicate holds no file: the original's is the one kept
+        item.import_batch.check_completion!
+        true
+      rescue ActiveStorage::FileNotFoundError
+        false # the text step reports a missing file
+      end
+
       # The text unless it is stored already, then the QR codes unless they are. A file missing
       # from storage only matters for the text: without it, the item goes on with no QR codes.
       def read_file(item)

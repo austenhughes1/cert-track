@@ -10,18 +10,19 @@ module Ai
   #   Ai::Budget.record!(provider: "workers_ai", model: "@cf/...", input_tokens: 1800, output_tokens: 240)
   #   Ai::Budget.next_reset_at               # => the next 00:05 UTC
   #
-  # Only providers with a daily allocation (workers_ai, and fake so tests exercise this) are
-  # limited. Anthropic and Ollama usage is recorded as plain tokens and never blocks.
+  # Providers with a daily allocation (workers_ai, and fake so tests exercise this) are limited, and
+  # so is Anthropic, by its own ceiling on paid tokens (Ai::Config.daily_budget): past it, jobs wait
+  # for the next UTC day just the same. Ollama is recorded as plain tokens and never blocks.
   module Budget
     RESET_OFFSET = 5.minutes # wait a little past 00:00 UTC so the allocation has really reset
 
     class << self
       def limited?(provider = Ai::Config.provider)
-        Ai::Config.daily_allocation?(provider)
+        Ai::Config.daily_allocation?(provider) || Ai::Config.paid_ceiling?(provider)
       end
 
       def exhausted?(provider = Ai::Config.provider, now: Time.current)
-        limited?(provider) && used_today(provider, now: now) >= Ai::Config.daily_budget
+        limited?(provider) && used_today(provider, now: now) >= Ai::Config.daily_budget(provider)
       end
 
       # Units recorded today (UTC) for provider: neurons for Workers AI, tokens otherwise.
@@ -30,7 +31,7 @@ module Ai
       end
 
       def remaining(provider = Ai::Config.provider, now: Time.current)
-        [ Ai::Config.daily_budget - used_today(provider, now: now), 0 ].max
+        [ Ai::Config.daily_budget(provider) - used_today(provider, now: now), 0 ].max
       end
 
       # Records one call and returns the units it cost (Integer).
@@ -46,7 +47,7 @@ module Ai
       def units_for(provider:, model:, input_tokens:, output_tokens:, images: 0)
         input = input_tokens.to_i
         output = output_tokens.to_i
-        return input + output unless limited?(provider)
+        return input + output unless Ai::Config.daily_allocation?(provider)
 
         rates = Ai::Config.model_settings(model)
         neurons = (input * rates[:input_per_million].to_f + output * rates[:output_per_million].to_f) / 1_000_000 +
@@ -58,10 +59,10 @@ module Ai
       # waits for the reset instead of hitting the API again. Returns the units added. Between
       # 00:00 and 00:05 UTC the day before is filled instead (see the class comment).
       def mark_exhausted!(provider = Ai::Config.provider, now: Time.current)
-        return 0 unless limited?(provider)
+        return 0 unless Ai::Config.daily_allocation?(provider) # a paid provider's 429 is a rate limit, not the day's end
 
         day = refusal_day(now)
-        shortfall = [ Ai::Config.daily_budget - AiUsageDay.used_on(day, provider), 0 ].max
+        shortfall = [ Ai::Config.daily_budget(provider) - AiUsageDay.used_on(day, provider), 0 ].max
         AiUsageDay.record!(provider: provider, units: shortfall, day: day, requests: 0)
         shortfall
       end

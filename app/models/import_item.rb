@@ -91,6 +91,14 @@ class ImportItem < ApplicationRecord
         .first
     end
 
+    # The earlier item showing the same content (Imports::ContentDigest) as a re-saved copy, or nil.
+    # Same exclusions as original_for; only whole files are compared.
+    def original_for_content(digest, except:)
+      return if digest.blank?
+
+      where(content_digest: digest, source_item_id: nil).where.not(id: except.id).where.not(status: %i[duplicate failed]).order(:id).first
+    end
+
     # The earlier item for the same file (any page range) that a new upload of it would
     # duplicate, or nil: the whole-file item when there is one. Same exclusions as original_for.
     def original_file_for(sha256)

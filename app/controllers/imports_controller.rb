@@ -65,7 +65,7 @@ class ImportsController < ApplicationController
         ready: Ai::Config.ready?(provider),
         problems: Ai::Config.problems(provider),
         used: Ai::Budget.used_today(provider),
-        budget: (Ai::Config.daily_budget if limited),
+        budget: (Ai::Config.daily_budget(provider) if limited),
         exhausted: Ai::Budget.exhausted?(provider),
         waiting_count: waiting.count,
         resumes_at: waiting.minimum(:next_attempt_at)

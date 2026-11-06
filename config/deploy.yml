@@ -70,13 +70,16 @@ env:
     # raising it would starve web.
     WEB_CONCURRENCY: 2
     JOB_CONCURRENCY: 1
-    # Chosen by the accuracy test on the owner's samples (docs/PLAN.md, Phase 3, Nov 2026). Text PDFs go
-    # to the first; scanned pages and photos to the second.
-    EXTRACTION_MODEL: "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
-    EXTRACTION_VISION_MODEL: "@cf/meta/llama-4-scout-17b-16e-instruct"
+    # Chosen by the accuracy test on the owner's samples (docs/PLAN.md, Phase 3, Nov 2026).
+    AI_PROVIDER: anthropic
+    ANTHROPIC_MODEL: claude-opus-5-5
+    # Only with AI_PROVIDER=workers_ai, the free option the accuracy test scored lower:
+    # EXTRACTION_MODEL: "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+    # EXTRACTION_VISION_MODEL: "@cf/meta/llama-4-scout-17b-16e-instruct"
+    # The app's own ceiling on paid tokens per UTC day (default 2000000, about $10 at Opus's rates).
+    AI_DAILY_TOKEN_BUDGET: "2000000"
     # CHAT_MODEL: "@cf/..."
-    # Only with AI_PROVIDER=anthropic (default claude-haiku-5-5) or ollama (default http://localhost:11434/v1).
-    # ANTHROPIC_MODEL: claude-haiku-5-5
+    # Only with AI_PROVIDER=ollama (default http://localhost:11434/v1).
     # OLLAMA_URL: "http://localhost:11434/v1"
   secret:
     - RAILS_MASTER_KEY
@@ -88,7 +91,7 @@ env:
     - CLOUDFLARE_ACCOUNT_ID
     - CLOUDFLARE_AI_API_TOKEN
     # Optional paid fallback (AI_PROVIDER=anthropic). Uncomment here AND in .kamal/secrets.
-    # - ANTHROPIC_API_KEY
+    - ANTHROPIC_API_KEY
 
 # Aliases are triggered with "bin/kamal <alias>". You can overwrite arguments on invocation:
 # "bin/kamal logs -r job" will tail logs from the first server in the job section.
