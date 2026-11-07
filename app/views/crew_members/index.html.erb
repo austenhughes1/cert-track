@@ -23,6 +23,11 @@
           data: { action: "input->auto-submit#debouncedSubmit" },
           class: "mt-1 block w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" %>
   </div>
+  <%# On a phone the search comes first and the rest fold away (a checkbox and CSS, so no JavaScript). %>
+  <% filtered = @filters.slice(:employer, :crew_role_id, :status).values.any?(&:present?) %>
+  <%= check_box_tag :crew_filters_toggle, "1", filtered, name: nil, class: "peer sr-only", id: "crew_filters_toggle" %>
+  <%= label_tag :crew_filters_toggle, "Filters", class: "flex min-h-11 w-full cursor-pointer items-center text-sm font-medium text-blue-700 peer-checked:hidden sm:hidden" %>
+  <div class="hidden w-full flex-wrap items-end gap-3 peer-checked:flex sm:flex sm:w-auto" id="crew_filters_more">
   <div>
     <%= label_tag :active, "Show", class: "block text-xs font-medium text-gray-600" %>
     <%= select_tag :active, options_for_select(crew_member_active_filter_options, @filters[:active]),
@@ -42,6 +47,7 @@
     <%= label_tag :status, "Status", class: "block text-xs font-medium text-gray-600" %>
     <%= select_tag :status, options_for_select(crew_member_status_filter_options, @filters[:status]),
           include_blank: "Any status", data: { action: "change->auto-submit#submit" }, class: "mt-1 block #{select_class}" %>
+  </div>
   </div>
   <%= form.submit "Search", name: nil, class: "cursor-pointer rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" %>
 <% end %>
@@ -82,17 +88,17 @@
         <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
           <tr>
             <th scope="col" class="px-4 py-2">Name</th>
-            <th scope="col" class="px-4 py-2">Role</th>
-            <th scope="col" class="px-4 py-2">Employer</th>
-            <th scope="col" class="px-4 py-2 text-right" title="Current (not superseded) certificates">Certs</th>
+            <th scope="col" class="hidden px-4 py-2 md:table-cell">Role</th>
+            <th scope="col" class="hidden px-4 py-2 md:table-cell">Employer</th>
+            <th scope="col" class="hidden px-4 py-2 text-right md:table-cell" title="Current (not superseded) certificates">Certs</th>
             <th scope="col" class="px-4 py-2" title="Worst requirement status across active projects">Status</th>
-            <th scope="col" class="px-4 py-2">Contact</th>
+            <th scope="col" class="hidden px-4 py-2 md:table-cell">Contact</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
           <% @crew_members.each do |crew_member| %>
             <tr id="<%= dom_id(crew_member) %>" class="<%= class_names("hover:bg-gray-50", "text-gray-500": !crew_member.active?) %>">
-              <td class="whitespace-nowrap px-4 py-2">
+              <td class="px-4 py-2 md:whitespace-nowrap">
                 <%= link_to crew_member.sort_name, crew_member, class: "font-medium text-blue-700 hover:underline" %>
                 <% if crew_member.preferred_name.present? %>
                   <span class="text-xs text-gray-500">(<%= crew_member.preferred_name %>)</span>
@@ -100,10 +106,11 @@
                 <% unless crew_member.active? %>
                   <span class="ml-1 inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">Inactive</span>
                 <% end %>
+                <span class="block text-xs text-gray-500 md:hidden" data-crew-summary><%= [ crew_member.crew_role&.name, crew_member.employer ].compact.join(" · ") %></span>
               </td>
-              <td class="whitespace-nowrap px-4 py-2"><%= crew_member.crew_role&.name || tag.span("—", class: "text-gray-400") %></td>
-              <td class="whitespace-nowrap px-4 py-2"><%= crew_member.employer || tag.span("—", class: "text-gray-400") %></td>
-              <td class="whitespace-nowrap px-4 py-2 text-right tabular-nums"><%= @current_certificate_counts.fetch(crew_member.id, 0) %></td>
+              <td class="hidden whitespace-nowrap px-4 py-2 md:table-cell"><%= crew_member.crew_role&.name || tag.span("—", class: "text-gray-400") %></td>
+              <td class="hidden whitespace-nowrap px-4 py-2 md:table-cell"><%= crew_member.employer || tag.span("—", class: "text-gray-400") %></td>
+              <td class="hidden whitespace-nowrap px-4 py-2 text-right tabular-nums md:table-cell"><%= @current_certificate_counts.fetch(crew_member.id, 0) %></td>
               <td class="whitespace-nowrap px-4 py-2">
                 <% if (status = @worst_statuses[crew_member.id]) %>
                   <%= compliance_badge(status) %>
@@ -111,7 +118,7 @@
                   <span class="text-gray-400" title="Not on an active project">—</span>
                 <% end %>
               </td>
-              <td class="whitespace-nowrap px-4 py-2"><%= crew_member_contact(crew_member) %></td>
+              <td class="hidden whitespace-nowrap px-4 py-2 md:table-cell"><%= crew_member_contact(crew_member) %></td>
             </tr>
           <% end %>
         </tbody>

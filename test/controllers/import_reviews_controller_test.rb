@@ -79,7 +79,7 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
       assert_select "td", /Jaun Ortis/
       assert_select "[data-match=unmatched]", text: "No match", count: 1 # the person
       assert_select "[data-match=suggested]", text: "Suggested", count: 1 # the type, by name
-      assert_select "td", "62%"
+      assert_select "td", /62%/
       assert_select "a[href=?]", import_path(@item.import_batch_id)
     end
     assert_select "tr#import_item_#{second.id}" do
@@ -147,7 +147,7 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_select "#merge_candidates", count: 0
   end
 
-  test "show prefills a printed expiry and offers 'create crew member' when nobody matched" do
+  test "show prefills a printed expiry and still offers adding a crew member when nobody was matched" do
     @item.update!(holder_name_raw: "ORTEGA, JUANA M.", proposed_expires_on: Date.current + 300, proposed_expires_on_source: :printed)
     sign_in_as users(:manager)
 
@@ -156,12 +156,12 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     assert_select "input[type=date][name=?][value=?]", "review[expires_on]", (Date.current + 300).iso8601
     assert_select "select[name=?] optgroup[label=Suggested]", "review[crew_member_id]", count: 0
     assert_select "select[name=?] option[selected]", "review[crew_member_id]", count: 0
-    assert_select "details#new_crew_member[open]" do
+    assert_select "details#new_crew_member" do
       assert_select "form[action=?]", create_crew_member_import_review_path(@item)
       assert_select "input[name=?][value=?]", "crew_member[first_name]", "Juana"
       assert_select "input[name=?][value=?]", "crew_member[last_name]", "Ortega"
     end
-    assert_select "a[href='#new_crew_member']", /Create a crew member from this/
+    assert_select "a[href='#new_crew_member']", /add a crew member/
   end
 
   test "each picker has one placeholder, and it shows when nothing is proposed" do
@@ -235,6 +235,61 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
 
     get import_review_path(plain)
     assert_select "#raw_unread_pages", count: 0
+  end
+
+  test "Accept all accepts only the ready items, and the queue says which those are" do
+    ready = ready_item
+    sign_in_as users(:manager)
+
+    get import_reviews_path
+    assert_select "#accept_all_button", "Accept all 1"
+    assert_select "#review_cards a[data-review-card=?] [data-ready]", ready.id.to_s, text: "Ready to accept"
+    assert_select "#review_cards a[data-review-card=?] [data-needs-look]", @item.id.to_s
+
+    assert_difference -> { Certificate.count }, 1 do
+      post accept_all_import_reviews_path
+    end
+    assert_redirected_to import_reviews_path
+    assert_match(/Accepted 1 certificate\./, flash[:notice])
+    assert ready.reload.accepted?
+    assert_not @item.reload.accepted?
+  end
+
+  test "Accept all is for editors, and isn't offered when nothing is ready" do
+    sign_in_as users(:manager)
+    get import_reviews_path
+    assert_select "#accept_all", count: 0
+    sign_out
+
+    ready = ready_item
+    sign_in_as users(:viewer)
+    assert_no_difference(-> { Certificate.count }) { post accept_all_import_reviews_path }
+    assert_response :forbidden
+    assert ready.reload.needs_review?
+  end
+
+  test "the review screen fits a phone: a fixed action bar, secondary sections folded, large fields" do
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+
+    assert_select "#review_action_bar button[form=review_form]", "Accept"
+    assert_select "#review_action_bar button[form=reject_form]", "Reject"
+    assert_select "#review_action_bar button[form=skip_form]", "Skip"
+    assert_select "details#review_read_details:not([open])"
+    assert_select "details#review_more_fields:not([open])"
+    assert_select "select[name=?].text-base", "review[crew_member_id]"
+    assert_select "details#review_authenticity_details #authenticity"
+  end
+
+  test "a crew member added from the card says so" do
+    @item.update!(person_suggestions: [ { "id" => @juan.id, "name" => @juan.full_name, "note" => Imports::CreateMissingRecords::CREATED_NOTE } ],
+      matched_crew_member: @juan, person_match: :matched)
+    sign_in_as users(:manager)
+
+    get import_review_path(@item)
+
+    assert_select "#person_created_hint", /added to the crew from this card/
   end
 
   test "a flagged image shows on the review screen and in the queue, asking for a clearer copy" do
@@ -1454,6 +1509,12 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
 
     def no_expiration_box_checked?
       css_select("input[type=checkbox][name='review[no_expiration]'][checked]").any?
+    end
+
+    def ready_item
+      new_item(matched_crew_member: @juan, person_match: :matched, matched_certificate_type: @first_aid, type_match: :matched,
+        proposed_completed_on: Date.current - 30, proposed_expires_on: Date.current + 300, proposed_expires_on_source: :printed,
+        confidence: 0.92, holder_name_raw: @juan.full_name, file: { io: StringIO.new(file_fixture("certificate.jpg").binread), filename: "c.jpg", content_type: "image/jpeg" })
     end
 
     def review_params(**overrides)

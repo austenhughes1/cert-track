@@ -474,8 +474,8 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
     split = item.split_items.sole
 
     assert_equal [], item.barcodes
-    assert_equal [ nil, "unmatched", nil, nil ],
-      [ item.matched_certificate_issuer, item.issuer_match, item.proposed_verification_code, item.proposed_verification_url ]
+    assert_equal [ "Example Safety Training LLC", "matched", nil, nil ], [ item.matched_certificate_issuer.name, item.issuer_match,
+      item.proposed_verification_code, item.proposed_verification_url ], "an issuer nothing matches is added from the card"
     assert_equal [ { "page" => 1, "text" => REDCROSS_QR } ], split.barcodes, "page 2 of the upload is page 1 of its own file"
     assert_equal [ issuer("REDCROSS"), "matched" ], [ split.matched_certificate_issuer, split.issuer_match ]
     assert_equal issuer("REDCROSS").id, split.issuer_suggestions.first["id"]
@@ -509,7 +509,7 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
     process(lookalike)
 
     assert_equal [ "PRINTED-1", REDCROSS_QR ], [ item.proposed_verification_code, item.proposed_verification_url ]
-    assert_equal [ nil, "unmatched", nil, nil ], [ lookalike.matched_certificate_issuer, lookalike.issuer_match,
+    assert_equal [ "Example Safety Training LLC", "matched", nil, nil ], [ lookalike.matched_certificate_issuer.name, lookalike.issuer_match,
       lookalike.proposed_verification_code, lookalike.proposed_verification_url ]
     assert_equal 1, lookalike.barcodes.size, "kept for the authenticity rules"
   end

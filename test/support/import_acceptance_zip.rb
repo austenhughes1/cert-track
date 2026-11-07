@@ -31,11 +31,10 @@ module ImportAcceptanceZip
   #   page_range    "1", "3"... for PDFs; nil for photos
   #   holder        the holder name as printed (and as OCR must read it)
   #   crew_member   fixture name of the member it should match or suggest, or nil
-  #   person_match  :matched | :suggested | :unmatched
+  #   person_match  :matched | :suggested | :created (nobody matched, so a member is added from the name)
   #   type          fixture name of the certificate type, or nil
-  #   type_match    :matched | :suggested | :unmatched
+  #   type_match    :matched | :suggested | :created (nothing fits, so a type is added from the printed name)
   #   expiry        expires_on_source a certificate made from it gets: :printed | :computed | :none
-  #                 (nil when the type is unknown)
   #   auto_accept   true when every auto-accept rule holds (with AUTO_ACCEPT_ENABLED on)
   #   ocr           true when the text came from tesseract (scan or photo)
   #   why           what the sample exercises
@@ -103,7 +102,7 @@ module ImportAcceptanceZip
 
     unknown = ImportSamples.pdf({ name: "Confined Space Entry", holder: "Robert Example", number: "CS-777",
       completed: day.(-60), issuer: "Example Safety Training LLC" })
-    expect.("certs/example_confined_space.pdf", "1", "Robert Example", nil, :unmatched, nil, :unmatched, nil, false,
+    expect.("certs/example_confined_space.pdf", "1", "Robert Example", nil, :created, nil, :created, :computed, true,
       "unknown person and unknown type")
 
     future = ImportSamples.pdf({ name: "Flagger Certification", holder: "Jon Ortiz", number: "FL-90909",
@@ -154,7 +153,7 @@ module ImportAcceptanceZip
     # A committed synthetic HEIC, so this works where libheif can't encode (CI): "Maria L. Example",
     # "Aerial Lift Operator Training", completed 2025-06-02, expires 2028-06-02.
     heic = File.binread(HEIC_FIXTURE)
-    expect.("photos/example_aerial_lift.heic", nil, "Maria L. Example", nil, :unmatched, nil, :unmatched, :printed, false,
+    expect.("photos/example_aerial_lift.heic", nil, "Maria L. Example", nil, :created, nil, :created, :printed, true,
       "HEIC photo, unknown person and type", ocr: true)
 
     # --- a zip in a zip in the upload (two levels below it: the deepest that is read) ---
@@ -165,8 +164,8 @@ module ImportAcceptanceZip
     level1 = ImportSamples.zip("level2.zip" => ImportSamples.zip("chen_cdl.pdf" => chen_cdl, "example_flagger.pdf" => rosa))
     expect.("nested/level1.zip/level2.zip/chen_cdl.pdf", "1", "Li Chen", :li_chen, :matched, :cdl_a, :matched, :printed, true,
       "two zips deep")
-    expect.("nested/level1.zip/level2.zip/example_flagger.pdf", "1", "Rosa Example", nil, :unmatched, :flagger, :matched,
-      :computed, false, "two zips deep, unknown person")
+    expect.("nested/level1.zip/level2.zip/example_flagger.pdf", "1", "Rosa Example", nil, :created, :flagger, :matched,
+      :computed, true, "two zips deep, unknown person")
 
     entries = [
       [ "certs/", nil ],

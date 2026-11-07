@@ -27,8 +27,12 @@ module Imports
     end
 
     def reasons
+      [ ("Auto-accept is turned off" unless Imports::Config.auto_accept_enabled?), *blockers ].compact
+    end
+
+    # Why a person should look at it, whether or not auto-accept is on ("Accept all" uses these).
+    def blockers
       [
-        ("Auto-accept is turned off" unless Imports::Config.auto_accept_enabled?),
         ("The certificate type was not matched by code" unless type_matched?),
         ("The crew member was not matched exactly" unless person_matched?),
         ("There is no completion date" if item.proposed_completed_on.blank?),

@@ -48,15 +48,15 @@
     <table class="min-w-full divide-y divide-gray-200 text-sm">
       <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
         <tr>
-          <% if admin %><th scope="col" class="px-3 py-2" title="Position: lower numbers come first">Order</th><% end %>
-          <th scope="col" class="px-3 py-2">Code</th>
+          <% if admin %><th scope="col" class="hidden md:table-cell px-3 py-2" title="Position: lower numbers come first">Order</th><% end %>
+          <th scope="col" class="hidden md:table-cell px-3 py-2">Code</th>
           <th scope="col" class="px-3 py-2">Name</th>
-          <th scope="col" class="px-3 py-2">Issuing body</th>
+          <th scope="col" class="hidden md:table-cell px-3 py-2">Issuing body</th>
           <th scope="col" class="px-3 py-2">Validity</th>
-          <th scope="col" class="px-3 py-2">Aliases</th>
-          <th scope="col" class="px-3 py-2">Status</th>
-          <th scope="col" class="px-3 py-2 text-right" title="Current certificates of this type (superseded history not counted)">Current certs</th>
-          <th scope="col" class="px-3 py-2 text-right" title="Projects (any status) that require this type">Projects</th>
+          <th scope="col" class="hidden md:table-cell px-3 py-2">Aliases</th>
+          <th scope="col" class="hidden md:table-cell px-3 py-2">Status</th>
+          <th scope="col" class="hidden md:table-cell px-3 py-2 text-right" title="Current certificates of this type (superseded history not counted)">Current certs</th>
+          <th scope="col" class="hidden md:table-cell px-3 py-2 text-right" title="Projects (any status) that require this type">Projects</th>
           <% if admin %><th scope="col" class="px-3 py-2"><span class="sr-only">Actions</span></th><% end %>
         </tr>
       </thead>
@@ -66,7 +66,7 @@
           <% usage = @usage.fetch(type.id) %>
           <tr id="<%= dom_id(type) %>" class="<%= class_names("align-top hover:bg-gray-50", "bg-gray-50 text-gray-400": !type.active?) %>">
             <% if admin %>
-              <td class="whitespace-nowrap px-3 py-2">
+              <td class="hidden md:table-cell whitespace-nowrap px-3 py-2">
                 <div class="flex items-center gap-1">
                   <span class="w-6 text-right text-xs tabular-nums text-gray-400"><%= type.position || "–" %></span>
                   <%= button_to "↑", move_certificate_type_path(type), method: :patch, params: { direction: "up", status: @status },
@@ -78,18 +78,18 @@
                 </div>
               </td>
             <% end %>
-            <td class="<%= class_names("whitespace-nowrap px-3 py-2 font-mono text-xs font-semibold", type.active? ? "text-gray-900" : "text-gray-400") %>" data-column="code"><%= type.code %></td>
+            <td class="hidden md:table-cell <%= class_names("whitespace-nowrap px-3 py-2 font-mono text-xs font-semibold", type.active? ? "text-gray-900" : "text-gray-400") %>" data-column="code"><%= type.code %></td>
             <td class="px-3 py-2" data-column="name">
               <span class="<%= class_names("font-medium", type.active? ? "text-gray-900" : "text-gray-400") %>"><%= type.name %></span>
               <% if type.description.present? %>
                 <p class="mt-0.5 line-clamp-2 max-w-sm text-xs text-gray-500" title="<%= type.description %>"><%= type.description %></p>
               <% end %>
             </td>
-            <td class="px-3 py-2" data-column="issuing-body"><%= type.issuing_body.presence || tag.span("—", class: "text-gray-400") %></td>
+            <td class="hidden md:table-cell px-3 py-2" data-column="issuing-body"><%= type.issuing_body.presence || tag.span("—", class: "text-gray-400") %></td>
             <td class="whitespace-nowrap px-3 py-2" data-column="validity">
               <span class="<%= class_names("text-gray-500": type.never_expires?) %>"><%= certificate_type_validity(type) %></span>
             </td>
-            <td class="px-3 py-2" data-column="aliases">
+            <td class="hidden md:table-cell px-3 py-2" data-column="aliases">
               <% if type.aliases.any? %>
                 <ul class="space-y-0.5 text-xs text-gray-600" title="<%= type.aliases.join("\n") %>">
                   <% type.aliases.first(2).each do |name| %>
@@ -103,16 +103,16 @@
                 <span class="text-gray-400">—</span>
               <% end %>
             </td>
-            <td class="whitespace-nowrap px-3 py-2" data-column="status">
+            <td class="hidden md:table-cell whitespace-nowrap px-3 py-2" data-column="status">
               <% if type.active? %>
                 <span class="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">Active</span>
               <% else %>
                 <span class="inline-flex rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">Inactive</span>
               <% end %>
             </td>
-            <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums" data-column="current-certificates"
+            <td class="hidden md:table-cell whitespace-nowrap px-3 py-2 text-right tabular-nums" data-column="current-certificates"
                 title="<%= pluralize(usage.certificates, "certificate") %> including history"><%= usage.current_certificates %></td>
-            <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums" data-column="projects"><%= usage.projects %></td>
+            <td class="hidden md:table-cell whitespace-nowrap px-3 py-2 text-right tabular-nums" data-column="projects"><%= usage.projects %></td>
             <% if admin %>
               <td class="whitespace-nowrap px-3 py-2">
                 <div class="flex items-center justify-end gap-3">

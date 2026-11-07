@@ -10,7 +10,7 @@
     <% blob = file.blob %>
     <% inline_path = rails_blob_path(file, disposition: "inline") %>
     <div class="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
-      <p class="text-gray-600">
+      <p class="min-w-0 text-gray-600 break-all">
         <span class="font-medium text-gray-900"><%= blob.filename %></span>
         <% if (pages = import_page_label(item)) %>
           · <span id="review_page_range"><%= item.pages.size == 1 ? "Page" : "Pages" %> <%= pages.delete_prefix("p. ") %> of the original file</span>
@@ -23,18 +23,27 @@
     </div>
 
     <% if blob.content_type == "application/pdf" %>
-      <iframe src="<%= inline_path %>" title="<%= blob.filename %>" id="review_preview_pdf"
-              class="h-[78vh] w-full rounded-lg border border-gray-200 bg-gray-100"></iframe>
+      <%# Phones don't show PDFs inside a page well, so they get a picture of the first page. %>
+      <iframe src="<%= inline_path %>" title="<%= blob.filename %>" id="review_preview_pdf" loading="lazy"
+              class="hidden h-[78vh] w-full rounded-lg border border-gray-200 bg-gray-100 lg:block"></iframe>
+      <%= link_to inline_path, target: "_blank", rel: "noopener", class: "block overflow-auto rounded-lg border border-gray-200 bg-gray-100 p-2 lg:hidden", id: "review_preview_pdf_image" do %>
+        <% if blob.representable? %>
+          <%= image_tag file.representation(resize_to_limit: [ 1200, 1200 ], format: :jpeg, saver: { quality: 80, strip: true }),
+                alt: "First page of #{blob.filename}. Tap to open the PDF.", loading: "lazy", class: "mx-auto max-h-[45vh] w-auto" %>
+        <% else %>
+          <span class="block px-4 py-8 text-center text-sm text-blue-700">Open the PDF</span>
+        <% end %>
+      <% end %>
     <% elsif blob.image? && ActiveStorage.web_image_content_types.include?(blob.content_type) %>
       <div class="overflow-auto rounded-lg border border-gray-200 bg-gray-100 p-2">
         <%= image_tag inline_path, alt: "Uploaded certificate image #{blob.filename}", id: "review_preview_image",
-              class: "mx-auto max-h-[78vh] w-auto" %>
+              class: "mx-auto max-h-[45vh] w-auto lg:max-h-[78vh]" %>
       </div>
     <% elsif blob.representable? %>
       <div class="overflow-auto rounded-lg border border-gray-200 bg-gray-100 p-2">
         <%= image_tag file.representation(resize_to_limit: [ 2000, 2000 ], format: :jpeg, saver: { quality: 80, strip: true }),
               alt: "Uploaded certificate image #{blob.filename}",
-              id: "review_preview_image", class: "mx-auto max-h-[78vh] w-auto" %>
+              id: "review_preview_image", class: "mx-auto max-h-[45vh] w-auto lg:max-h-[78vh]" %>
       </div>
     <% else %>
       <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center text-sm text-gray-500">
@@ -48,7 +57,7 @@
     </div>
   <% end %>
 
-  <details class="mt-4 rounded-lg border border-gray-200 bg-white shadow-sm" id="extracted_text">
+  <details class="mt-4 hidden rounded-lg border border-gray-200 bg-white shadow-sm lg:block" id="extracted_text">
     <summary class="cursor-pointer px-4 py-2 text-sm font-medium text-gray-700">Text read from the file</summary>
     <% if item.extracted_text.present? %>
       <pre class="max-h-96 overflow-auto whitespace-pre-wrap border-t border-gray-100 px-4 py-3 font-mono text-xs text-gray-700"><%= item.extracted_text %></pre>

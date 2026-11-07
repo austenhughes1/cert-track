@@ -52,14 +52,14 @@
     <table class="min-w-full divide-y divide-gray-200 text-sm">
       <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
         <tr>
-          <th scope="col" class="px-3 py-2" title="Position: lower numbers come first">Order</th>
-          <th scope="col" class="px-3 py-2">Code</th>
+          <th scope="col" class="hidden md:table-cell px-3 py-2" title="Position: lower numbers come first">Order</th>
+          <th scope="col" class="hidden md:table-cell px-3 py-2">Code</th>
           <th scope="col" class="px-3 py-2">Name</th>
           <th scope="col" class="px-3 py-2">How it verifies</th>
-          <th scope="col" class="px-3 py-2">Check</th>
-          <th scope="col" class="px-3 py-2">Domains</th>
+          <th scope="col" class="hidden md:table-cell px-3 py-2">Check</th>
+          <th scope="col" class="hidden md:table-cell px-3 py-2">Domains</th>
           <th scope="col" class="px-3 py-2">Status</th>
-          <th scope="col" class="px-3 py-2 text-right" title="Current certificates from this issuer (superseded history not counted)">Current certs</th>
+          <th scope="col" class="hidden md:table-cell px-3 py-2 text-right" title="Current certificates from this issuer (superseded history not counted)">Current certs</th>
           <th scope="col" class="px-3 py-2"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
@@ -67,8 +67,8 @@
         <% @certificate_issuers.each do |issuer| %>
           <% usage = @usage.fetch(issuer.id) %>
           <tr id="<%= dom_id(issuer) %>" class="<%= class_names("align-top hover:bg-gray-50", "bg-gray-50 text-gray-400": !issuer.active?) %>">
-            <td class="whitespace-nowrap px-3 py-2 text-xs tabular-nums text-gray-400"><%= issuer.position || "–" %></td>
-            <td class="<%= class_names("whitespace-nowrap px-3 py-2 font-mono text-xs font-semibold", issuer.active? ? "text-gray-900" : "text-gray-400") %>" data-column="code"><%= issuer.code %></td>
+            <td class="hidden md:table-cell whitespace-nowrap px-3 py-2 text-xs tabular-nums text-gray-400"><%= issuer.position || "–" %></td>
+            <td class="hidden md:table-cell <%= class_names("whitespace-nowrap px-3 py-2 font-mono text-xs font-semibold", issuer.active? ? "text-gray-900" : "text-gray-400") %>" data-column="code"><%= issuer.code %></td>
             <td class="px-3 py-2" data-column="name">
               <span class="<%= class_names("font-medium", issuer.active? ? "text-gray-900" : "text-gray-400") %>"><%= issuer.name %></span>
               <% if certificate_issuer_needs_details?(issuer) %>
@@ -80,7 +80,7 @@
               <% end %>
             </td>
             <td class="px-3 py-2" data-column="method"><%= certificate_issuer_method_label(issuer) %></td>
-            <td class="px-3 py-2" data-column="check">
+            <td class="hidden md:table-cell px-3 py-2" data-column="check">
               <% if issuer.automatic_check? %>
                 <span class="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700"
                       title="<%= issuer.automatic_check %>"><%= certificate_issuer_check_label(issuer) %></span>
@@ -88,7 +88,7 @@
                 <span class="text-gray-500"><%= certificate_issuer_check_label(issuer) %></span>
               <% end %>
             </td>
-            <td class="px-3 py-2 font-mono text-xs" data-column="domains">
+            <td class="hidden md:table-cell px-3 py-2 font-mono text-xs" data-column="domains">
               <%= issuer.domains.any? ? issuer.domains.join(", ") : tag.span("—", class: "font-sans text-gray-400") %>
             </td>
             <td class="whitespace-nowrap px-3 py-2" data-column="status">
@@ -98,7 +98,7 @@
                 <span class="inline-flex rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">Inactive</span>
               <% end %>
             </td>
-            <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums" data-column="current-certificates"
+            <td class="hidden md:table-cell whitespace-nowrap px-3 py-2 text-right tabular-nums" data-column="current-certificates"
                 title="<%= pluralize(usage.certificates, "certificate") %> including history"><%= usage.current_certificates %></td>
             <td class="whitespace-nowrap px-3 py-2">
               <div class="flex items-center justify-end gap-3">

@@ -5,7 +5,7 @@
   <table class="min-w-full border-separate border-spacing-0 text-sm" id="compliance_matrix">
     <thead>
       <tr>
-        <th scope="col" class="sticky top-0 left-0 z-30 border-r border-b border-gray-200 bg-gray-50 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <th scope="col" class="sticky top-0 left-0 z-30 border-r border-b border-gray-200 bg-gray-50 px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 sm:px-3">
           Crew member
         </th>
         <% report.columns.each do |type| %>
@@ -21,10 +21,11 @@
         <% member = row.crew_member %>
         <% gap_count = row.gaps.size %>
         <tr id="<%= dom_id(member, :compliance_row) %>" class="group hover:bg-gray-50">
-          <th scope="row" class="sticky left-0 z-10 whitespace-nowrap border-r border-b border-gray-100 bg-white px-3 py-1.5 text-left font-normal group-hover:bg-gray-50">
+          <th scope="row" class="sticky left-0 z-10 max-w-28 border-r border-b border-gray-100 bg-white px-2 py-1.5 text-left font-normal break-words group-hover:bg-gray-50 sm:max-w-none sm:whitespace-nowrap sm:px-3">
             <%= link_to member.sort_name, crew_member_path(member), title: member.display_name,
                   class: "font-medium text-gray-900 hover:text-blue-700 hover:underline" %>
-            <div class="flex items-center gap-2 text-xs text-gray-500">
+            <% if gap_count.positive? %><div class="text-xs font-medium text-red-700 sm:hidden"><%= pluralize(gap_count, "gap") %></div><% end %>
+            <div class="hidden items-center gap-2 text-xs text-gray-500 sm:flex">
               <span><%= row.role&.name || "No role" %></span>
               <% if member.employer.present? %><span class="max-w-40 truncate" title="<%= member.employer %>">· <%= member.employer %></span><% end %>
               <% if gap_count.positive? %><span class="font-medium text-red-700">· <%= pluralize(gap_count, "gap") %></span><% end %>

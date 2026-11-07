@@ -81,6 +81,16 @@ module ImportsHelper
     item.person_match.to_s
   end
 
+  # Whether the crew member on this item was added automatically from its card.
+  def import_person_created?(item)
+    Array(item.person_suggestions).any? { |suggestion| suggestion.respond_to?(:key?) && suggestion["note"] == Imports::CreateMissingRecords::CREATED_NOTE }
+  end
+
+  # Whether the picker should keep the review's secondary sections shut: only what needs attention opens.
+  def import_authenticity_needs_attention?(item)
+    item.authenticity_flagged? || item.authenticity_needs_check?
+  end
+
   # A badge for person_match / type_match ("matched", "suggested", "unmatched", "picked").
   def import_match_badge(state)
     label, classes = MATCH_STATES.fetch(state.to_s, MATCH_STATES["unmatched"])

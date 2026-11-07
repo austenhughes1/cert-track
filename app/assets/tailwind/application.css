@@ -1,1 +1,25 @@
 @import "tailwindcss";
+
+/* Phones. iOS zooms the whole page when a field under 16px takes focus. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"], [type="radio"], [type="file"]), select, textarea {
+    font-size: 16px;
+  }
+}
+
+/* A fingertip needs about 44px: real controls grow, and a plain text link gets a taller tap area
+   without moving anything around it. */
+@media (pointer: coarse) {
+  button, [type="submit"], select, summary {
+    min-height: 44px;
+  }
+
+  input:not([type="checkbox"], [type="radio"], [type="file"], [type="hidden"]) {
+    min-height: 44px;
+  }
+
+  main a:not([class*="rounded"], [class*="block"]) {
+    padding-block: 0.5rem;
+    margin-block: -0.5rem;
+  }
+}

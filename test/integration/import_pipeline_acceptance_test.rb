@@ -73,15 +73,16 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
     assert_intake_outcomes(batch, zip)
     assert_certificate_items(batch, zip, auto_accept: true)
 
-    assert_equal 8, zip.auto_accepted.size
+    assert_equal 11, zip.auto_accepted.size
     zip.auto_accepted.each do |expected|
       item = item_for(batch, expected)
       certificate = item.certificate
       assert certificate, "#{expected.file} p#{expected.page_range} should be auto-accepted (#{expected.why})"
       assert certificate.source_import?
       assert_equal item.id, certificate.import_item_id
-      assert_equal [ crew_members(expected.crew_member), certificate_types(expected.type) ],
-        [ certificate.crew_member, certificate.certificate_type ], expected.file
+      assert_equal [ item.matched_crew_member, item.matched_certificate_type ], [ certificate.crew_member, certificate.certificate_type ], expected.file
+      assert_equal crew_members(expected.crew_member), certificate.crew_member, expected.file if expected.crew_member
+      assert_equal certificate_types(expected.type), certificate.certificate_type, expected.file if expected.type
       assert_equal item.proposed_completed_on, certificate.completed_on
       assert_equal expected.expiry.to_s, certificate.expires_on_source, "#{expected.file}: expiry source"
       assert_nil certificate.verified_by, "auto-accepted certificates are not verified by anyone"
@@ -107,7 +108,7 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
     assert_match(/completion date .* is in the future/, future.error_message)
 
     assert batch.needs_review?
-    assert_summary_email(batch, accepted: 8, needs_review: 9, duplicates: 1, rejected: 2, failed: 0)
+    assert_summary_email(batch, accepted: 11, needs_review: 6, duplicates: 1, rejected: 2, failed: 0)
   end
 
   test "a quota error mid-batch parks the rest until 00:05 UTC; after the reset they finish" do
@@ -201,7 +202,7 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
     assert_equal [ "1", "2" ], [ first.page_range, second.page_range ]
     assert_equal [ [], [ { "page" => 1, "text" => "https://www.redcross.org/take-a-class/qrcode?certnumber=TEST123" } ] ],
       [ first.barcodes, second.barcodes ]
-    assert_equal [ nil, "unmatched" ], [ first.matched_certificate_issuer, first.issuer_match ]
+    assert_equal [ "Example Safety Training LLC", "matched" ], [ first.matched_certificate_issuer.name, first.issuer_match ], "added from the card"
     assert_equal [ "REDCROSS", "matched", "TEST123", "https://www.redcross.org/take-a-class/qrcode?certnumber=TEST123" ],
       [ second.matched_certificate_issuer.code, second.issuer_match, second.proposed_verification_code, second.proposed_verification_url ]
     assert second.authenticity_needs_check?, "Red Cross is checked by a person"
@@ -356,10 +357,18 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
 
         assert_equal expected_status, item.status, label
         assert_equal expected.holder, item.holder_name_raw, "#{label}: holder name as read"
-        assert_equal expected.person_match.to_s, item.person_match, "#{label}: person match"
-        assert_same_record expected.crew_member && crew_members(expected.crew_member), item.matched_crew_member, "#{label}: person"
-        assert_equal expected.type_match.to_s, item.type_match, "#{label}: type match"
-        assert_same_record expected.type && certificate_types(expected.type), item.matched_certificate_type, "#{label}: type"
+        assert_equal expected.person_match == :created ? "matched" : expected.person_match.to_s, item.person_match, "#{label}: person match"
+        if expected.person_match == :created
+          assert_equal NameNormalizer.normalize(expected.holder), NameNormalizer.normalize(item.matched_crew_member.full_name), "#{label}: added from the card"
+        else
+          assert_same_record expected.crew_member && crew_members(expected.crew_member), item.matched_crew_member, "#{label}: person"
+        end
+        assert_equal expected.type_match == :created ? "matched" : expected.type_match.to_s, item.type_match, "#{label}: type match"
+        if expected.type_match == :created
+          assert_equal item.certificate_name_raw, item.matched_certificate_type.name, "#{label}: type added from the card"
+        else
+          assert_same_record expected.type && certificate_types(expected.type), item.matched_certificate_type, "#{label}: type"
+        end
         assert_equal BigDecimal("0.95"), item.confidence, label
         assert_equal "fake", item.provider
         assert stored_file(item), label
@@ -367,11 +376,7 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
         if expected.ocr
           assert_match(/Awarded to: #{Regexp.escape(expected.holder)}/, item.extracted_text, "#{label}: OCR text")
         end
-        if expected.person_match == :unmatched
-          assert_nil item.matched_crew_member
-        else
-          assert_equal item.matched_crew_member_id, item.person_suggestions.first["id"], label
-        end
+        assert_equal item.matched_crew_member_id, item.person_suggestions.first["id"], label
       end
     end
 

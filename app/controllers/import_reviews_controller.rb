@@ -26,8 +26,8 @@ class ImportReviewsController < ApplicationController
   # The reviewer's version of the proposal (form scope :review).
   Fields = Struct.new(*REVIEW_FIELDS, keyword_init: true)
 
-  before_action :set_item, except: :index
-  before_action :require_reviewable, except: %i[index reread]
+  before_action :set_item, except: %i[index accept_all]
+  before_action :require_reviewable, except: %i[index accept_all reread]
 
   def index
     queue = ImportItem.review_queue
@@ -35,6 +35,17 @@ class ImportReviewsController < ApplicationController
     @skipped_count = queue.where.not(skipped_at: nil).count
     @items = queue.limit(INDEX_LIMIT).includes(:matched_crew_member, :matched_certificate_type).to_a
     @processing_count = ImportItem.in_pipeline.count
+    @blockers = @items.to_h { |item| [ item.id, Imports::AcceptAll.blockers(item) ] }
+    @ready_count = @blockers.values.count(&:empty?)
+  end
+
+  # Accepts everything in the queue a person needn't look at (Imports::AcceptAll).
+  def accept_all
+    result = Imports::AcceptAll.new(user: Current.user).call
+    left = ImportItem.review_queue.count
+    notice = "Accepted #{helpers.pluralize(result.accepted, "certificate")}."
+    notice += " #{left} still #{left == 1 ? "needs" : "need"} a look." if left.positive?
+    redirect_to import_reviews_path, status: :see_other, notice: notice
   end
 
   def show

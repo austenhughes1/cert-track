@@ -206,7 +206,7 @@ class CertificateVerificationAcceptanceTest < ActionDispatch::IntegrationTest
     end
     assert_equal [ "360TRAINING", "matched", "12345678" ],
       [ training.matched_certificate_issuer.code, training.issuer_match, training.proposed_verification_code ]
-    assert_nil first_page.matched_certificate_issuer
+    assert_equal "Example Safety Training LLC", first_page.matched_certificate_issuer.name, "added from the card"
     assert first_page.authenticity_cannot_verify?, "page 1 has nothing to check with"
 
     # A QR code to a site that imitates an issuer's is suspicious.

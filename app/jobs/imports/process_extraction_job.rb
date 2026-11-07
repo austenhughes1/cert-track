@@ -130,6 +130,7 @@ module Imports
           quality_flags: Imports::ImageQuality.flags(item, certificate, dates),
           error_message: dates.errors.join(" ").presence
         )
+        Imports::CreateMissingRecords.new(item).call
         item.reset_fake_for_new_reading! # Read again kept a person's fake result: is it about these details?
       end
 

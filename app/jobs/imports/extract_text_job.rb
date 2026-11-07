@@ -69,7 +69,7 @@ module Imports
         return false if digest.nil?
 
         original = ImportItem.transaction do
-          ImportItem.connection.execute("SELECT pg_advisory_xact_lock(hashtext(#{ImportItem.connection.quote("content:#{digest}")}))")
+          ImportItem.connection.execute(ImportItem.sanitize_sql_array([ "SELECT pg_advisory_xact_lock(hashtext(?))", "content:#{digest}" ]))
           item.update!(content_digest: digest)
           ImportItem.original_for_content(digest, except: item)
         end

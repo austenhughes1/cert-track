@@ -14,9 +14,21 @@
   </div>
   <% if @items.any? %>
     <%= link_to "Start reviewing", import_review_path(@items.first), id: "start_reviewing",
-          class: "rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" %>
+          class: "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-center text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 sm:w-auto" %>
   <% end %>
 </div>
+
+<% if @ready_count.to_i.positive? %>
+  <section class="mb-4 flex flex-col gap-3 rounded-lg border border-green-200 bg-green-50 p-4 sm:flex-row sm:items-center sm:justify-between" id="accept_all" aria-label="Accept all">
+    <p class="text-sm text-green-900">
+      <span class="font-semibold"><%= pluralize(@ready_count, "certificate") %> ready to accept:</span>
+      read at <%= number_to_percentage(Imports::Config.auto_accept_confidence.to_f * 100, precision: 0) %> confidence or higher, with everything matched and nothing flagged.
+    </p>
+    <%= button_to "Accept all #{@ready_count}", accept_all_import_reviews_path, id: "accept_all_button",
+          form: { data: { turbo_confirm: "Accept #{pluralize(@ready_count, "certificate")} without opening each one?" } },
+          class: "w-full cursor-pointer whitespace-nowrap rounded-md bg-green-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-green-600 sm:w-auto sm:py-2" %>
+  </section>
+<% end %>
 
 <% if @items.empty? %>
   <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
@@ -33,7 +45,36 @@
   <% if @total_count > @items.size %>
     <p class="mb-2 text-sm text-gray-500">Showing the first <%= @items.size %> of <%= number_with_delimiter(@total_count) %>.</p>
   <% end %>
-  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+  <%# Cards on a phone, where the table would need sideways scrolling. %>
+  <ul class="space-y-3 md:hidden" id="review_cards">
+    <% @items.each do |item| %>
+      <% blockers = @blockers.fetch(item.id) %>
+      <li>
+        <%= link_to import_review_path(item), class: "block rounded-lg border border-gray-200 bg-white p-4 shadow-sm active:bg-gray-50", data: { review_card: item.id } do %>
+          <div class="flex items-start justify-between gap-3">
+            <span class="min-w-0 font-medium text-gray-900 break-words"><%= item.matched_crew_member&.display_name || item.holder_name_raw.presence || "Name not read" %></span>
+            <span class="shrink-0 text-sm"><%= import_confidence(item.confidence) %></span>
+          </div>
+          <p class="mt-1 text-sm text-gray-700 break-words"><%= item.matched_certificate_type&.name || item.certificate_name_raw.presence || "Certificate not read" %></p>
+          <p class="mt-1 text-xs text-gray-500 break-words">
+            Completed <%= format_date(item.proposed_completed_on) %> · <%= item.original_filename.presence || "Item #{item.id}" %>
+            <% if item.skipped_at %><span class="text-amber-700">· skipped</span><% end %>
+          </p>
+          <p class="mt-2 flex flex-wrap items-center gap-1">
+            <% if blockers.empty? %>
+              <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800" data-ready>Ready to accept</span>
+            <% else %>
+              <span class="text-xs text-amber-800" data-needs-look><%= blockers.first %></span>
+            <% end %>
+            <% if item.quality_flagged? %>
+              <span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Hard to read</span>
+            <% end %>
+          </p>
+        <% end %>
+      </li>
+    <% end %>
+  </ul>
+  <div class="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm md:block">
     <table class="min-w-full divide-y divide-gray-200 text-sm" id="review_items">
       <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
         <tr>
@@ -76,7 +117,14 @@
               <%= import_match_badge(item.type_match) %>
             </td>
             <td class="whitespace-nowrap px-4 py-2 text-gray-700"><%= format_date(item.proposed_completed_on) %></td>
-            <td class="whitespace-nowrap px-4 py-2 text-right"><%= import_confidence(item.confidence) %></td>
+            <td class="whitespace-nowrap px-4 py-2 text-right">
+              <%= import_confidence(item.confidence) %>
+              <% if @blockers.fetch(item.id).empty? %>
+                <span class="mt-1 block text-xs font-medium text-green-700" data-ready>Ready</span>
+              <% else %>
+                <span class="mt-1 block max-w-40 whitespace-normal text-left text-xs text-amber-800" data-needs-look><%= @blockers.fetch(item.id).first %></span>
+              <% end %>
+            </td>
             <td class="whitespace-nowrap px-4 py-2">
               <%= link_to "##{item.import_batch_id}", import_path(item.import_batch_id), class: "text-blue-700 hover:underline",
                     aria: { label: "Batch #{item.import_batch_id}" } %>

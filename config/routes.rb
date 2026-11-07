@@ -48,6 +48,7 @@ Rails.application.routes.draw do
   # The review queue is declared before resources :imports so /imports/review isn't read as imports#show.
   scope "imports" do
     resources :review, controller: "import_reviews", as: :import_reviews, only: %i[index show update] do
+      collection { post :accept_all }
       member do
         post :accept
         post :reject

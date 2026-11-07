@@ -4,14 +4,14 @@
     <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
       <tr>
         <th scope="col" class="px-4 py-2">Type</th>
-        <th scope="col" class="px-4 py-2">Number</th>
-        <th scope="col" class="px-4 py-2">Issued by</th>
-        <th scope="col" class="px-4 py-2">Completed</th>
+        <th scope="col" class="hidden md:table-cell px-4 py-2">Number</th>
+        <th scope="col" class="hidden md:table-cell px-4 py-2">Issued by</th>
+        <th scope="col" class="hidden md:table-cell px-4 py-2">Completed</th>
         <th scope="col" class="px-4 py-2">Expires</th>
         <% if superseded %>
-          <th scope="col" class="px-4 py-2">Replaced</th>
+          <th scope="col" class="hidden md:table-cell px-4 py-2">Replaced</th>
         <% end %>
-        <th scope="col" class="px-4 py-2">Files</th>
+        <th scope="col" class="hidden md:table-cell px-4 py-2">Files</th>
         <th scope="col" class="px-4 py-2"><span class="sr-only">Open</span></th>
       </tr>
     </thead>
@@ -22,9 +22,9 @@
             <span class="font-medium text-gray-900"><%= certificate.certificate_type.name %></span>
             <span class="block text-xs text-gray-500"><%= certificate.certificate_type.code %></span>
           </td>
-          <td class="whitespace-nowrap px-4 py-2 font-mono text-xs"><%= certificate.certificate_number || tag.span("—", class: "font-sans text-gray-400") %></td>
-          <td class="px-4 py-2"><%= certificate.issued_by || tag.span("—", class: "text-gray-400") %></td>
-          <td class="whitespace-nowrap px-4 py-2"><%= format_date(certificate.completed_on) %></td>
+          <td class="hidden md:table-cell whitespace-nowrap px-4 py-2 font-mono text-xs"><%= certificate.certificate_number || tag.span("—", class: "font-sans text-gray-400") %></td>
+          <td class="hidden md:table-cell px-4 py-2"><%= certificate.issued_by || tag.span("—", class: "text-gray-400") %></td>
+          <td class="hidden md:table-cell whitespace-nowrap px-4 py-2"><%= format_date(certificate.completed_on) %></td>
           <td class="whitespace-nowrap px-4 py-2">
             <% if certificate.never_expires? %>
               <span class="text-gray-500">Never</span>
@@ -44,9 +44,9 @@
             <% end %>
           </td>
           <% if superseded %>
-            <td class="whitespace-nowrap px-4 py-2"><%= format_date(certificate.superseded_at.to_date) %></td>
+            <td class="hidden md:table-cell whitespace-nowrap px-4 py-2"><%= format_date(certificate.superseded_at.to_date) %></td>
           <% end %>
-          <td class="px-4 py-2"><%= render "certificates/files", certificate: certificate %></td>
+          <td class="hidden md:table-cell px-4 py-2"><%= render "certificates/files", certificate: certificate %></td>
           <td class="whitespace-nowrap px-4 py-2 text-right">
             <%= link_to "View", crew_member_certificate_path(crew_member, certificate), class: "text-blue-700 hover:underline",
                   aria: { label: "View #{certificate.certificate_type.name} certificate" } %>

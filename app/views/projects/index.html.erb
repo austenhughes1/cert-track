@@ -1,6 +1,6 @@
 <% content_for :title, "Projects" %>
 
-<div class="mb-4 flex items-end justify-between gap-4">
+<div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
   <div>
     <h1 class="text-2xl font-semibold">Projects</h1>
     <p class="mt-1 text-sm text-gray-500">Each project picks its required certificates from the certificate types and tracks its assigned crew.</p>
@@ -41,14 +41,14 @@
       <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
         <tr>
           <th scope="col" class="px-4 py-2">Project</th>
-          <th scope="col" class="px-4 py-2">Client</th>
-          <th scope="col" class="px-4 py-2">Location</th>
-          <th scope="col" class="px-4 py-2">Dates</th>
+          <th scope="col" class="hidden md:table-cell px-4 py-2">Client</th>
+          <th scope="col" class="hidden md:table-cell px-4 py-2">Location</th>
+          <th scope="col" class="hidden md:table-cell px-4 py-2">Dates</th>
           <th scope="col" class="px-4 py-2">Status</th>
-          <th scope="col" class="px-4 py-2 text-right" title="Active crew members assigned">Crew</th>
-          <th scope="col" class="px-4 py-2 text-right" title="Certificate types required of at least one role">Types</th>
+          <th scope="col" class="hidden md:table-cell px-4 py-2 text-right" title="Active crew members assigned">Crew</th>
+          <th scope="col" class="hidden md:table-cell px-4 py-2 text-right" title="Certificate types required of at least one role">Types</th>
           <th scope="col" class="px-4 py-2">Compliance</th>
-          <th scope="col" class="px-4 py-2"><span class="sr-only">Actions</span></th>
+          <th scope="col" class="hidden md:table-cell px-4 py-2"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-100">
@@ -58,19 +58,19 @@
             <td class="px-4 py-2 font-medium text-gray-900">
               <%= link_to project.display_name, project, class: "text-blue-700 hover:underline" %>
             </td>
-            <td class="whitespace-nowrap px-4 py-2 text-gray-700"><%= project.client || "—" %></td>
-            <td class="whitespace-nowrap px-4 py-2 text-gray-700"><%= project.location || "—" %></td>
-            <td class="whitespace-nowrap px-4 py-2 text-gray-700">
+            <td class="hidden md:table-cell whitespace-nowrap px-4 py-2 text-gray-700"><%= project.client || "—" %></td>
+            <td class="hidden md:table-cell whitespace-nowrap px-4 py-2 text-gray-700"><%= project.location || "—" %></td>
+            <td class="hidden md:table-cell whitespace-nowrap px-4 py-2 text-gray-700">
               <%= render "projects/dates", starts_on: project.starts_on, ends_on: project.ends_on %>
             </td>
             <td class="whitespace-nowrap px-4 py-2"><%= render "projects/status_badge", project: project %></td>
-            <td class="whitespace-nowrap px-4 py-2 text-right tabular-nums"><%= report.rows.size %></td>
-            <td class="whitespace-nowrap px-4 py-2 text-right tabular-nums"><%= report.columns.size %></td>
+            <td class="hidden md:table-cell whitespace-nowrap px-4 py-2 text-right tabular-nums"><%= report.rows.size %></td>
+            <td class="hidden md:table-cell whitespace-nowrap px-4 py-2 text-right tabular-nums"><%= report.columns.size %></td>
             <td class="px-4 py-2">
               <%= render "projects/compliance_counts", summary: report.summary,
                     empty_text: report.columns.empty? ? "No requirements" : "No crew" %>
             </td>
-            <td class="whitespace-nowrap px-4 py-2 text-right">
+            <td class="hidden md:table-cell whitespace-nowrap px-4 py-2 text-right">
               <%= link_to "Matrix", project_compliance_path(project), class: "text-blue-700 hover:underline" %>
             </td>
           </tr>
