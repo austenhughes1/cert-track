@@ -1,17 +1,21 @@
 module Imports
   # Adds what a card names but nothing on file matches, so a reviewer isn't asked to (owner, Nov 6,
   # 2026): a crew member from the holder's name, a certificate type from the printed name, an issuer
-  # from the printed issuer. Only when the match found nobody: a near match stays a suggestion for a
-  # person to confirm ("Rash Williams" is not a new crew member). Stored names may be misread, and
-  # duplicates are accepted for now and can be cleaned up later.
+  # from the printed issuer. Stored names may be misread, and duplicates are accepted for now.
   #
   #   Imports::CreateMissingRecords.new(item).call # updates the item's matches; returns nothing useful
   #
-  # A holder name needs a first and a last name; without one the item waits for a person. An advisory
-  # lock on the first and last name means two items read at once make one crew member, not two,
-  # with or without a middle name.
+  # Crew members (owner, Nov 7, 2026: every card should end up on someone, a duplicate is easier to
+  # fix than a card left waiting): a holder Imports::PersonMatcher matches (exactly, by middle name or
+  # by a one-letter slip) is matched; one it only finds a fuzzy suggestion for, or nobody, is added
+  # as a new crew member, marked a possible duplicate of the closest one
+  # (CrewMembers::DuplicateFinder) for the crew page's Merge. An ambiguous name (two members fit
+  # equally) or one that only fits an inactive member still waits for a person to pick, as does a
+  # holder name without a first and a last name, and an item a person already matched or picked.
+  # One advisory lock for every new crew member means two items read at once make one, not two.
   class CreateMissingRecords
     CREATED_NOTE = "created from this item".freeze
+    CREATE_LOCK = "crew:create".freeze
 
     def initialize(item)
       @item = item
@@ -24,19 +28,24 @@ module Imports
 
     private
       def crew_member_match
-        return unless @item.person_unmatched? && @item.matched_crew_member_id.nil?
+        return if @item.person_matched? || @item.person_picked?
 
         name = CreateCrewMember.suggested_attributes(@item)
         return if name.values_at(:first_name, :last_name).any?(&:blank?)
 
         CrewMember.transaction do
-          wait_for_name("crew:#{NameNormalizer.normalize(@item.holder_name_raw).split.values_at(0, -1).join(" ")}")
+          wait_for_name(CREATE_LOCK)
           found = PersonMatcher.new(@item.holder_name_raw).call
-          next unless found.match == :unmatched || found.match == :matched
+          member = if found.match == :matched
+            found.crew_member
+          elsif found.match == :unmatched || found.basis == :fuzzy
+            duplicate = CrewMembers::DuplicateFinder.new(@item.holder_name_raw).call
+            CrewMember.create!(name.merge(active: true, possible_duplicate_of: duplicate))
+          end
+          next unless member
 
-          member = found.crew_member || CrewMember.create!(name.merge(active: true))
           { matched_crew_member: member, person_match: :matched,
-            person_suggestions: [ entry(member), *others(@item.person_suggestions, member) ].first(PersonMatcher::MAX_SUGGESTIONS) }
+            person_suggestions: [ entry(member), *others(found.suggestions, member) ].first(PersonMatcher::MAX_SUGGESTIONS) }
         end
       end
 

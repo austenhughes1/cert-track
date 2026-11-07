@@ -24,7 +24,7 @@ module CrewMembersHelper
 
   # True when anything beyond the default (active members, no search) narrows the list.
   def crew_member_filters_applied?(filters)
-    filters.values_at(:q, :active, :employer, :crew_role_id, :status).any?(&:present?)
+    filters.values_at(:q, :active, :employer, :crew_role_id, :status, :duplicates).any?(&:present?)
   end
 
   # Value for the one-alias-per-line textarea.

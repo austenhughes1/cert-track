@@ -99,8 +99,35 @@ class Imports::PersonMatcherTest < ActiveSupport::TestCase
     assert_equal [ :matched, long ], match("Shamel Deshawn Ferebee").then { [ _1.match, _1.crew_member ] }
   end
 
+  test "a one-letter slip in a long enough word matches, noted" do
+    [ "Juan Ortez", "JUAN ORTZ", "Jaun Ortiz" ].each do |name|
+      result = match(name)
+
+      assert_equal [ :matched, crew_members(:juan_ortiz), :close_spelling ], [ result.match, result.crew_member, result.basis ], name
+      assert_equal Imports::PersonMatcher::CLOSE_NOTE, result.suggestions.first["note"], name
+    end
+    assert_not_equal :matched, match("Li Chan").match # Chen and Chan are both surnames
+  end
+
+  test "two members a slip fits equally are ambiguous" do
+    CrewMember.create!(first_name: "Juan", last_name: "Ortaz")
+
+    result = match("Juan Ortez")
+
+    assert_equal [ :suggested, :close_spelling ], [ result.match, result.basis ]
+  end
+
+  test "basis says which rule matched" do
+    CrewMember.create!(first_name: "Shamel", last_name: "Deshawn Ferebee")
+
+    assert_equal :exact, match("Juan Ortiz").basis
+    assert_equal :middle_name, match("Shamel Ferebee").basis
+    assert_equal :none, match("Nobody Atall").basis
+    assert_equal :none, match("").basis
+  end
+
   test "a misspelling that clearly beats everyone else is suggested" do
-    result = match("Juan Ortis")
+    result = match("Juan Ortizes") # two letters off: not a close spelling
 
     assert_equal :suggested, result.match
     assert_equal crew_members(:juan_ortiz), result.crew_member
@@ -108,9 +135,9 @@ class Imports::PersonMatcherTest < ActiveSupport::TestCase
   end
 
   test "a close runner-up blocks the suggestion (margin rule)" do
-    CrewMember.create!(first_name: "Juan", last_name: "Ortez")
+    CrewMember.create!(first_name: "Juan", last_name: "Ortizzas") # both two letters off "Ortizes"
 
-    result = match("Juan Ortis")
+    result = match("Juan Ortizes")
     best, second = result.suggestions.first(2).map { _1["similarity"] }
 
     assert_operator best - second, :<, 0.15
@@ -121,12 +148,12 @@ class Imports::PersonMatcherTest < ActiveSupport::TestCase
 
   test "the margin and threshold are compared exactly as configured" do
     Imports::Config.with(person_margin: 0.0) do
-      CrewMember.create!(first_name: "Juan", last_name: "Ortez")
-      assert_equal :suggested, match("Juan Ortis").match
+      CrewMember.create!(first_name: "Juan", last_name: "Ortizzas")
+      assert_equal :suggested, match("Juan Ortizes").match
     end
 
     Imports::Config.with(person_suggest_threshold: 0.99) do
-      assert_equal :unmatched, match("Juan Ortis").match
+      assert_equal :unmatched, match("Juan Ortizes").match
     end
   end
 

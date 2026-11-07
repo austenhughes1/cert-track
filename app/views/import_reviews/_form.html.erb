@@ -38,7 +38,11 @@
             { include_blank: "Choose a person" }, required: true, class: "#{input_class} bg-white" %>
       <p class="<%= hint_class %>">
         <% if import_person_created?(item) %>
-          <span id="person_created_hint"><%= item.matched_crew_member&.display_name %> was added to the crew from this card.</span>
+          <span id="person_created_hint"><%= item.matched_crew_member&.display_name %> was added to the crew from this card.
+            <% if (other = item.matched_crew_member&.possible_duplicate_of) %>
+              Possibly the same person as <%= other.full_name %>: pick them instead, or merge the two later from the crew page.
+            <% end %>
+          </span>
         <% elsif item.person_unmatched? && item.person_suggestions.blank? %>
           The name on this card couldn't be read as a first and last name. Pick someone, or
           <a href="#new_crew_member" class="text-blue-700 hover:underline">add a crew member</a>.

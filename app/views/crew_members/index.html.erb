@@ -53,6 +53,16 @@
 <% end %>
 
 <%= turbo_frame_tag "crew_members_results", target: "_top" do %>
+  <% if @filters[:duplicates].present? %>
+    <p id="possible_duplicates_notice" class="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+      Possible duplicates: crew added from a card whose name was close to someone already on file. Open one to merge it, or mark it as a different person.
+    </p>
+  <% elsif @possible_duplicate_count.positive? %>
+    <p id="possible_duplicates_notice" class="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+      <%= link_to "#{pluralize(@possible_duplicate_count, 'possible duplicate')} to review", crew_members_path(duplicates: 1),
+            class: "font-medium underline" %>: crew added from a card whose name was close to someone already on file.
+    </p>
+  <% end %>
   <div class="mb-2 flex items-center justify-between text-sm text-gray-500">
     <p id="crew_members_count">
       <% if @total_count > @crew_members.size %>
@@ -105,6 +115,11 @@
                 <% end %>
                 <% unless crew_member.active? %>
                   <span class="ml-1 inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">Inactive</span>
+                <% end %>
+                <% if (other = crew_member.possible_duplicate_of) %>
+                  <%= link_to "Possible duplicate of #{other.full_name}",
+                        can?(:editor) ? new_crew_member_merge_path(crew_member, into: other.id) : crew_member_path(crew_member),
+                        class: "ml-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 hover:underline", data: { possible_duplicate: other.id } %>
                 <% end %>
                 <span class="block text-xs text-gray-500 md:hidden" data-crew-summary><%= [ crew_member.crew_role&.name, crew_member.employer ].compact.join(" · ") %></span>
               </td>

@@ -73,7 +73,7 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
     assert_intake_outcomes(batch, zip)
     assert_certificate_items(batch, zip, auto_accept: true)
 
-    assert_equal 11, zip.auto_accepted.size
+    assert_equal 14, zip.auto_accepted.size
     zip.auto_accepted.each do |expected|
       item = item_for(batch, expected)
       certificate = item.certificate
@@ -88,7 +88,9 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
       assert_nil certificate.verified_by, "auto-accepted certificates are not verified by anyone"
       assert_nil item.reviewed_by
       assert_not_nil item.reviewed_at
-      assert certificate.current?, "#{expected.file}: the newest certificate of its type is current"
+      group = Certificate.where(crew_member: certificate.crew_member, certificate_type: certificate.certificate_type)
+      assert_equal [ group.order(*Certificate.currency_order).first ], group.current.to_a,
+        "#{expected.file}: the newest certificate of its type is current (an older card on import goes into history)"
       assert_not item.file.attached?, "#{expected.file}: the certificate holds the file, not the item"
       assert_equal [ certificate ], ActiveStorage::Attachment.where(blob_id: certificate.files.sole.blob_id).map(&:record),
         "#{expected.file}: one link to the file"
@@ -108,7 +110,7 @@ class ImportPipelineAcceptanceTest < ActionDispatch::IntegrationTest
     assert_match(/completion date .* is in the future/, future.error_message)
 
     assert batch.needs_review?
-    assert_summary_email(batch, accepted: 11, needs_review: 6, duplicates: 1, rejected: 2, failed: 0)
+    assert_summary_email(batch, accepted: 14, needs_review: 3, duplicates: 1, rejected: 2, failed: 0)
   end
 
   test "a quota error mid-batch parks the rest until 00:05 UTC; after the reset they finish" do

@@ -4,6 +4,9 @@ class CrewMember < ApplicationRecord
   PREFERRED_NAME_SQL = "lower(coalesce(crew_members.preferred_name, crew_members.first_name) || ' ' || crew_members.last_name)".freeze
 
   belongs_to :crew_role, optional: true
+  # Set when a card's holder was added automatically and someone on file has a close name
+  # (Imports::CreateMissingRecords); cleared by Merge (CrewMembers::Merge) or "Not a duplicate".
+  belongs_to :possible_duplicate_of, class_name: "CrewMember", optional: true
 
   # History is kept: members with certificates or assignments are deactivated, not deleted.
   has_many :certificates, dependent: :restrict_with_error
@@ -24,6 +27,7 @@ class CrewMember < ApplicationRecord
   scope :active, -> { where(active: true) }
   scope :inactive, -> { where(active: false) }
   scope :ordered, -> { order(:last_name, :first_name, :id) }
+  scope :possible_duplicates, -> { where.not(possible_duplicate_of_id: nil) }
 
   class << self
     # Typo-tolerant name search over full name, preferred name and aliases, best match first.
@@ -62,12 +66,13 @@ class CrewMember < ApplicationRecord
     # and the other way round. Active members first. Imports::PersonMatcher uses it when no name
     # matches exactly.
     def matching_name_ignoring_middle(raw)
-      target = NameNormalizer.normalize(raw)
-      return [] unless NameNormalizer.matchable?(target)
+      matching_names(raw) { |name, target| NameNormalizer.differs_only_by_middle?(name, target) }
+    end
 
-      all.order(active: :desc, id: :asc).select do |member|
-        member.normalized_names.any? { |name| NameNormalizer.differs_only_by_middle?(name, target) }
-      end
+    # Members whose name, preferred name or alias is raw with a one-letter slip
+    # (NameNormalizer.close_spelling?): "Juan Ortez" finds "Juan Ortiz". Active members first.
+    def matching_close_spelling(raw)
+      matching_names(raw) { |name, target| NameNormalizer.close_spelling?(name, target) }
     end
 
     # Single best exact normalized match (prefers active members), or nil.
@@ -83,6 +88,15 @@ class CrewMember < ApplicationRecord
     def clean_aliases(aliases)
       Array(aliases).map { |name| name.to_s.squish }.compact_blank.uniq(&:downcase)
     end
+
+    private
+      # Members (active first) with a normalized name for which the block, given it and raw's, is true.
+      def matching_names(raw)
+        target = NameNormalizer.normalize(raw)
+        return [] unless NameNormalizer.matchable?(target)
+
+        all.order(active: :desc, id: :asc).select { |member| member.normalized_names.any? { |name| yield name, target } }
+      end
   end
 
   def full_name

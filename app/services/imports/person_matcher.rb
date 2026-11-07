@@ -5,6 +5,7 @@ module Imports
   #   result.crew_member # => the CrewMember (the match, or the top suggestion), or nil
   #   result.match       # => :matched | :suggested | :unmatched
   #   result.suggestions # => [{ "id" => 7, "name" => "Juan Ortiz", "similarity" => 1.0 }, ...]
+  #   result.basis       # => :exact | :middle_name | :close_spelling | :fuzzy | :none
   #
   # Exact: the name normalizes (NameNormalizer) to a full name, preferred + last name or alias
   # of exactly one member, who is active -> :matched. More than one exact match is ambiguous,
@@ -14,19 +15,23 @@ module Imports
   # No exact match: a name that differs only by middle names on one side
   # (CrewMember.matching_name_ignoring_middle: "Shamel Ferebee" and "Shamel Deshawn Ferebee")
   # counts as exact, by the same rules (owner, Nov 7, 2026: a card printing the middle name made
-  # the crew member and the others, without it, stopped matching).
+  # the crew member and the others, without it, stopped matching). Then a one-letter slip
+  # (CrewMember.matching_close_spelling: "Juan Ortez" for "Juan Ortiz"), by the same rules, noted
+  # CLOSE_NOTE. Each says how it matched in basis.
   # Otherwise trigram similarity (pg_trgm, on the normalized forms of every member's names):
   # the best candidate scoring Imports::Config.person_suggest_threshold or more AND beating
-  # the runner-up by Imports::Config.person_margin or more -> :suggested; else :unmatched
-  # (the review screen offers "create crew member").
+  # the runner-up by Imports::Config.person_margin or more -> :suggested (basis :fuzzy); else
+  # :unmatched (basis :none). For either, Imports::CreateMissingRecords adds the card's holder as a
+  # new crew member, marked a possible duplicate of a close one (CrewMembers::DuplicateFinder).
   # Suggestions always list up to MAX_SUGGESTIONS candidates (scoring at least
   # CrewMember::SEARCH_SIMILARITY), best first, so the reviewer has someone to pick even when
   # nothing qualifies as a suggestion.
   class PersonMatcher
-    Result = Data.define(:crew_member, :match, :suggestions)
+    Result = Data.define(:crew_member, :match, :suggestions, :basis)
 
     MAX_SUGGESTIONS = 5
     INACTIVE_NOTE = "inactive crew member".freeze
+    CLOSE_NOTE = "spelled slightly differently".freeze
     EPSILON = 1e-6 # similarity is a float4; keep 0.75 - 0.60 from failing a 0.15 margin
 
     def initialize(holder_name)
@@ -35,21 +40,31 @@ module Imports
     end
 
     def call
-      return Result.new(crew_member: nil, match: :unmatched, suggestions: []) if @target.blank?
+      return Result.new(crew_member: nil, match: :unmatched, suggestions: [], basis: :none) if @target.blank?
 
-      exact = CrewMember.matching_normalized_name(@holder_name).presence || CrewMember.matching_name_ignoring_middle(@holder_name)
+      basis, exact = exact_candidates
       scored = scored_candidates.reject { |member, _| exact.include?(member) }
 
-      exact.any? ? exact_result(exact, scored) : fuzzy_result(scored)
+      exact.any? ? exact_result(exact, scored, basis) : fuzzy_result(scored)
     end
 
     private
-      def exact_result(exact, scored)
-        listed = exact.map { |member| entry(member, 1.0) }
+      # [basis, members] for the first rule that finds anyone; [nil, []] when none does.
+      def exact_candidates
+        { exact: :matching_normalized_name, middle_name: :matching_name_ignoring_middle, close_spelling: :matching_close_spelling }.each do |basis, finder|
+          members = CrewMember.public_send(finder, @holder_name)
+          return [ basis, members ] if members.any?
+        end
+        [ nil, [] ]
+      end
+
+      def exact_result(exact, scored, basis)
+        note = CLOSE_NOTE if basis == :close_spelling
+        listed = exact.map { |member| entry(member, 1.0, note:) }
         listed += scored.first([ MAX_SUGGESTIONS - listed.size, 0 ].max).map { |member, score| entry(member, score) }
         match = exact.one? && exact.first.active? ? :matched : :suggested
 
-        Result.new(crew_member: exact.first, match:, suggestions: listed) # exact is active first
+        Result.new(crew_member: exact.first, match:, suggestions: listed, basis:) # exact is active first
       end
 
       def fuzzy_result(scored)
@@ -57,9 +72,9 @@ module Imports
         suggestions = scored.first(MAX_SUGGESTIONS).map { |member, score| entry(member, score) }
 
         if best && clear_winner?(best.last, runner_up&.last)
-          Result.new(crew_member: best.first, match: :suggested, suggestions:)
+          Result.new(crew_member: best.first, match: :suggested, suggestions:, basis: :fuzzy)
         else
-          Result.new(crew_member: nil, match: :unmatched, suggestions:)
+          Result.new(crew_member: nil, match: :unmatched, suggestions:, basis: :none)
         end
       end
 
@@ -92,7 +107,7 @@ module Imports
         CrewMember.connection.select_rows(sql).to_h { |id, score| [ id.to_i, score.to_f.round(3) ] }
       end
 
-      def entry(member, similarity)
+      def entry(member, similarity, note: nil)
         note = INACTIVE_NOTE unless member.active?
         { "id" => member.id, "name" => member.full_name, "similarity" => similarity.to_f.round(3), "note" => note }.compact
       end

@@ -611,4 +611,51 @@ class CrewMembersControllerTest < ActionDispatch::IntegrationTest
       ActiveSupport::Notifications.subscribed(counter, "sql.active_record", &block)
       count
     end
+
+  # --- Possible duplicates ---
+
+  test "possible duplicates: a notice links to the filter, which lists only them, active or not" do
+    sign_in_as users(:viewer)
+    marked = CrewMember.create!(first_name: "Juan", last_name: "Ortizes", possible_duplicate_of: @juan)
+    inactive = CrewMember.create!(first_name: "Li", last_name: "Chan", possible_duplicate_of: crew_members(:li_chen), active: false)
+
+    get crew_members_path
+    assert_select "#possible_duplicates_notice a[href=?]", crew_members_path(duplicates: 1), text: "2 possible duplicates to review"
+    assert_select "[data-possible-duplicate='#{@juan.id}']", text: "Possible duplicate of Juan Ortiz"
+
+    get crew_members_path(duplicates: 1)
+    assert_select "tbody tr", count: 2
+    assert_select "##{ActionView::RecordIdentifier.dom_id(marked)}"
+    assert_select "##{ActionView::RecordIdentifier.dom_id(inactive)}"
+    assert_select "a", text: "Clear filters"
+  end
+
+  test "no notice without possible duplicates" do
+    sign_in_as users(:viewer)
+    get crew_members_path
+    assert_select "#possible_duplicates_notice", count: 0
+  end
+
+  test "the page of a possible duplicate offers merge and not a duplicate to editors only" do
+    marked = CrewMember.create!(first_name: "Juan", last_name: "Ortizes", possible_duplicate_of: @juan)
+
+    sign_in_as users(:viewer)
+    get crew_member_path(marked)
+    assert_select "#possible_duplicate", text: /same person as\s+Juan Ortiz/
+    assert_select "#possible_duplicate a", text: "Review and merge", count: 0
+    patch not_duplicate_crew_member_path(marked)
+    assert_response :forbidden
+    assert_equal @juan, marked.reload.possible_duplicate_of
+
+    sign_in_as users(:manager)
+    get crew_member_path(marked)
+    assert_select "#possible_duplicate a[href=?]", new_crew_member_merge_path(marked, into: @juan.id), text: "Review and merge"
+    assert_select "a[href=?]", new_crew_member_merge_path(marked), text: "Merge…"
+
+    patch not_duplicate_crew_member_path(marked)
+    assert_redirected_to crew_member_path(marked)
+    assert_nil marked.reload.possible_duplicate_of
+    follow_redirect!
+    assert_select "#possible_duplicate", count: 0
+  end
 end

@@ -49,14 +49,48 @@ class Imports::CreateMissingRecordsTest < ActiveSupport::TestCase
     end
   end
 
-  test "a near match stays a suggestion for a person to confirm" do
-    item = review_item(member: crew_members(:juan_ortiz), type: certificate_types(:flagger), holder_name_raw: "Jaun Ortis", person_match: :suggested,
-      type_match: :suggested, issuer_match: :suggested, certificate_name_raw: "Flagger", issuer_raw: "Summit")
+  test "a fuzzy match gets its own crew member, marked a possible duplicate of the close one" do
+    juan = crew_members(:juan_ortiz)
+    [ "Juan Ortizes", "Jaun Ortis" ].each do |name| # a fuzzy suggestion; a low score but every word a letter off
+      item = review_item(member: juan, type: certificate_types(:flagger), holder_name_raw: name, person_match: :suggested, bytes: name)
 
-    assert_no_difference([ -> { CrewMember.count }, -> { CertificateType.count }, -> { CertificateIssuer.count } ]) do
+      assert_difference -> { CrewMember.count }, 1, name do
+        Imports::CreateMissingRecords.new(item).call
+      end
+
+      item.reload
+      assert item.person_matched?, name
+      assert_equal [ name, juan ], [ item.matched_crew_member.full_name, item.matched_crew_member.possible_duplicate_of ], name
+      assert_equal juan.id, item.person_suggestions.second&.dig("id"), name if name == "Juan Ortizes" # still offered
+    end
+  end
+
+  test "a new person nobody is close to isn't marked a duplicate" do
+    item = waiting
+    Imports::CreateMissingRecords.new(item).call
+
+    assert_nil item.reload.matched_crew_member.possible_duplicate_of
+  end
+
+  test "an ambiguous name, an inactive member's, or one a person picked still waits for a person" do
+    CrewMember.create!(first_name: "Juan", last_name: "Ortiz", employer: "Skyline Tower Services")
+    items = [ review_item(member: nil, holder_name_raw: "Juan Ortiz", person_match: :suggested, bytes: "twins"),
+      review_item(member: nil, holder_name_raw: "Sam Price", person_match: :suggested, bytes: "inactive"),
+      review_item(member: crew_members(:li_chen), holder_name_raw: "Robert Example", person_match: :picked, bytes: "picked") ]
+
+    assert_no_difference -> { CrewMember.count } do
+      items.each { Imports::CreateMissingRecords.new(it).call }
+    end
+    assert_equal %w[suggested suggested picked], items.map { it.reload.person_match }
+  end
+
+  test "a close spelling is matched, not added" do
+    item = waiting(holder_name_raw: "JUAN ORTEZ")
+
+    assert_no_difference -> { CrewMember.count } do
       Imports::CreateMissingRecords.new(item).call
     end
-    assert item.reload.person_suggested?
+    assert_equal [ crew_members(:juan_ortiz), "matched" ], item.reload.then { [ it.matched_crew_member, it.person_match ] }
   end
 
   test "without a first and last name, or printed names, nothing is added" do

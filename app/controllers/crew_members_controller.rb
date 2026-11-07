@@ -4,20 +4,21 @@ class CrewMembersController < ApplicationController
   PROJECT_STATUS_ORDER = %w[active planned closed].freeze
 
   require_role :editor, except: %i[index show]
-  before_action :set_crew_member, only: %i[show edit update destroy]
+  before_action :set_crew_member, only: %i[show edit update destroy not_duplicate]
 
   # Filters (all optional, GET params): q (typo-tolerant name search), active ("" = active
   # only, "inactive", "all"), employer, crew_role_id (an id or "none"), status (one of
-  # STATUS_FILTERS, across active projects).
+  # STATUS_FILTERS, across active projects), duplicates ("1" = possible duplicates only, active or not).
   def index
     @filters = index_filters
     @overview = Compliance::Overview.new(Project.active, today: Date.current)
 
     members = filtered_crew_members
     @total_count = members.count
-    @crew_members = members.includes(:crew_role).limit(INDEX_LIMIT).to_a
+    @crew_members = members.includes(:crew_role, :possible_duplicate_of).limit(INDEX_LIMIT).to_a
     @current_certificate_counts = Certificate.current.where(crew_member_id: @crew_members.map(&:id)).group(:crew_member_id).count
     @worst_statuses = @overview.worst_status_by_crew_member
+    @possible_duplicate_count = CrewMember.possible_duplicates.count
     @employers = CrewMember.employer_names
     @crew_roles = CrewRole.ordered.to_a
   end
@@ -81,9 +82,17 @@ class CrewMembersController < ApplicationController
     end
   end
 
+  # "Not a duplicate": a different person who only has a close name.
+  def not_duplicate
+    other = @crew_member.possible_duplicate_of
+    @crew_member.update!(possible_duplicate_of: nil)
+    redirect_to @crew_member, status: :see_other,
+      notice: other ? "Noted: #{@crew_member.display_name} and #{other.display_name} are different people." : nil
+  end
+
   private
     def set_crew_member
-      @crew_member = CrewMember.includes(:crew_role).find(params.expect(:id))
+      @crew_member = CrewMember.includes(:crew_role, :possible_duplicate_of).find(params.expect(:id))
     end
 
     def crew_member_params
@@ -95,7 +104,8 @@ class CrewMembersController < ApplicationController
     end
 
     def index_filters
-      filters = params.permit(:q, :active, :employer, :crew_role_id, :status).to_h.symbolize_keys
+      filters = params.permit(:q, :active, :employer, :crew_role_id, :status, :duplicates).to_h.symbolize_keys
+      filters[:duplicates] = filters[:duplicates] == "1" ? "1" : ""
       filters[:q] = filters[:q].to_s.squish
       filters[:active] = filters[:active].presence_in(%w[inactive all]).to_s
       filters[:status] = filters[:status].presence_in(STATUS_FILTERS).to_s
@@ -107,10 +117,14 @@ class CrewMembersController < ApplicationController
 
     def filtered_crew_members
       members = CrewMember.all
-      members = case @filters[:active]
-      when "all" then members
-      when "inactive" then members.inactive
-      else members.active
+      members = if @filters[:duplicates].present?
+        members.possible_duplicates # active or not
+      else
+        case @filters[:active]
+        when "all" then members
+        when "inactive" then members.inactive
+        else members.active
+        end
       end
       members = members.where(employer: @filters[:employer]) if @filters[:employer].present?
       if @filters[:crew_role_id] == "none"

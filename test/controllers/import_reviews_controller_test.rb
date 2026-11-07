@@ -290,6 +290,11 @@ class ImportReviewsControllerTest < ActionDispatch::IntegrationTest
     get import_review_path(@item)
 
     assert_select "#person_created_hint", /added to the crew from this card/
+    assert_select "#person_created_hint", text: /Possibly the same person/, count: 0
+
+    @juan.update!(possible_duplicate_of: crew_members(:li_chen))
+    get import_review_path(@item)
+    assert_select "#person_created_hint", /Possibly the same person as Li Chen/
   end
 
   test "a flagged image shows on the review screen and in the queue, asking for a clearer copy" do

@@ -63,14 +63,32 @@ class Imports::ProcessExtractionJobTest < ActiveJob::TestCase
     assert item.import_batch.reload.completed?
   end
 
-  test "auto-accept on still reviews a suggestion" do
-    item = image_item(extraction: extraction_with(ortiz_osha(holder: "Juan Ortis")))
+  test "auto-accept on still reviews a name two crew members fit" do
+    CrewMember.create!(first_name: "Juan", last_name: "Ortiz", employer: "Skyline Tower Services")
+    item = image_item(extraction: extraction_with(ortiz_osha(holder: "Juan Ortiz")))
 
     with_auto_accept { process(item) }
 
     assert item.needs_review?
     assert item.person_suggested?
     assert_equal crew_members(:juan_ortiz), item.matched_crew_member
+  end
+
+  test "a close spelling is matched" do
+    close = image_item(extraction: extraction_with(ortiz_osha(holder: "Juan Ortez")))
+
+    process(close)
+
+    assert_equal [ crew_members(:juan_ortiz), "matched" ], close.reload.then { [ it.matched_crew_member, it.person_match ] }
+  end
+
+  test "a name only near someone gets its own crew member, marked a possible duplicate" do
+    far = image_item(extraction: extraction_with(ortiz_osha(holder: "Juan Ortizes")))
+
+    process(far)
+
+    created = far.reload.matched_crew_member
+    assert_equal [ "Juan Ortizes", crew_members(:juan_ortiz), "matched" ], [ created.full_name, created.possible_duplicate_of, far.person_match ]
   end
 
   test "date problems are kept for the reviewer and block auto-accept" do

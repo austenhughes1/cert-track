@@ -1,0 +1,51 @@
+<% content_for :title, "Merge #{@crew_member.display_name}" %>
+<% secondary_button = "inline-flex min-h-10 items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" %>
+
+<div class="max-w-3xl">
+  <%= link_to "← #{@crew_member.display_name}", crew_member_path(@crew_member), class: "text-sm text-blue-700 hover:underline" %>
+  <h1 class="mt-2 text-2xl font-semibold">Merge crew records</h1>
+  <p class="mt-1 text-sm text-gray-500">
+    For two records of the same person. The record you keep takes over this one's certificates, projects and imported cards,
+    and this one is deleted. Its name becomes one of the kept record's other spellings, so future cards still match.
+  </p>
+
+  <%= form_with url: new_crew_member_merge_path(@crew_member), method: :get, id: "merge_target",
+        class: "mt-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm", data: { controller: "auto-submit" } do %>
+    <%= label_tag :into, "Merge #{@crew_member.full_name} into", class: "block text-sm font-medium text-gray-700" %>
+    <div class="mt-1 flex flex-wrap items-center gap-2">
+      <%= select_tag :into, options_for_select(@others.map { |member| [ "#{member.sort_name}#{' (inactive)' unless member.active?}", member.id ] }, @into&.id),
+            include_blank: "Choose the record to keep", data: { action: "change->auto-submit#submit" },
+            class: "block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 sm:w-auto" %>
+      <%= submit_tag "Show what moves", name: nil, class: secondary_button %>
+    </div>
+  <% end %>
+
+  <% if @into && @preview %>
+    <section id="merge_preview" class="mt-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm" aria-labelledby="merge_preview_heading">
+      <h2 id="merge_preview_heading" class="text-lg font-semibold">
+        Keep <%= link_to @into.full_name, crew_member_path(@into), class: "text-blue-700 hover:underline" %>
+      </h2>
+      <p class="mt-1 text-sm text-gray-500">
+        <%= [ @into.crew_role&.name, @into.employer ].compact.join(" · ").presence || "No role or employer set" %>.
+        <%= link_to "Keep #{@crew_member.full_name} instead", new_crew_member_merge_path(@into, into: @crew_member.id), class: "text-blue-700 hover:underline" %>
+      </p>
+
+      <ul class="mt-4 list-disc space-y-1 pl-5 text-sm text-gray-800" id="merge_moves">
+        <li><%= pluralize(@preview.certificates, "certificate") %> <%= @preview.certificates == 1 ? "moves" : "move" %>, older ones included.</li>
+        <% @preview.shared_types.each do |type| %>
+          <li>Both have a current <strong><%= type.name %></strong>: the latest stays current and the other goes into history.</li>
+        <% end %>
+        <li><%= pluralize(@preview.projects, "project assignment") %> <%= @preview.projects == 1 ? "moves" : "move" %>.</li>
+        <% @preview.shared_projects.each do |project| %>
+          <li>Both are on <strong><%= project.display_name %></strong>: the kept record's assignment stays.</li>
+        <% end %>
+        <li><%= pluralize(@preview.import_items, "imported card") %> <%= @preview.import_items == 1 ? "moves" : "move" %>.</li>
+        <li>Blank details on the kept record (preferred name, email, phone, employer, role) are filled in from this one.</li>
+      </ul>
+
+      <%= button_to "Merge into #{@into.full_name}", crew_member_merge_path(@crew_member), params: { into: @into.id }, id: "merge_button",
+            class: "mt-4 min-h-11 w-full cursor-pointer rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 sm:w-auto",
+            form: { data: { turbo_confirm: "Merge #{@crew_member.full_name} into #{@into.full_name}? This record is deleted and can't be brought back." } } %>
+    </section>
+  <% end %>
+</div>

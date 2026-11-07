@@ -75,4 +75,27 @@ class NameNormalizerTest < ActiveSupport::TestCase
     assert_not NameNormalizer.differs_only_by_middle?("ferebee", "shamel ferebee")
     assert_not NameNormalizer.differs_only_by_middle?(nil, "shamel ferebee")
   end
+
+  test "close_spelling? is one letter slip in one long enough word" do
+    assert NameNormalizer.close_spelling?("juan ortez", "juan ortiz") # changed
+    assert NameNormalizer.close_spelling?("juan ortz", "juan ortiz") # dropped
+    assert NameNormalizer.close_spelling?("shamel fereebee", "shamel ferebee") # added
+    assert NameNormalizer.close_spelling?("jaun ortiz", "juan ortiz") # swapped, 4 letters
+
+    assert_not NameNormalizer.close_spelling?("li chan", "li chen") # 4 letters: both real surnames
+    assert_not NameNormalizer.close_spelling?("jon ortiz", "jan ortiz")
+    assert_not NameNormalizer.close_spelling?("jaun ortis", "juan ortiz") # two words off
+    assert_not NameNormalizer.close_spelling?("juan ortega", "juan ortiz")
+    assert_not NameNormalizer.close_spelling?("juan ortiz", "juan ortiz")
+    assert_not NameNormalizer.close_spelling?("juan carlos ortiz", "juan ortiz")
+    assert_not NameNormalizer.close_spelling?("ortiz", "ortez")
+  end
+
+  test "each_word_within_one_edit? allows a letter off in every word" do
+    assert NameNormalizer.each_word_within_one_edit?("jaun ortis", "juan ortiz")
+    assert NameNormalizer.each_word_within_one_edit?("li chan", "li chen")
+    assert_not NameNormalizer.each_word_within_one_edit?("juan ortiz", "juan ortiz")
+    assert_not NameNormalizer.each_word_within_one_edit?("jose ortiz", "juan ortiz")
+    assert_not NameNormalizer.each_word_within_one_edit?("juan ortiz", "juan c ortiz ruiz")
+  end
 end

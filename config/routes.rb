@@ -16,6 +16,9 @@ Rails.application.routes.draw do
   # --- Crew ---
   resources :crew_roles, except: :show
   resources :crew_members do
+    patch :not_duplicate, on: :member # clears possible_duplicate_of
+    # Fold this record into another (params: into); new shows what moves
+    resource :merge, only: %i[new create], controller: "crew_member_merges"
     resources :certificates, except: :index do
       delete "files", action: :remove_file, on: :member, as: :remove_file # param: attachment_id
       # Phase 3b: a person's authenticity result (PATCH) and "Check again" (POST recheck)

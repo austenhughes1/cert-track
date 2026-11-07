@@ -92,8 +92,8 @@ module ImportAcceptanceZip
 
     chen_first_aid = ImportSamples.pdf({ name: "Adult First Aid CPR AED", holder: "Li Chenn", number: "FA-1001",
       completed: day.(-90), issuer: "Example First Aid Chapter" })
-    expect.("certs/chen_first_aid.pdf", "1", "Li Chenn", :li_chen, :suggested, :first_aid, :matched, :computed, false,
-      "variant spelling: suggested, never auto-accepted")
+    expect.("certs/chen_first_aid.pdf", "1", "Li Chenn", :li_chen, :matched, :first_aid, :matched, :computed, true,
+      "one-letter slip: matched (owner, Nov 7, 2026)")
 
     miller_cdl = ImportSamples.pdf({ name: "CDL Class A", holder: "Dave Miller", number: "CDL-0042", completed: day.(-30),
       expires: years_later.(-30, 5), issuer: "Example Motor Vehicle Division" })
@@ -129,8 +129,8 @@ module ImportAcceptanceZip
     )
     expect.("packets/crew_packet.pdf", "1", "Li Chen", :li_chen, :matched, :flagger, :matched, :computed, true,
       "page 1 of a multi-certificate PDF")
-    expect.("packets/crew_packet.pdf", "3", "David Millar", :dave_miller, :suggested, :cdl_a, :matched, :printed, false,
-      "page 3 (after an outline page): variant spelling")
+    expect.("packets/crew_packet.pdf", "3", "David Millar", :dave_miller, :matched, :cdl_a, :matched, :printed, true,
+      "page 3 (after an outline page): one-letter slip, matched")
     expect.("packets/crew_packet.pdf", "4", "Sam Price", :sam_inactive, :suggested, :first_aid, :suggested, :computed, false,
       "page 4: inactive member, type only fuzzy-matched")
 
@@ -142,8 +142,8 @@ module ImportAcceptanceZip
 
     png = ImportSamples.image({ name: "Flagger Certification", holder: "Davd Miller", number: "FL-12121",
       completed: day.(-10), issuer: "Example Traffic Safety Inc" }, format: :png)
-    expect.("photos/miller_flagger.png", nil, "Davd Miller", :dave_miller, :suggested, :flagger, :matched, :computed, false,
-      "PNG photo, misspelled name", ocr: true)
+    expect.("photos/miller_flagger.png", nil, "Davd Miller", :dave_miller, :matched, :flagger, :matched, :computed, true,
+      "PNG photo, name a letter short: matched", ocr: true)
 
     webp = ImportSamples.image({ name: "Tower Climber", holder: "Maria Garcia", number: "CL-3434", completed: day.(-120),
       issuer: "Example Tower Safety Inc" }, format: :webp)

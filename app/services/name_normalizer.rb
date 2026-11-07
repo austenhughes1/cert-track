@@ -9,10 +9,15 @@
 # are dropped only between the first and last token (middle initials): a leading
 # initial is kept, so "J. Smith" and "K. Smith" stay different people.
 #   NameNormalizer.differs_only_by_middle?("shamel ferebee", "shamel deshawn ferebee") # => true
+#   NameNormalizer.close_spelling?("juan ortez", "juan ortiz")                         # => true
 module NameNormalizer
   SUFFIXES = %w[jr sr ii iii iv].freeze
   # Fewer tokens than this (a bare surname, a lone initial) is never an exact match.
   MIN_MATCH_TOKENS = 2
+  # A one-letter slip counts only in a word this long or longer: "Chen" and "Chan" are both surnames.
+  CLOSE_SPELLING_MIN_LENGTH = 5
+  # Two neighbouring letters swapped ("Jaun" for "Juan") counts from this length.
+  CLOSE_SWAP_MIN_LENGTH = 4
 
   module_function
 
@@ -41,6 +46,52 @@ module NameNormalizer
       found = long[position...-1].index(word)
       position += found + 1 if found
       found
+    end
+  end
+
+  # True when two normalized names have the same words but one, and that one is a one-letter slip:
+  # a letter changed, added or dropped in a word of CLOSE_SPELLING_MIN_LENGTH or more ("Ortez",
+  # "Ortiz"), or two neighbouring letters swapped in one of CLOSE_SWAP_MIN_LENGTH or more ("Jaun",
+  # "Juan"). A misprint or misread on a card, not a different name.
+  def close_spelling?(one, other)
+    a, b = [ one, other ].map { |name| name.to_s.split }
+    return false if a.size < MIN_MATCH_TOKENS || a.size != b.size
+
+    differing = a.zip(b).reject { |x, y| x == y }
+    return false unless differing.one?
+
+    x, y = differing.first
+    longest = [ x.length, y.length ].max
+    case one_edit(x, y)
+    when :swap then longest >= CLOSE_SWAP_MIN_LENGTH
+    when :edit then longest >= CLOSE_SPELLING_MIN_LENGTH
+    else false
+    end
+  end
+
+  # True when two normalized names have as many words and each is equal or at most one letter off
+  # (one_edit), whatever its length: "Jaun Ortis" and "Juan Ortiz". Too loose to match on, but a
+  # sign of a possible duplicate (CrewMembers::DuplicateFinder).
+  def each_word_within_one_edit?(one, other)
+    a, b = [ one, other ].map { |name| name.to_s.split }
+    return false if a.size < MIN_MATCH_TOKENS || a.size != b.size || a == b
+
+    a.zip(b).all? { |x, y| x == y || one_edit(x, y) }
+  end
+
+  # :edit (one letter changed, added or dropped), :swap (two neighbouring letters swapped) or nil.
+  def one_edit(x, y)
+    return if x == y || (x.length - y.length).abs > 1
+
+    if x.length == y.length
+      at = (0...x.length).reject { |i| x[i] == y[i] }
+      return :edit if at.one?
+
+      :swap if at.size == 2 && at.last == at.first + 1 && x[at.first] == y[at.last] && x[at.last] == y[at.first]
+    else
+      short, long = [ x, y ].sort_by(&:length)
+      at = (0...short.length).find { |i| short[i] != long[i] } || short.length
+      :edit if short[at..] == long[(at + 1)..]
     end
   end
 

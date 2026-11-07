@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_07_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_07_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -140,8 +140,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_07_120000) do
     t.text "notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "possible_duplicate_of_id"
     t.index "lower((((first_name)::text || ' '::text) || (last_name)::text)) gin_trgm_ops", name: "index_crew_members_on_full_name_trgm", using: :gin
     t.index ["crew_role_id"], name: "index_crew_members_on_crew_role_id"
+    t.index ["possible_duplicate_of_id"], name: "index_crew_members_on_possible_duplicate_of_id"
   end
 
   create_table "crew_roles", force: :cascade do |t|
@@ -334,6 +336,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_07_120000) do
   add_foreign_key "certificates", "import_items", on_delete: :restrict
   add_foreign_key "certificates", "users", column: "authenticity_checked_by_id", on_delete: :nullify
   add_foreign_key "certificates", "users", column: "verified_by_id", on_delete: :restrict
+  add_foreign_key "crew_members", "crew_members", column: "possible_duplicate_of_id", on_delete: :nullify
   add_foreign_key "crew_members", "crew_roles", on_delete: :restrict
   add_foreign_key "expiry_notifications", "certificates", on_delete: :cascade
   add_foreign_key "import_batches", "users", column: "uploaded_by_id", on_delete: :restrict
