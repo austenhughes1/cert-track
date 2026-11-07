@@ -29,7 +29,7 @@ module Imports
         return if name.values_at(:first_name, :last_name).any?(&:blank?)
 
         CrewMember.transaction do
-          lock("crew:#{NameNormalizer.normalize(@item.holder_name_raw)}")
+          wait_for_name("crew:#{NameNormalizer.normalize(@item.holder_name_raw)}")
           found = PersonMatcher.new(@item.holder_name_raw).call
           next unless found.match == :unmatched || found.match == :matched
 
@@ -53,7 +53,7 @@ module Imports
         { matched_certificate_issuer: issuer, issuer_match: issuer.active? ? :matched : :suggested }
       end
 
-      def lock(key)
+      def wait_for_name(key)
         CrewMember.connection.execute(CrewMember.sanitize_sql_array([ "SELECT pg_advisory_xact_lock(hashtext(?))", key ]))
       end
 
