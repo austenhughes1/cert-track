@@ -58,6 +58,47 @@ class Imports::PersonMatcherTest < ActiveSupport::TestCase
     assert_equal [ nil, "inactive crew member" ], result.suggestions.first(2).map { _1["note"] }
   end
 
+  test "a middle name on one side only still matches: same first and last name, words in order" do
+    shamel = CrewMember.create!(first_name: "Shamel", last_name: "Deshawn Ferebee") # created from a card with the middle name
+
+    [ "Shamel Ferebee", "FEREBEE, SHAMEL", "Shamel D. Ferebee" ].each do |name|
+      result = match(name)
+
+      assert_equal :matched, result.match, name
+      assert_equal shamel, result.crew_member, name
+      assert_equal 1.0, result.suggestions.first["similarity"], name
+    end
+
+    short = CrewMember.create!(first_name: "Tavon", last_name: "Rice")
+    assert_equal [ :matched, short ], match("Tavon Marquis Rice").then { [ _1.match, _1.crew_member ] }
+  end
+
+  test "a middle name never joins different first or last names, or words out of order" do
+    CrewMember.create!(first_name: "Shamel", last_name: "Deshawn Ferebee")
+
+    [ "Deshawn Ferebee", "Shamel Deshawn", "Shamel Ferebee Deshawn", "Ferebee" ].each do |name|
+      assert_not_equal :matched, match(name).match, name
+    end
+  end
+
+  test "two members a short name fits are ambiguous: suggested, listing both" do
+    one = CrewMember.create!(first_name: "Shamel", last_name: "Deshawn Ferebee")
+    two = CrewMember.create!(first_name: "Shamel", last_name: "Andre Ferebee")
+
+    result = match("Shamel Ferebee")
+
+    assert_equal :suggested, result.match
+    assert_equal [ one.id, two.id ].sort, ids(result).first(2).sort
+  end
+
+  test "an exact name beats one that only differs by a middle name" do
+    long = CrewMember.create!(first_name: "Shamel", last_name: "Deshawn Ferebee")
+    exact = CrewMember.create!(first_name: "Shamel", last_name: "Ferebee")
+
+    assert_equal [ :matched, exact ], match("Shamel Ferebee").then { [ _1.match, _1.crew_member ] }
+    assert_equal [ :matched, long ], match("Shamel Deshawn Ferebee").then { [ _1.match, _1.crew_member ] }
+  end
+
   test "a misspelling that clearly beats everyone else is suggested" do
     result = match("Juan Ortis")
 

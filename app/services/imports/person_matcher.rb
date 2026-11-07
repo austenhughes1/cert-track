@@ -11,6 +11,10 @@ module Imports
   # even when the others are inactive (it may be a former employee's old card) -> :suggested,
   # listing all of them, active first. An exact match on an inactive member only ->
   # :suggested ("note" => "inactive crew member"), never :matched.
+  # No exact match: a name that differs only by middle names on one side
+  # (CrewMember.matching_name_ignoring_middle: "Shamel Ferebee" and "Shamel Deshawn Ferebee")
+  # counts as exact, by the same rules (owner, Nov 7, 2026: a card printing the middle name made
+  # the crew member and the others, without it, stopped matching).
   # Otherwise trigram similarity (pg_trgm, on the normalized forms of every member's names):
   # the best candidate scoring Imports::Config.person_suggest_threshold or more AND beating
   # the runner-up by Imports::Config.person_margin or more -> :suggested; else :unmatched
@@ -33,7 +37,7 @@ module Imports
     def call
       return Result.new(crew_member: nil, match: :unmatched, suggestions: []) if @target.blank?
 
-      exact = CrewMember.matching_normalized_name(@holder_name)
+      exact = CrewMember.matching_normalized_name(@holder_name).presence || CrewMember.matching_name_ignoring_middle(@holder_name)
       scored = scored_candidates.reject { |member, _| exact.include?(member) }
 
       exact.any? ? exact_result(exact, scored) : fuzzy_result(scored)

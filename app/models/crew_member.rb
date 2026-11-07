@@ -57,6 +57,19 @@ class CrewMember < ApplicationRecord
       all.order(active: :desc, id: :asc).select { |member| member.normalized_names.include?(target) }
     end
 
+    # Members whose name, preferred name or alias is raw with middle names on one side only
+    # (NameNormalizer.differs_only_by_middle?): "Shamel Ferebee" finds "Shamel Deshawn Ferebee"
+    # and the other way round. Active members first. Imports::PersonMatcher uses it when no name
+    # matches exactly.
+    def matching_name_ignoring_middle(raw)
+      target = NameNormalizer.normalize(raw)
+      return [] unless NameNormalizer.matchable?(target)
+
+      all.order(active: :desc, id: :asc).select do |member|
+        member.normalized_names.any? { |name| NameNormalizer.differs_only_by_middle?(name, target) }
+      end
+    end
+
     # Single best exact normalized match (prefers active members), or nil.
     def find_by_normalized_name(raw)
       matching_normalized_name(raw).first

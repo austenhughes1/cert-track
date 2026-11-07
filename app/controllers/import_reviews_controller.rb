@@ -255,13 +255,14 @@ class ImportReviewsController < ApplicationController
 
     # People a crew member created from this item may repeat: the person it is already matched
     # to (exactly, or picked by hand) and any member, active or not, whose name, preferred name
-    # or alias is the name entered (CrewMember.matching_normalized_name, active first). Someone
+    # or alias is the name entered, or that name with or without a middle name
+    # (CrewMember.matching_normalized_name and matching_name_ignoring_middle, active first). Someone
     # who left and came back is better reactivated than added a second time.
     def possible_duplicates(attributes)
       attributes = attributes.to_h.symbolize_keys
       name = [ attributes[:first_name], attributes[:last_name] ].compact_blank.join(" ")
       matched = @item.matched_crew_member if @item.person_matched? || @item.person_picked?
-      [ matched, *CrewMember.matching_normalized_name(name) ].compact.uniq
+      [ matched, *CrewMember.matching_normalized_name(name), *CrewMember.matching_name_ignoring_middle(name) ].compact.uniq
     end
 
     # The form starts from the proposal. A computed expiry is left blank: blank means

@@ -35,6 +35,20 @@ class Imports::CreateMissingRecordsTest < ActiveSupport::TestCase
     assert_equal "Robert Example", second.reload.matched_crew_member.full_name
   end
 
+  test "cards with and without the middle name make one crew member, in either order" do
+    [ [ "SHAMEL DESHAWN FEREBEE", "Shamel Ferebee" ], [ "Tavon Rice", "TAVON M. RICE" ], [ "Lena Ruiz", "Lena Maria Ruiz" ] ].each do |first_name, second_name|
+      first = waiting(holder_name_raw: first_name, bytes: "a #{first_name}")
+      second = waiting(holder_name_raw: second_name, bytes: "b #{first_name}")
+
+      assert_difference -> { CrewMember.count }, 1, first_name do
+        Imports::CreateMissingRecords.new(first).call
+        Imports::CreateMissingRecords.new(second).call
+      end
+      assert_equal first.reload.matched_crew_member, second.reload.matched_crew_member, first_name
+      assert second.person_matched?, first_name
+    end
+  end
+
   test "a near match stays a suggestion for a person to confirm" do
     item = review_item(member: crew_members(:juan_ortiz), type: certificate_types(:flagger), holder_name_raw: "Jaun Ortis", person_match: :suggested,
       type_match: :suggested, issuer_match: :suggested, certificate_name_raw: "Flagger", issuer_raw: "Summit")

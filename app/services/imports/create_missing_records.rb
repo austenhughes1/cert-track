@@ -8,7 +8,8 @@ module Imports
   #   Imports::CreateMissingRecords.new(item).call # updates the item's matches; returns nothing useful
   #
   # A holder name needs a first and a last name; without one the item waits for a person. An advisory
-  # lock on the name means two items read at once make one crew member, not two.
+  # lock on the first and last name means two items read at once make one crew member, not two,
+  # with or without a middle name.
   class CreateMissingRecords
     CREATED_NOTE = "created from this item".freeze
 
@@ -29,7 +30,7 @@ module Imports
         return if name.values_at(:first_name, :last_name).any?(&:blank?)
 
         CrewMember.transaction do
-          wait_for_name("crew:#{NameNormalizer.normalize(@item.holder_name_raw)}")
+          wait_for_name("crew:#{NameNormalizer.normalize(@item.holder_name_raw).split.values_at(0, -1).join(" ")}")
           found = PersonMatcher.new(@item.holder_name_raw).call
           next unless found.match == :unmatched || found.match == :matched
 
