@@ -68,7 +68,7 @@ group :test do
 end
 
 # CertTrack (see docs/PLAN.md "Locked decisions")
-gem "ruby_llm", "~> 2.1"            # Workers AI (OpenAI-compatible) and optional Anthropic fallback
+gem "ruby_llm", "~> 2.2"            # Workers AI (OpenAI-compatible) and optional Anthropic fallback
 gem "rubyzip", "~> 3.7", require: "zip" # unpack bulk-import archives, build compliance packets
 gem "combine_pdf", "~> 1.0"         # split multi-certificate PDFs, packet index PDF
 gem "aws-sdk-s3", "~> 1.237", require: false # Active Storage on Cloudflare R2, database backups
